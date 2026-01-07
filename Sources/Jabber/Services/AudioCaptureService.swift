@@ -1,5 +1,6 @@
 import AVFoundation
 import Foundation
+import os
 
 final class AudioCaptureService {
     private let engine = AVAudioEngine()
@@ -8,14 +9,21 @@ final class AudioCaptureService {
 
     private let queue = DispatchQueue(label: "com.jabber.audiocapture")
     private var capturedSamples: [Float] = []
-    private var isCapturing = false
+    private var _isCapturing = false
+    private let logger = Logger(subsystem: "com.rselbach.jabber", category: "AudioCaptureService")
 
     var onAudioLevel: ((Float) -> Void)?
+    var onConversionError: ((Error) -> Void)?
+
+    private var isCapturing: Bool {
+        get { queue.sync { _isCapturing } }
+        set { queue.sync { _isCapturing = newValue } }
+    }
 
     func startCapture() throws {
         guard !isCapturing else { return }
 
-        capturedSamples.removeAll()
+        queue.sync { capturedSamples.removeAll() }
         isCapturing = true
 
         let inputNode = engine.inputNode
@@ -77,14 +85,21 @@ final class AudioCaptureService {
         var hasData = true
 
         converter.convert(to: convertedBuffer, error: &error) { _, outStatus in
-            if hasData {
-                outStatus.pointee = .haveData
-                hasData = false
-                return buffer
-            } else {
+            guard hasData else {
                 outStatus.pointee = .noDataNow
                 return nil
             }
+            outStatus.pointee = .haveData
+            hasData = false
+            return buffer
+        }
+
+        if let error {
+            logger.error("Audio conversion failed: \(error.localizedDescription)")
+            DispatchQueue.main.async {
+                self.onConversionError?(error)
+            }
+            return
         }
 
         if let channelData = convertedBuffer.floatChannelData?[0] {
@@ -98,6 +113,16 @@ final class AudioCaptureService {
     }
 }
 
-enum AudioCaptureError: Error {
+enum AudioCaptureError: Error, LocalizedError {
     case invalidFormat
+    case conversionFailed(Error)
+
+    var errorDescription: String? {
+        switch self {
+        case .invalidFormat:
+            return "Invalid audio format configuration"
+        case .conversionFailed(let error):
+            return "Audio conversion failed: \(error.localizedDescription)"
+        }
+    }
 }

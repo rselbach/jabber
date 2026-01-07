@@ -1,13 +1,19 @@
 import AppKit
 import SwiftUI
+import os
 
 @MainActor
 final class DownloadOverlayWindow {
     private var window: NSPanel?
+    private let viewModel = DownloadOverlayViewModel()
+    private let logger = Logger(subsystem: "com.rselbach.jabber", category: "DownloadOverlayWindow")
 
     func show() {
         if window == nil {
-            createWindow()
+            guard createWindow() else {
+                logger.error("Failed to create download overlay window - no screen available")
+                return
+            }
         }
         window?.orderFront(nil)
     }
@@ -25,12 +31,13 @@ final class DownloadOverlayWindow {
     }
 
     func updateProgress(_ progress: Double, status: String) {
-        guard let contentView = window?.contentView as? NSHostingView<DownloadOverlayContent> else { return }
-        contentView.rootView = DownloadOverlayContent(progress: progress, status: status)
+        viewModel.progress = progress
+        viewModel.status = status
     }
 
-    private func createWindow() {
-        guard let screen = NSScreen.main else { return }
+    @discardableResult
+    private func createWindow() -> Bool {
+        guard let screen = NSScreen.main else { return false }
 
         let windowWidth: CGFloat = 320
         let windowHeight: CGFloat = 80
@@ -53,18 +60,24 @@ final class DownloadOverlayWindow {
         panel.hasShadow = true
         panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
 
-        let content = DownloadOverlayContent(progress: 0, status: "Preparing...")
+        let content = DownloadOverlayContent(viewModel: viewModel)
         let hostingView = NSHostingView(rootView: content)
         hostingView.frame = NSRect(x: 0, y: 0, width: windowWidth, height: windowHeight)
 
         panel.contentView = hostingView
         self.window = panel
+        return true
     }
 }
 
+@MainActor
+final class DownloadOverlayViewModel: ObservableObject {
+    @Published var progress: Double = 0
+    @Published var status: String = "Preparing..."
+}
+
 struct DownloadOverlayContent: View {
-    let progress: Double
-    let status: String
+    @ObservedObject var viewModel: DownloadOverlayViewModel
 
     var body: some View {
         VStack(spacing: 12) {
@@ -76,10 +89,10 @@ struct DownloadOverlayContent: View {
             }
 
             VStack(spacing: 6) {
-                ProgressView(value: progress)
+                ProgressView(value: viewModel.progress)
                     .progressViewStyle(.linear)
 
-                Text(status)
+                Text(viewModel.status)
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }

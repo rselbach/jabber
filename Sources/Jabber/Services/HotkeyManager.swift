@@ -1,12 +1,15 @@
 import Carbon
 import Foundation
+import os
 
 final class HotkeyManager {
     private var hotKeyRef: EventHotKeyRef?
     private var eventHandlerRef: EventHandlerRef?
+    private let logger = Logger(subsystem: "com.rselbach.jabber", category: "HotkeyManager")
 
     var onKeyDown: (() -> Void)?
     var onKeyUp: (() -> Void)?
+    var onRegistrationFailure: ((OSStatus) -> Void)?
 
     init() {
         installEventHandler()
@@ -37,7 +40,8 @@ final class HotkeyManager {
         )
 
         if status != noErr {
-            print("Failed to register hotkey: \(status)")
+            logger.error("Failed to register hotkey with status: \(status)")
+            onRegistrationFailure?(status)
         }
     }
 

@@ -7,6 +7,8 @@ struct SettingsView: View {
     @AppStorage("vocabularyPrompt") private var vocabularyPrompt = ""
 
     @State private var modelManager = ModelManager.shared
+    @State private var errorMessage: String?
+    @State private var showError = false
 
     @State private var selectedTab = "general"
 
@@ -33,6 +35,11 @@ struct SettingsView: View {
         .frame(width: 450, height: 400)
         .onAppear {
             modelManager.refreshModels()
+        }
+        .alert("Error", isPresented: $showError, presenting: errorMessage) { _ in
+            Button("OK") { }
+        } message: { message in
+            Text(message)
         }
     }
 
@@ -63,11 +70,11 @@ struct SettingsView: View {
                         .padding(.vertical, 4)
                         .background(.quaternary)
                         .clipShape(RoundedRectangle(cornerRadius: 4))
-
-                    Button("Change...") {
-                        // TODO: Hotkey recorder
-                    }
                 }
+
+                Text("Hotkey customization will be available in a future update.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
             } header: {
                 Text("Hotkey")
             }
@@ -83,17 +90,27 @@ struct SettingsView: View {
                         model: model,
                         isSelected: selectedModel == model.id,
                         onSelect: {
-                            if model.isDownloaded {
-                                selectedModel = model.id
-                            }
+                            guard model.isDownloaded else { return }
+                            selectedModel = model.id
+                            NotificationCenter.default.post(name: .modelDidChange, object: nil)
                         },
                         onDownload: {
                             Task {
-                                try? await modelManager.downloadModel(model.id)
+                                do {
+                                    try await modelManager.downloadModel(model.id)
+                                } catch {
+                                    errorMessage = "Failed to download \(model.name): \(error.localizedDescription)"
+                                    showError = true
+                                }
                             }
                         },
                         onDelete: {
-                            try? modelManager.deleteModel(model.id)
+                            do {
+                                try modelManager.deleteModel(model.id)
+                            } catch {
+                                errorMessage = "Failed to delete \(model.name): \(error.localizedDescription)"
+                                showError = true
+                            }
                         }
                     )
                 }
@@ -198,4 +215,8 @@ struct ModelRow: View {
 
 #Preview {
     SettingsView()
+}
+
+extension Notification.Name {
+    static let modelDidChange = Notification.Name("com.rselbach.jabber.modelDidChange")
 }

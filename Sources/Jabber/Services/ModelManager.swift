@@ -1,10 +1,12 @@
 import Foundation
 import WhisperKit
+import os
 
 @MainActor
 @Observable
 final class ModelManager {
     static let shared = ModelManager()
+    private let logger = Logger(subsystem: "com.rselbach.jabber", category: "ModelManager")
 
     struct Model: Identifiable {
         let id: String
@@ -81,16 +83,31 @@ final class ModelManager {
     }
 
     func deleteModel(_ modelId: String) throws {
+        let currentModel = UserDefaults.standard.string(forKey: "selectedModel")
+
+        // Prevent deleting currently selected model if it's the only one
+        if currentModel == modelId && downloadedModels.count == 1 {
+            throw ModelError.cannotDeleteActiveModel
+        }
+
         guard let modelPath = modelFolderPath(for: modelId) else { return }
 
-        if FileManager.default.fileExists(atPath: modelPath.path) {
-            try FileManager.default.removeItem(at: modelPath)
+        guard FileManager.default.fileExists(atPath: modelPath.path) else {
+            return
         }
+
+        try FileManager.default.removeItem(at: modelPath)
 
         refreshModels()
 
-        if UserDefaults.standard.string(forKey: "selectedModel") == modelId {
-            let firstDownloaded = downloadedModels.first?.id ?? "base"
+        // Switch to another model if we deleted the selected one
+        if currentModel == modelId {
+            guard let firstDownloaded = downloadedModels.first?.id else {
+                // This should never happen due to the guard at the top, but be safe
+                logger.error("No models available after deletion, falling back to base")
+                UserDefaults.standard.set("base", forKey: "selectedModel")
+                return
+            }
             UserDefaults.standard.set(firstDownloaded, forKey: "selectedModel")
         }
     }
@@ -102,7 +119,7 @@ final class ModelManager {
             try await downloadModel("base")
             UserDefaults.standard.set("base", forKey: "selectedModel")
         } catch {
-            print("[ModelManager] Failed to download base model: \(error)")
+            logger.error("Failed to download base model: \(error.localizedDescription)")
         }
     }
 
@@ -122,16 +139,30 @@ final class ModelManager {
         let fm = FileManager.default
         guard fm.fileExists(atPath: base.path) else { return nil }
 
-        do {
-            let contents = try fm.contentsOfDirectory(atPath: base.path)
-            for folder in contents {
-                if folder.contains(modelId) || folder.hasSuffix("-\(modelId)") {
-                    return base.appendingPathComponent(folder)
-                }
-            }
-        } catch {
+        guard let contents = try? fm.contentsOfDirectory(atPath: base.path) else {
             return nil
         }
+
+        let suffixPattern = "-\(modelId)"
+
+        for folder in contents {
+            let matchesExactSuffix = folder.hasSuffix(suffixPattern)
+            let matchesExactName = folder == modelId
+
+            guard matchesExactSuffix || matchesExactName else {
+                continue
+            }
+
+            let folderURL = base.appendingPathComponent(folder)
+            let configPath = folderURL.appendingPathComponent("config.json")
+
+            guard fm.fileExists(atPath: configPath.path) else {
+                continue
+            }
+
+            return folderURL
+        }
+
         return nil
     }
 
@@ -141,16 +172,38 @@ final class ModelManager {
         let fm = FileManager.default
         guard fm.fileExists(atPath: base.path) else { return [] }
 
-        do {
-            let contents = try fm.contentsOfDirectory(atPath: base.path)
-            return modelDefinitions.compactMap { def in
-                let matchesAny = contents.contains { folder in
-                    folder.contains(def.id) || folder.hasSuffix("-\(def.id)")
-                }
-                return matchesAny ? def.id : nil
-            }
-        } catch {
+        guard let contents = try? fm.contentsOfDirectory(atPath: base.path) else {
             return []
+        }
+
+        return modelDefinitions.compactMap { def in
+            let suffixPattern = "-\(def.id)"
+
+            let matchesAny = contents.contains { folder in
+                let matchesExactSuffix = folder.hasSuffix(suffixPattern)
+                let matchesExactName = folder == def.id
+
+                guard matchesExactSuffix || matchesExactName else {
+                    return false
+                }
+
+                let folderURL = base.appendingPathComponent(folder)
+                let configPath = folderURL.appendingPathComponent("config.json")
+                return fm.fileExists(atPath: configPath.path)
+            }
+
+            return matchesAny ? def.id : nil
+        }
+    }
+}
+
+enum ModelError: Error, LocalizedError {
+    case cannotDeleteActiveModel
+
+    var errorDescription: String? {
+        switch self {
+        case .cannotDeleteActiveModel:
+            return "Cannot delete the currently active model. Please select a different model first."
         }
     }
 }

@@ -1,15 +1,20 @@
 import AppKit
 import SwiftUI
+import os
 
 @MainActor
 final class OverlayWindow {
     private var window: NSPanel?
     private var waveformView: WaveformView?
     private var hostingView: NSHostingView<WaveformContainer>?
+    private let logger = Logger(subsystem: "com.rselbach.jabber", category: "OverlayWindow")
 
     func show() {
         if window == nil {
-            createWindow()
+            guard createWindow() else {
+                logger.error("Failed to create overlay window - no screen available")
+                return
+            }
         }
         waveformView?.reset()
         window?.orderFront(nil)
@@ -35,8 +40,9 @@ final class OverlayWindow {
         waveformView?.showProcessing()
     }
 
-    private func createWindow() {
-        guard let screen = NSScreen.main else { return }
+    @discardableResult
+    private func createWindow() -> Bool {
+        guard let screen = NSScreen.main else { return false }
 
         let windowWidth: CGFloat = 400
         let windowHeight: CGFloat = 60
@@ -70,6 +76,7 @@ final class OverlayWindow {
         self.window = panel
         self.waveformView = waveform
         self.hostingView = hostingView
+        return true
     }
 }
 

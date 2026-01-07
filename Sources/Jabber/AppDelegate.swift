@@ -1,6 +1,7 @@
 import AppKit
 import Carbon
 import SwiftUI
+import os
 
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
@@ -15,15 +16,34 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private let downloadOverlay = DownloadOverlayWindow()
     let updaterController = UpdaterController()
 
+    private let logger = Logger(subsystem: "com.rselbach.jabber", category: "AppDelegate")
+
     func applicationDidFinishLaunching(_ notification: Notification) {
         setupMenuBar()
         setupHotkey()
+        setupNotifications()
 
         // Hide dock icon (menu bar app only)
         NSApp.setActivationPolicy(.accessory)
 
         Task {
             await ModelManager.shared.ensureDefaultModelDownloaded()
+            await loadModel()
+        }
+    }
+
+    private func setupNotifications() {
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(handleModelChange),
+            name: .modelDidChange,
+            object: nil
+        )
+    }
+
+    @objc private func handleModelChange() {
+        Task {
+            await whisperService.unloadModel()
             await loadModel()
         }
     }
@@ -38,9 +58,26 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         do {
             try await whisperService.ensureModelLoaded()
         } catch {
-            print("Failed to load model: \(error)")
+            logger.error("Failed to load model: \(error.localizedDescription)")
             updateStatusIcon(state: .error)
             downloadOverlay.hide()
+            showModelLoadError(error)
+        }
+    }
+
+    private func showModelLoadError(_ error: Error) {
+        let alert = NSAlert()
+        alert.messageText = "Failed to Load Model"
+        alert.informativeText = "The transcription model could not be loaded: \(error.localizedDescription)\n\nPlease check your internet connection and try restarting the app."
+        alert.alertStyle = .warning
+        alert.addButton(withTitle: "Retry")
+        alert.addButton(withTitle: "OK")
+
+        let response = alert.runModal()
+        if response == .alertFirstButtonReturn {
+            Task {
+                await loadModel()
+            }
         }
     }
 
@@ -57,7 +94,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             downloadOverlay.hide()
             updateStatusIcon(state: .ready)
         case .error(let message):
-            print("Model error: \(message)")
+            logger.error("Model error: \(message)")
             downloadOverlay.hide()
             updateStatusIcon(state: .error)
         }
@@ -118,6 +155,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 await self?.stopDictationAndTranscribe()
             }
         }
+
+        hotkeyManager.onRegistrationFailure = { [weak self] status in
+            Task { @MainActor in
+                self?.logger.error("Hotkey registration failed with status: \(status)")
+                NotificationService.shared.showError(
+                    title: "Hotkey Registration Failed",
+                    message: "Could not register the global hotkey (⌥ Space). It may be in use by another application.",
+                    critical: false
+                )
+            }
+        }
     }
 
     @objc private func togglePopover() {
@@ -142,12 +190,29 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             self?.overlayWindow.updateLevel(level)
         }
 
+        audioCapture.onConversionError = { [weak self] error in
+            Task { @MainActor in
+                self?.logger.error("Audio conversion error: \(error.localizedDescription)")
+                NotificationService.shared.showError(
+                    title: "Audio Processing Error",
+                    message: "Failed to process audio: \(error.localizedDescription)",
+                    critical: false
+                )
+            }
+        }
+
         do {
             try audioCapture.startCapture()
             updateStatusIcon(state: .recording)
         } catch {
-            print("Failed to start audio capture: \(error)")
+            logger.error("Failed to start audio capture: \(error.localizedDescription)")
             overlayWindow.hide()
+            updateStatusIcon(state: .error)
+            NotificationService.shared.showError(
+                title: "Audio Capture Failed",
+                message: "Could not access the microphone. Please check your system permissions.",
+                critical: false
+            )
         }
     }
 
@@ -172,9 +237,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             let text = try await whisperService.transcribe(samples: samples)
             if !text.isEmpty {
                 outputManager.output(text)
+            } else {
+                NotificationService.shared.showWarning(
+                    title: "No Speech Detected",
+                    message: "Could not detect any speech in the recording. Try speaking louder or closer to the microphone."
+                )
             }
         } catch {
-            print("[Jabber] Transcription failed: \(error)")
+            logger.error("Transcription failed: \(error.localizedDescription)")
+            NotificationService.shared.showError(
+                title: "Transcription Failed",
+                message: "Could not transcribe audio: \(error.localizedDescription)",
+                critical: false
+            )
         }
 
         overlayWindow.hide()

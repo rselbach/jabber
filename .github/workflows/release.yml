@@ -165,6 +165,17 @@ jobs:
           SPARKLE_PRIVATE_KEY: ${{ secrets.SPARKLE_EDDSA_PRIVATE_KEY }}
         run: |
           SIGNATURE=$(/tmp/sparkle/bin/sign_update ".build/dmg/Jabber-${{ steps.version.outputs.version }}.dmg" --ed-key-file <(echo "$SPARKLE_PRIVATE_KEY"))
+
+          if [[ -z "$SIGNATURE" ]]; then
+            echo "Error: Failed to generate Sparkle signature"
+            exit 1
+          fi
+
+          if [[ ! "$SIGNATURE" =~ sparkle:edSignature= ]]; then
+            echo "Error: Sparkle signature has invalid format: $SIGNATURE"
+            exit 1
+          fi
+
           echo "SPARKLE_SIGNATURE=$SIGNATURE" >> $GITHUB_ENV
 
       - name: Generate appcast.xml

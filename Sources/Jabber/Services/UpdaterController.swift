@@ -1,9 +1,11 @@
 import Foundation
 import Sparkle
+import os
 
 @MainActor
 final class UpdaterController: ObservableObject {
     private var updaterController: SPUStandardUpdaterController?
+    private let logger = Logger(subsystem: "com.rselbach.jabber", category: "UpdaterController")
 
     @Published var canCheckForUpdates = false
 
@@ -13,7 +15,7 @@ final class UpdaterController: ObservableObject {
 
     init() {
         guard isValidBundle else {
-            print("[Sparkle] Skipping updater init — not running from a valid app bundle")
+            logger.info("Skipping updater init — not running from a valid app bundle")
             return
         }
 

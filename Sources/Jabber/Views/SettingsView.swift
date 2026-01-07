@@ -5,7 +5,7 @@ struct SettingsView: View {
     @AppStorage("outputMode") private var outputMode = "paste"
     @AppStorage("hotkeyDisplay") private var hotkeyDisplay = "⌥ Space"
     @AppStorage("vocabularyPrompt") private var vocabularyPrompt = ""
-    @AppStorage("selectedLanguage") private var selectedLanguage = "auto"
+    @AppStorage("selectedLanguage") private var selectedLanguage = Constants.defaultLanguage
 
     @State private var modelManager = ModelManager.shared
     @State private var errorMessage: String?

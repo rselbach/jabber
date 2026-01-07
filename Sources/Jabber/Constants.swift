@@ -48,6 +48,23 @@ enum Constants {
             .sorted { $0.name < $1.name }
     }()
 
+    /// Valid language codes for validation (includes all unique codes from languages dict)
+    static let validLanguageCodes: Set<String> = Set(languages.values)
+
+    /// Default language based on system locale, falls back to "auto" if unsupported
+    static let defaultLanguage: String = {
+        guard let languageCode = Locale.current.language.languageCode?.identifier else {
+            return "auto"
+        }
+
+        // Check if the system language is supported by Whisper
+        if validLanguageCodes.contains(languageCode) {
+            return languageCode
+        }
+
+        return "auto"
+    }()
+
     /// Helper for locating Whisper model files
     enum ModelPaths {
         private static let repoName = "argmaxinc/whisperkit-coreml"

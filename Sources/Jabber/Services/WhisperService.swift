@@ -71,7 +71,7 @@ actor WhisperService {
     private var vocabularyPrompt: String = ""
 
     /// Language for transcription ("auto" for auto-detect, or language code like "en", "es", etc.)
-    private var selectedLanguage: String = "auto"
+    private var selectedLanguage: String = Constants.defaultLanguage
 
     func setVocabularyPrompt(_ prompt: String) {
         let trimmed = String(prompt.prefix(500))
@@ -79,7 +79,21 @@ actor WhisperService {
     }
 
     func setLanguage(_ language: String) {
-        selectedLanguage = language
+        // Validate language code
+        if language == "auto" || Constants.validLanguageCodes.contains(language) {
+            selectedLanguage = language
+        } else {
+            // Invalid code - fall back to auto-detect and notify user
+            logger.warning("Invalid language code '\(language)' - falling back to auto-detect")
+            selectedLanguage = "auto"
+
+            Task { @MainActor in
+                NotificationService.shared.showWarning(
+                    title: "Invalid Language Setting",
+                    message: "The language code '\(language)' is not recognized. Auto-detect has been enabled instead."
+                )
+            }
+        }
     }
 
     func ensureModelLoaded() async throws {

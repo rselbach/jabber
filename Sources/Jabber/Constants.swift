@@ -41,6 +41,13 @@ enum Constants {
         "vietnamese": "vi", "welsh": "cy", "yiddish": "yi", "yoruba": "yo"
     ]
 
+    /// Pre-sorted languages for UI display (cached to avoid repeated sorting)
+    static let sortedLanguages: [(name: String, code: String)] = {
+        languages
+            .map { (name: $0.key.capitalized, code: $0.value) }
+            .sorted { $0.name < $1.name }
+    }()
+
     /// Helper for locating Whisper model files
     enum ModelPaths {
         private static let repoName = "argmaxinc/whisperkit-coreml"

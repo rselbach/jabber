@@ -38,7 +38,7 @@ struct MenuBarView: View {
                         Picker("", selection: $selectedLanguage) {
                             Text("Auto-detect").tag("auto")
                             Divider()
-                            ForEach(sortedLanguages, id: \.code) { lang in
+                            ForEach(Constants.sortedLanguages, id: \.code) { lang in
                                 Text(lang.name).tag(lang.code)
                             }
                         }
@@ -77,12 +77,6 @@ struct MenuBarView: View {
         .onAppear {
             modelManager.refreshModels()
         }
-    }
-
-    private var sortedLanguages: [(name: String, code: String)] {
-        Constants.languages
-            .map { (name: $0.key.capitalized, code: $0.value) }
-            .sorted { $0.name < $1.name }
     }
 }
 

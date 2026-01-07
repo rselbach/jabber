@@ -70,9 +70,16 @@ actor WhisperService {
     /// Vocabulary prompt to bias transcription toward specific terms (names, jargon, etc.)
     private var vocabularyPrompt: String = ""
 
+    /// Language for transcription ("auto" for auto-detect, or language code like "en", "es", etc.)
+    private var selectedLanguage: String = "auto"
+
     func setVocabularyPrompt(_ prompt: String) {
         let trimmed = String(prompt.prefix(500))
         vocabularyPrompt = trimmed
+    }
+
+    func setLanguage(_ language: String) {
+        selectedLanguage = language
     }
 
     func ensureModelLoaded() async throws {
@@ -95,7 +102,15 @@ actor WhisperService {
         let kit = try await getWhisperKit()
 
         var options = DecodingOptions()
-        options.language = "en"  // Force English since we're using multilingual model
+
+        // Configure language based on user preference
+        if selectedLanguage == "auto" {
+            options.detectLanguage = true
+            options.language = nil
+        } else {
+            options.detectLanguage = false
+            options.language = selectedLanguage
+        }
 
         if !vocabularyPrompt.isEmpty, let tokenizer = kit.tokenizer {
             let tokens = tokenizer.encode(text: vocabularyPrompt).filter { $0 < 51865 }

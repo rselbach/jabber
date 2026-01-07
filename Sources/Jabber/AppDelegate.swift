@@ -244,9 +244,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         overlayWindow.showProcessing()
 
-        // Sync vocabulary prompt from settings
+        // Sync vocabulary prompt and language from settings
         let vocab = UserDefaults.standard.string(forKey: "vocabularyPrompt") ?? ""
         await whisperService.setVocabularyPrompt(vocab)
+
+        let language = UserDefaults.standard.string(forKey: "selectedLanguage") ?? "auto"
+        await whisperService.setLanguage(language)
 
         do {
             let text = try await whisperService.transcribe(samples: samples)

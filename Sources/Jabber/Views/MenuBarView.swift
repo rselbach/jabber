@@ -2,6 +2,7 @@ import SwiftUI
 
 struct MenuBarView: View {
     @AppStorage("selectedModel") private var selectedModel = "base"
+    @AppStorage("selectedLanguage") private var selectedLanguage = "auto"
     @State private var modelManager = ModelManager.shared
     @ObservedObject var updaterController: UpdaterController
 
@@ -27,6 +28,18 @@ struct MenuBarView: View {
                         Picker("", selection: $selectedModel) {
                             ForEach(modelManager.downloadedModels) { model in
                                 Text(model.name).tag(model.id)
+                            }
+                        }
+                        .labelsHidden()
+                    }
+
+                    HStack {
+                        Text("Language:")
+                        Picker("", selection: $selectedLanguage) {
+                            Text("Auto-detect").tag("auto")
+                            Divider()
+                            ForEach(sortedLanguages, id: \.code) { lang in
+                                Text(lang.name).tag(lang.code)
                             }
                         }
                         .labelsHidden()
@@ -64,6 +77,12 @@ struct MenuBarView: View {
         .onAppear {
             modelManager.refreshModels()
         }
+    }
+
+    private var sortedLanguages: [(name: String, code: String)] {
+        Constants.languages
+            .map { (name: $0.key.capitalized, code: $0.value) }
+            .sorted { $0.name < $1.name }
     }
 }
 

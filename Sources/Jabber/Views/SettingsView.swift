@@ -5,6 +5,7 @@ struct SettingsView: View {
     @AppStorage("outputMode") private var outputMode = "paste"
     @AppStorage("hotkeyDisplay") private var hotkeyDisplay = "⌥ Space"
     @AppStorage("vocabularyPrompt") private var vocabularyPrompt = ""
+    @AppStorage("selectedLanguage") private var selectedLanguage = "auto"
 
     @State private var modelManager = ModelManager.shared
     @State private var errorMessage: String?
@@ -78,8 +79,30 @@ struct SettingsView: View {
             } header: {
                 Text("Hotkey")
             }
+
+            Section {
+                Picker("Language", selection: $selectedLanguage) {
+                    Text("Auto-detect").tag("auto")
+                    Divider()
+                    ForEach(sortedLanguages, id: \.code) { lang in
+                        Text(lang.name).tag(lang.code)
+                    }
+                }
+
+                Text("Select a specific language or use auto-detect to identify it automatically.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            } header: {
+                Text("Transcription Language")
+            }
         }
         .formStyle(.grouped)
+    }
+
+    private var sortedLanguages: [(name: String, code: String)] {
+        Constants.languages
+            .map { (name: $0.key.capitalized, code: $0.value) }
+            .sorted { $0.name < $1.name }
     }
 
     private var modelsTab: some View {

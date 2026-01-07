@@ -127,7 +127,14 @@ actor WhisperService {
         }
 
         if !vocabularyPrompt.isEmpty, let tokenizer = kit.tokenizer {
-            let tokens = tokenizer.encode(text: vocabularyPrompt).filter { $0 < 51865 }
+            // Format vocabulary as comma-separated text with leading space (Whisper prompt convention)
+            let formattedPrompt = " " + vocabularyPrompt
+                .components(separatedBy: .newlines)
+                .map { $0.trimmingCharacters(in: .whitespaces) }
+                .filter { !$0.isEmpty }
+                .joined(separator: ", ")
+
+            let tokens = tokenizer.encode(text: formattedPrompt).filter { $0 < tokenizer.specialTokens.specialTokenBegin }
             if !tokens.isEmpty {
                 options.promptTokens = tokens
             }

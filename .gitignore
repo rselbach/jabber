@@ -3,6 +3,11 @@
 .swiftpm/
 Package.resolved
 
+.claude/
+.opencode/
+CLAUDE.md
+AGENTS.md 
+
 # Xcode
 *.xcodeproj/
 *.xcworkspace/

@@ -2,7 +2,7 @@ import SwiftUI
 
 struct MenuBarView: View {
     @AppStorage("selectedModel") private var selectedModel = "base"
-    @AppStorage("selectedLanguage") private var selectedLanguage = "auto"
+    @AppStorage("selectedLanguage") private var selectedLanguage = Constants.defaultLanguage
     @State private var modelManager = ModelManager.shared
     @ObservedObject var updaterController: UpdaterController
 

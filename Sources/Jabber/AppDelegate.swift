@@ -248,7 +248,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let vocab = UserDefaults.standard.string(forKey: "vocabularyPrompt") ?? ""
         await whisperService.setVocabularyPrompt(vocab)
 
-        let language = UserDefaults.standard.string(forKey: "selectedLanguage") ?? "auto"
+        let language = UserDefaults.standard.string(forKey: "selectedLanguage") ?? Constants.defaultLanguage
         await whisperService.setLanguage(language)
 
         do {

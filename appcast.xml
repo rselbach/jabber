@@ -6,14 +6,14 @@
     <description>Jabber changelog</description>
     <language>en</language>
     <item>
-      <title>Version 0.0.4</title>
-      <pubDate>Wed, 07 Jan 2026 11:13:16 +0000</pubDate>
-      <sparkle:version>4</sparkle:version>
-      <sparkle:shortVersionString>0.0.4</sparkle:shortVersionString>
+      <title>Version 0.0.5</title>
+      <pubDate>Wed, 07 Jan 2026 13:08:46 +0000</pubDate>
+      <sparkle:version>5</sparkle:version>
+      <sparkle:shortVersionString>0.0.5</sparkle:shortVersionString>
       <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
-      <enclosure url="https://github.com/rselbach/jabber/releases/download/v0.0.4/Jabber-0.0.4.dmg"
-                 sparkle:edSignature="hXrOyjZKP08w7qDR78vbffpNE1kV7M4JvSzyigG5kmyfXspSJRuUWXVuPRK04w33ZSSVtlqOkwUqaH8tPhHRDg==" length="3588351"
-                 length="3588351"
+      <enclosure url="https://github.com/rselbach/jabber/releases/download/v0.0.5/Jabber-0.0.5.dmg"
+                 sparkle:edSignature="SspExmYhguZSqTVSQGR5btJR1ODqXNO1asD0JR88I8RdtBqicOz/3mNXB+izJbNJ3O4LsHvwBkDnZFEBH9OYCQ==" length="4482448"
+                 length="4482448"
                  type="application/octet-stream"/>
     </item>
   </channel>

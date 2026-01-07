@@ -28,8 +28,6 @@ final class ModelManager {
         ("large-v3", "Large v3", "Best accuracy", "~3GB")
     ]
 
-    private let repoName = "argmaxinc/whisperkit-coreml"
-
     private init() {
         refreshModels()
     }
@@ -58,28 +56,43 @@ final class ModelManager {
     }
 
     func downloadModel(_ modelId: String) async throws {
-        guard let idx = models.firstIndex(where: { $0.id == modelId }) else { return }
+        // Verify model exists before starting
+        guard models.contains(where: { $0.id == modelId }) else {
+            logger.warning("Attempted to download non-existent model: \(modelId)")
+            return
+        }
 
-        models[idx].isDownloading = true
-        models[idx].downloadProgress = 0
+        // Set initial download state
+        if let idx = models.firstIndex(where: { $0.id == modelId }) {
+            models[idx].isDownloading = true
+            models[idx].downloadProgress = 0
+        }
 
         defer {
-            models[idx].isDownloading = false
+            // Always clear downloading state, even on error
+            if let idx = models.firstIndex(where: { $0.id == modelId }) {
+                models[idx].isDownloading = false
+            }
         }
 
         _ = try await WhisperKit.download(
             variant: modelId,
             progressCallback: { [weak self] progress in
                 Task { @MainActor in
-                    guard let self,
-                          let idx = self.models.firstIndex(where: { $0.id == modelId }) else { return }
-                    self.models[idx].downloadProgress = progress.fractionCompleted
+                    guard let self else { return }
+                    // Look up index each time to avoid stale references
+                    if let idx = self.models.firstIndex(where: { $0.id == modelId }) {
+                        self.models[idx].downloadProgress = progress.fractionCompleted
+                    }
                 }
             }
         )
 
-        models[idx].isDownloaded = true
-        models[idx].downloadProgress = 1.0
+        // Look up index after download completes
+        if let idx = models.firstIndex(where: { $0.id == modelId }) {
+            models[idx].isDownloaded = true
+            models[idx].downloadProgress = 1.0
+        }
     }
 
     func deleteModel(_ modelId: String) throws {
@@ -90,10 +103,12 @@ final class ModelManager {
             throw ModelError.cannotDeleteActiveModel
         }
 
-        guard let modelPath = modelFolderPath(for: modelId) else { return }
+        guard let modelPath = Constants.ModelPaths.localModelFolder(for: modelId) else {
+            throw ModelError.modelNotFound(modelId: modelId)
+        }
 
         guard FileManager.default.fileExists(atPath: modelPath.path) else {
-            return
+            throw ModelError.modelNotFound(modelId: modelId)
         }
 
         try FileManager.default.removeItem(at: modelPath)
@@ -109,6 +124,7 @@ final class ModelManager {
                 return
             }
             UserDefaults.standard.set(firstDownloaded, forKey: "selectedModel")
+            NotificationCenter.default.post(name: Constants.Notifications.modelDidChange, object: nil)
         }
     }
 
@@ -123,87 +139,23 @@ final class ModelManager {
         }
     }
 
-    private func modelsBaseURL() -> URL? {
-        guard let docs = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first else {
-            return nil
-        }
-        return docs
-            .appendingPathComponent("huggingface")
-            .appendingPathComponent("models")
-            .appendingPathComponent(repoName)
-    }
-
-    private func modelFolderPath(for modelId: String) -> URL? {
-        guard let base = modelsBaseURL() else { return nil }
-
-        let fm = FileManager.default
-        guard fm.fileExists(atPath: base.path) else { return nil }
-
-        guard let contents = try? fm.contentsOfDirectory(atPath: base.path) else {
-            return nil
-        }
-
-        let suffixPattern = "-\(modelId)"
-
-        for folder in contents {
-            let matchesExactSuffix = folder.hasSuffix(suffixPattern)
-            let matchesExactName = folder == modelId
-
-            guard matchesExactSuffix || matchesExactName else {
-                continue
-            }
-
-            let folderURL = base.appendingPathComponent(folder)
-            let configPath = folderURL.appendingPathComponent("config.json")
-
-            guard fm.fileExists(atPath: configPath.path) else {
-                continue
-            }
-
-            return folderURL
-        }
-
-        return nil
-    }
-
     private func installedModelIds() -> [String] {
-        guard let base = modelsBaseURL() else { return [] }
-
-        let fm = FileManager.default
-        guard fm.fileExists(atPath: base.path) else { return [] }
-
-        guard let contents = try? fm.contentsOfDirectory(atPath: base.path) else {
-            return []
-        }
-
         return modelDefinitions.compactMap { def in
-            let suffixPattern = "-\(def.id)"
-
-            let matchesAny = contents.contains { folder in
-                let matchesExactSuffix = folder.hasSuffix(suffixPattern)
-                let matchesExactName = folder == def.id
-
-                guard matchesExactSuffix || matchesExactName else {
-                    return false
-                }
-
-                let folderURL = base.appendingPathComponent(folder)
-                let configPath = folderURL.appendingPathComponent("config.json")
-                return fm.fileExists(atPath: configPath.path)
-            }
-
-            return matchesAny ? def.id : nil
+            Constants.ModelPaths.localModelFolder(for: def.id) != nil ? def.id : nil
         }
     }
 }
 
 enum ModelError: Error, LocalizedError {
     case cannotDeleteActiveModel
+    case modelNotFound(modelId: String)
 
     var errorDescription: String? {
         switch self {
         case .cannotDeleteActiveModel:
             return "Cannot delete the currently active model. Please select a different model first."
+        case .modelNotFound(let modelId):
+            return "Model '\(modelId)' not found or already deleted."
         }
     }
 }

@@ -5,6 +5,7 @@ import os
 final class AudioCaptureService {
     private let engine = AVAudioEngine()
     private let targetSampleRate: Double = 16_000
+    private let converterQueue = DispatchQueue(label: "com.jabber.audioconverter")
     private var converter: AVAudioConverter?
 
     private let queue = DispatchQueue(label: "com.jabber.audiocapture")
@@ -18,6 +19,14 @@ final class AudioCaptureService {
     private var isCapturing: Bool {
         get { queue.sync { _isCapturing } }
         set { queue.sync { _isCapturing = newValue } }
+    }
+
+    private func getConverter() -> AVAudioConverter? {
+        converterQueue.sync { converter }
+    }
+
+    private func setConverter(_ newConverter: AVAudioConverter?) {
+        converterQueue.sync { converter = newConverter }
     }
 
     func startCapture() throws {
@@ -38,7 +47,7 @@ final class AudioCaptureService {
             throw AudioCaptureError.invalidFormat
         }
 
-        converter = AVAudioConverter(from: inputFormat, to: outputFormat)
+        setConverter(AVAudioConverter(from: inputFormat, to: outputFormat))
 
         inputNode.installTap(onBus: 0, bufferSize: 1024, format: inputFormat) { [weak self] buffer, _ in
             self?.processBuffer(buffer)
@@ -52,6 +61,7 @@ final class AudioCaptureService {
         isCapturing = false
         engine.inputNode.removeTap(onBus: 0)
         engine.stop()
+        setConverter(nil)
     }
 
     func currentSamples() -> [Float] {
@@ -59,19 +69,22 @@ final class AudioCaptureService {
     }
 
     private func processBuffer(_ buffer: AVAudioPCMBuffer) {
-        guard isCapturing, let converter else { return }
+        // Safely capture converter reference before checking state
+        guard let converter = getConverter() else { return }
+        guard isCapturing else { return }
 
-        // Calculate RMS for visualization
+        // Calculate RMS for visualization (do this synchronously before dispatching)
+        var rms: Float = 0
         if let channelData = buffer.floatChannelData?[0] {
             let frames = Int(buffer.frameLength)
             var sum: Float = 0
             for i in 0..<frames {
                 sum += channelData[i] * channelData[i]
             }
-            let rms = sqrt(sum / Float(frames))
-            DispatchQueue.main.async {
-                self.onAudioLevel?(rms)
-            }
+            rms = sqrt(sum / Float(frames))
+        }
+        DispatchQueue.main.async { [weak self] in
+            self?.onAudioLevel?(rms)
         }
 
         // Convert to 16kHz mono
@@ -82,22 +95,23 @@ final class AudioCaptureService {
               ) else { return }
 
         var error: NSError?
-        var hasData = true
+        var hasProvidedBuffer = false
 
+        // Capture buffer in the conversion callback to avoid race conditions
         converter.convert(to: convertedBuffer, error: &error) { _, outStatus in
-            guard hasData else {
+            guard !hasProvidedBuffer else {
                 outStatus.pointee = .noDataNow
                 return nil
             }
             outStatus.pointee = .haveData
-            hasData = false
+            hasProvidedBuffer = true
             return buffer
         }
 
         if let error {
             logger.error("Audio conversion failed: \(error.localizedDescription)")
-            DispatchQueue.main.async {
-                self.onConversionError?(error)
+            DispatchQueue.main.async { [weak self] in
+                self?.onConversionError?(error)
             }
             return
         }
@@ -106,8 +120,8 @@ final class AudioCaptureService {
             let frames = Int(convertedBuffer.frameLength)
             let samples = Array(UnsafeBufferPointer(start: channelData, count: frames))
 
-            queue.async {
-                self.capturedSamples.append(contentsOf: samples)
+            queue.async { [weak self] in
+                self?.capturedSamples.append(contentsOf: samples)
             }
         }
     }

@@ -7,28 +7,34 @@ final class NotificationService {
     static let shared = NotificationService()
 
     private let logger = Logger(subsystem: "com.rselbach.jabber", category: "NotificationService")
-    private var notificationCenter: UNUserNotificationCenter?
+    private let notificationCenter: UNUserNotificationCenter?
     private let isValidBundle: Bool
+    private var isAuthorized = false
 
     private init() {
         isValidBundle = Bundle.main.bundleIdentifier != nil
 
         if isValidBundle {
+            // Initialize notification center immediately
+            notificationCenter = UNUserNotificationCenter.current()
             setupNotifications()
         } else {
+            notificationCenter = nil
             logger.info("Running without proper bundle - notifications will use alerts")
         }
     }
 
     private func setupNotifications() {
-        let center = UNUserNotificationCenter.current()
-        center.requestAuthorization(options: [.alert, .sound]) { granted, error in
+        guard let center = notificationCenter else { return }
+
+        center.requestAuthorization(options: [.alert, .sound]) { [weak self] granted, error in
             if let error {
-                self.logger.error("Failed to request notification authorization: \(error.localizedDescription)")
+                self?.logger.error("Failed to request notification authorization: \(error.localizedDescription)")
             }
-            if granted {
-                Task { @MainActor in
-                    self.notificationCenter = center
+            Task { @MainActor in
+                self?.isAuthorized = granted
+                if !granted {
+                    self?.logger.info("User denied notification permissions, will use alert fallback")
                 }
             }
         }

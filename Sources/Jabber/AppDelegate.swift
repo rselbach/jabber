@@ -18,6 +18,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private let logger = Logger(subsystem: "com.rselbach.jabber", category: "AppDelegate")
 
+    private var modelLoadTask: Task<Void, Never>?
+
     func applicationDidFinishLaunching(_ notification: Notification) {
         setupMenuBar()
         setupHotkey()
@@ -26,23 +28,30 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // Hide dock icon (menu bar app only)
         NSApp.setActivationPolicy(.accessory)
 
-        Task {
+        modelLoadTask = Task {
             await ModelManager.shared.ensureDefaultModelDownloaded()
             await loadModel()
         }
+    }
+
+    func applicationWillTerminate(_ notification: Notification) {
+        modelLoadTask?.cancel()
     }
 
     private func setupNotifications() {
         NotificationCenter.default.addObserver(
             self,
             selector: #selector(handleModelChange),
-            name: .modelDidChange,
+            name: Constants.Notifications.modelDidChange,
             object: nil
         )
     }
 
     @objc private func handleModelChange() {
-        Task {
+        modelLoadTask?.cancel()
+        let oldTask = modelLoadTask
+        modelLoadTask = Task {
+            await oldTask?.value
             await whisperService.unloadModel()
             await loadModel()
         }
@@ -68,7 +77,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func showModelLoadError(_ error: Error) {
         let alert = NSAlert()
         alert.messageText = "Failed to Load Model"
-        alert.informativeText = "The transcription model could not be loaded: \(error.localizedDescription)\n\nPlease check your internet connection and try restarting the app."
+        alert.informativeText = "The transcription model could not be loaded: \(error.localizedDescription)\n\nDictation is unavailable until a model loads successfully. Please check your internet connection and try restarting the app."
         alert.alertStyle = .warning
         alert.addButton(withTitle: "Retry")
         alert.addButton(withTitle: "OK")
@@ -122,7 +131,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         case .error:
             iconName = "exclamationmark.triangle"
         }
-        statusItem?.button?.image = NSImage(systemSymbolName: iconName, accessibilityDescription: "Jabber")
+
+        guard let button = statusItem?.button else {
+            logger.error("Status item button unavailable when trying to update icon")
+            return
+        }
+
+        button.image = NSImage(systemSymbolName: iconName, accessibilityDescription: "Jabber")
     }
 
     private func setupMenuBar() {

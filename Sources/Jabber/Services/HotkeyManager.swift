@@ -26,7 +26,7 @@ final class HotkeyManager {
         unregister()
 
         let hotKeyID = EventHotKeyID(
-            signature: OSType(fourCharCode: "JBBR"),
+            signature: OSType(fourCharCode: "JBBR")!,
             id: 1
         )
 
@@ -85,8 +85,10 @@ final class HotkeyManager {
 }
 
 private extension OSType {
-    init(fourCharCode: String) {
-        precondition(fourCharCode.utf8.count == 4)
+    init?(fourCharCode: String) {
+        guard fourCharCode.utf8.count == 4 else {
+            return nil
+        }
         var result: OSType = 0
         for char in fourCharCode.utf8 {
             result = (result << 8) + OSType(char)

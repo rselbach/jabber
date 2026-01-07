@@ -41,27 +41,36 @@ final class OutputManager {
         if !trusted {
             // Prompt user to grant permission
             let options = [kAXTrustedCheckOptionPrompt.takeUnretainedValue(): true] as CFDictionary
-            AXIsProcessTrustedWithOptions(options)
+            _ = AXIsProcessTrustedWithOptions(options)
+
+            // Check again - permission might be granted now
+            // Note: If just granted, may require app relaunch to take effect
+            return AXIsProcessTrusted()
         }
 
-        return trusted
+        return true
     }
 
     private func copyToClipboard(_ text: String) {
         let pasteboard = NSPasteboard.general
         pasteboard.clearContents()
-        pasteboard.setString(text, forType: .string)
+        let success = pasteboard.setString(text, forType: .string)
+        if !success {
+            logger.warning("Failed to copy text to clipboard")
+        }
     }
 
     private func sendPaste() {
         // Small delay to ensure the target app is ready
         DispatchQueue.main.asyncAfter(deadline: .now() + Self.pasteDelay) { [weak self] in
+            guard let self else { return }
+
             // Synthesize Cmd+V
             let src = CGEventSource(stateID: .hidSystemState)
 
             guard let keyDown = CGEvent(keyboardEventSource: src, virtualKey: KeyCode.v, keyDown: true),
                   let keyUp = CGEvent(keyboardEventSource: src, virtualKey: KeyCode.v, keyDown: false) else {
-                self?.logger.error("Failed to create CGEvent for paste operation")
+                self.logger.error("Failed to create CGEvent for paste operation")
                 Task { @MainActor in
                     NotificationService.shared.showError(
                         title: "Paste Failed",
@@ -84,5 +93,4 @@ final class OutputManager {
 // Virtual key codes for keyboard events
 private enum KeyCode {
     static let v: CGKeyCode = 0x09
-    static let space: CGKeyCode = 0x31
 }

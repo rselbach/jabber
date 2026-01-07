@@ -2,11 +2,44 @@ import Foundation
 import WhisperKit
 import os
 
+/// Thread-safe observer for WhisperService state changes.
+/// Uses @unchecked Sendable because NSLock-protected mutable state cannot be verified
+/// by the compiler, but manual synchronization with NSLock ensures thread safety.
+final class WhisperStateObserver: @unchecked Sendable {
+    private let lock = NSLock()
+    private var _isReady = false
+    private var _stateCallback: (@Sendable (WhisperService.State) -> Void)?
+
+    var isReady: Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        return _isReady
+    }
+
+    func setReady(_ value: Bool) {
+        lock.lock()
+        _isReady = value
+        lock.unlock()
+    }
+
+    func setCallback(_ callback: @escaping @Sendable (WhisperService.State) -> Void) {
+        lock.lock()
+        _stateCallback = callback
+        lock.unlock()
+    }
+
+    func notifyState(_ state: WhisperService.State) {
+        lock.lock()
+        let callback = _stateCallback
+        lock.unlock()
+        callback?(state)
+    }
+}
+
 actor WhisperService {
     private var whisperKit: WhisperKit?
     private var isLoading = false
-    private nonisolated(unsafe) var _isReady = false
-    private let stateLock = NSLock()
+    nonisolated let stateObserver = WhisperStateObserver()
     private let logger = Logger(subsystem: "com.rselbach.jabber", category: "WhisperService")
     private static let loadTimeout: Duration = .seconds(60)
 
@@ -18,31 +51,20 @@ actor WhisperService {
         case error(String)
     }
 
-    private nonisolated(unsafe) var _stateCallback: (@Sendable (State) -> Void)?
-
     nonisolated func setStateCallback(_ callback: @escaping @Sendable (State) -> Void) {
-        stateLock.lock()
-        _stateCallback = callback
-        stateLock.unlock()
+        stateObserver.setCallback(callback)
     }
 
     private nonisolated func notifyState(_ state: State) {
-        stateLock.lock()
-        let callback = _stateCallback
-        stateLock.unlock()
-        callback?(state)
+        stateObserver.notifyState(state)
     }
 
     nonisolated var isReady: Bool {
-        stateLock.lock()
-        defer { stateLock.unlock() }
-        return _isReady
+        stateObserver.isReady
     }
 
     private func setReady(_ ready: Bool) {
-        stateLock.lock()
-        _isReady = ready
-        stateLock.unlock()
+        stateObserver.setReady(ready)
     }
 
     /// Vocabulary prompt to bias transcription toward specific terms (names, jargon, etc.)
@@ -89,19 +111,8 @@ actor WhisperService {
 
     private func loadModel() async throws {
         guard !isLoading else {
-            // Wait for current load to complete with timeout
-            let startTime = ContinuousClock.now
-            while isLoading {
-                let elapsed = ContinuousClock.now - startTime
-                if elapsed > Self.loadTimeout {
-                    logger.error("Timeout waiting for model to load")
-                    throw WhisperError.loadTimeout
-                }
-                try await Task.sleep(for: .milliseconds(100))
-            }
-            guard whisperKit != nil else {
-                throw WhisperError.loadFailed
-            }
+            // Another task is loading; wait until complete or timeout
+            try await waitForModelLoad()
             return
         }
 
@@ -111,7 +122,7 @@ actor WhisperService {
         let selectedModel = UserDefaults.standard.string(forKey: "selectedModel") ?? "base"
 
         let modelFolder: URL
-        if let existingFolder = localModelFolder(for: selectedModel) {
+        if let existingFolder = Constants.ModelPaths.localModelFolder(for: selectedModel) {
             modelFolder = existingFolder
         } else {
             modelFolder = try await WhisperKit.download(
@@ -145,43 +156,28 @@ actor WhisperService {
         return kit
     }
 
-    private nonisolated func localModelFolder(for modelId: String) -> URL? {
-        guard let docs = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first else {
-            return nil
-        }
+    private func waitForModelLoad() async throws {
+        let startTime = ContinuousClock.now
+        var backoffDelay: Duration = .milliseconds(100)
+        let maxBackoff: Duration = .seconds(1)
 
-        let base = docs
-            .appendingPathComponent("huggingface")
-            .appendingPathComponent("models")
-            .appendingPathComponent("argmaxinc/whisperkit-coreml")
-
-        let fm = FileManager.default
-        guard fm.fileExists(atPath: base.path) else { return nil }
-
-        guard let contents = try? fm.contentsOfDirectory(atPath: base.path) else { return nil }
-
-        // Match folders ending with "-{modelId}" to avoid false matches
-        // e.g., "openai_whisper-base" or "base" but not "base-small"
-        let suffixPattern = "-\(modelId)"
-
-        for folder in contents {
-            let matchesExactSuffix = folder.hasSuffix(suffixPattern)
-            let matchesExactName = folder == modelId
-
-            guard matchesExactSuffix || matchesExactName else {
-                continue
+        while isLoading {
+            let elapsed = ContinuousClock.now - startTime
+            if elapsed > Self.loadTimeout {
+                logger.error("Timeout waiting for model to load")
+                throw WhisperError.loadTimeout
             }
 
-            let folderURL = base.appendingPathComponent(folder)
-            let configPath = folderURL.appendingPathComponent("config.json")
+            try await Task.sleep(for: backoffDelay)
 
-            guard fm.fileExists(atPath: configPath.path) else {
-                continue
-            }
-
-            return folderURL
+            // Exponential backoff with max cap
+            backoffDelay = min(backoffDelay * 2, maxBackoff)
         }
-        return nil
+
+        guard whisperKit != nil else {
+            logger.error("Model load completed but whisperKit is nil")
+            throw WhisperError.loadFailed
+        }
     }
 }
 

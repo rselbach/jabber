@@ -91,8 +91,9 @@ struct SettingsView: View {
                         isSelected: selectedModel == model.id,
                         onSelect: {
                             guard model.isDownloaded else { return }
+                            guard selectedModel != model.id else { return }
                             selectedModel = model.id
-                            NotificationCenter.default.post(name: .modelDidChange, object: nil)
+                            NotificationCenter.default.post(name: Constants.Notifications.modelDidChange, object: nil)
                         },
                         onDownload: {
                             Task {
@@ -215,8 +216,4 @@ struct ModelRow: View {
 
 #Preview {
     SettingsView()
-}
-
-extension Notification.Name {
-    static let modelDidChange = Notification.Name("com.rselbach.jabber.modelDidChange")
 }

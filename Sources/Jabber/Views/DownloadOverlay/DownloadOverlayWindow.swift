@@ -30,9 +30,10 @@ final class DownloadOverlayWindow {
         }
     }
 
-    func updateProgress(_ progress: Double, status: String) {
+    func updateProgress(_ progress: Double, status: String, indeterminate: Bool = false) {
         viewModel.progress = progress
         viewModel.status = status
+        viewModel.isIndeterminate = indeterminate
     }
 
     @discardableResult
@@ -75,6 +76,7 @@ final class DownloadOverlayWindow {
 final class DownloadOverlayViewModel: ObservableObject {
     @Published var progress: Double = 0
     @Published var status: String = "Preparing..."
+    @Published var isIndeterminate: Bool = false
 }
 
 struct DownloadOverlayContent: View {
@@ -90,8 +92,13 @@ struct DownloadOverlayContent: View {
             }
 
             VStack(spacing: 6) {
-                ProgressView(value: viewModel.progress)
-                    .progressViewStyle(.linear)
+                if viewModel.isIndeterminate {
+                    ProgressView()
+                        .progressViewStyle(.linear)
+                } else {
+                    ProgressView(value: viewModel.progress)
+                        .progressViewStyle(.linear)
+                }
 
                 Text(viewModel.status)
                     .font(.caption)

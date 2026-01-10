@@ -396,7 +396,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
            isModelLoadInProgress,
            state.modelId == UserDefaults.standard.string(forKey: "selectedModel") {
             downloadOverlay.show()
-            downloadOverlay.updateProgress(1.0, status: "Loading model...")
+            downloadOverlay.updateProgress(0, status: "Loading model...", indeterminate: true)
             updateStatusIcon(state: .downloading)
             return
         }
@@ -427,7 +427,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         if isModelLoadInProgress, case .loading = modelState {
             downloadOverlay.show()
-            downloadOverlay.updateProgress(1.0, status: "Loading model...")
+            downloadOverlay.updateProgress(0, status: "Loading model...", indeterminate: true)
             updateStatusIcon(state: .downloading)
             return
         }
@@ -448,7 +448,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             updateStatusIcon(state: .error)
         case .loading:
             downloadOverlay.show()
-            downloadOverlay.updateProgress(1.0, status: "Loading model...")
+            downloadOverlay.updateProgress(0, status: "Loading model...", indeterminate: true)
             updateStatusIcon(state: .downloading)
         }
     }

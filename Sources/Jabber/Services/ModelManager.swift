@@ -71,6 +71,15 @@ final class ModelManager {
         }
     }
 
+    func selectModel(_ modelId: String, previousModelId: String?) -> Bool {
+        guard downloadedModels.contains(where: { $0.id == modelId }) else { return false }
+        let current = previousModelId ?? UserDefaults.standard.string(forKey: "selectedModel")
+        guard current != modelId else { return false }
+        UserDefaults.standard.set(modelId, forKey: "selectedModel")
+        NotificationCenter.default.post(name: Constants.Notifications.modelDidChange, object: nil)
+        return true
+    }
+
     func ensureModelDownloaded(_ modelId: String) async throws -> URL {
         if let existing = Constants.ModelPaths.localModelFolder(for: modelId) {
             return existing

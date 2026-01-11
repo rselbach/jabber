@@ -108,9 +108,9 @@ struct SettingsView: View {
                         isSelected: selectedModel == model.id,
                         onSelect: {
                             guard model.isDownloaded else { return }
-                            guard selectedModel != model.id else { return }
+                            let previousModelId = selectedModel
+                            guard modelManager.selectModel(model.id, previousModelId: previousModelId) else { return }
                             selectedModel = model.id
-                            NotificationCenter.default.post(name: Constants.Notifications.modelDidChange, object: nil)
                         },
                         onDownload: {
                             Task {

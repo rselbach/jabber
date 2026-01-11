@@ -77,9 +77,8 @@ struct MenuBarView: View {
         .onAppear {
             modelManager.refreshModels()
         }
-        .onChange(of: selectedModel) { _, newValue in
-            guard modelManager.downloadedModels.contains(where: { $0.id == newValue }) else { return }
-            NotificationCenter.default.post(name: Constants.Notifications.modelDidChange, object: nil)
+        .onChange(of: selectedModel) { oldValue, newValue in
+            _ = modelManager.selectModel(newValue, previousModelId: oldValue)
         }
     }
 }

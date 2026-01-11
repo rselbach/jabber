@@ -49,18 +49,7 @@ final class DownloadOverlayWindow {
 
         let frame = NSRect(x: x, y: y, width: windowWidth, height: windowHeight)
 
-        let panel = NSPanel(
-            contentRect: frame,
-            styleMask: [.borderless, .nonactivatingPanel],
-            backing: .buffered,
-            defer: false
-        )
-
-        panel.level = .floating
-        panel.isOpaque = false
-        panel.backgroundColor = .clear
-        panel.hasShadow = true
-        panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
+        let panel = OverlayPanelFactory.makePanel(frame: frame)
 
         let content = DownloadOverlayContent(viewModel: viewModel)
         let hostingView = NSHostingView(rootView: content)

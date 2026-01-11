@@ -81,26 +81,55 @@ final class AudioCaptureService {
         guard let converter = getConverter() else { return }
         guard isCapturing else { return }
 
-        // Calculate RMS for visualization (do this synchronously before dispatching)
-        var rms: Float = 0
-        if let channelData = buffer.floatChannelData?[0] {
-            let frames = Int(buffer.frameLength)
-            var sum: Float = 0
-            for i in 0..<frames {
-                sum += channelData[i] * channelData[i]
-            }
-            rms = sqrt(sum / Float(frames))
-        }
+        let rms = calculateRms(from: buffer)
         DispatchQueue.main.async { [weak self] in
             self?.onAudioLevel?(rms)
         }
 
+        let conversionResult = convertBuffer(buffer, using: converter)
+        if let error = conversionResult.error {
+            logger.error("Audio conversion failed: \(error.localizedDescription)")
+            DispatchQueue.main.async { [weak self] in
+                self?.onConversionError?(AudioCaptureError.conversionFailed(error))
+            }
+            return
+        }
+
+        guard let convertedBuffer = conversionResult.buffer else { return }
+
+        if let channelData = convertedBuffer.floatChannelData?[0] {
+            let frames = Int(convertedBuffer.frameLength)
+            let samples = Array(UnsafeBufferPointer(start: channelData, count: frames))
+
+            queue.async { [weak self] in
+                self?.capturedSamples.append(contentsOf: samples)
+            }
+        }
+    }
+
+    private func calculateRms(from buffer: AVAudioPCMBuffer) -> Float {
+        guard let channelData = buffer.floatChannelData?[0] else { return 0 }
+
+        let frames = Int(buffer.frameLength)
+        var sum: Float = 0
+        for i in 0..<frames {
+            sum += channelData[i] * channelData[i]
+        }
+        return sqrt(sum / Float(frames))
+    }
+
+    private func convertBuffer(
+        _ buffer: AVAudioPCMBuffer,
+        using converter: AVAudioConverter
+    ) -> (buffer: AVAudioPCMBuffer?, error: Error?) {
         // Convert to 16kHz mono
         let outputFormat = converter.outputFormat
         guard let convertedBuffer = AVAudioPCMBuffer(
             pcmFormat: outputFormat,
             frameCapacity: AVAudioFrameCount(targetSampleRate / 10)
-        ) else { return }
+        ) else {
+            return (nil, nil)
+        }
 
         var error: NSError?
         var hasProvidedBuffer = false
@@ -116,22 +145,7 @@ final class AudioCaptureService {
             return buffer
         }
 
-        if let error {
-            logger.error("Audio conversion failed: \(error.localizedDescription)")
-            DispatchQueue.main.async { [weak self] in
-                self?.onConversionError?(AudioCaptureError.conversionFailed(error))
-            }
-            return
-        }
-
-        if let channelData = convertedBuffer.floatChannelData?[0] {
-            let frames = Int(convertedBuffer.frameLength)
-            let samples = Array(UnsafeBufferPointer(start: channelData, count: frames))
-
-            queue.async { [weak self] in
-                self?.capturedSamples.append(contentsOf: samples)
-            }
-        }
+        return (convertedBuffer, error)
     }
 }
 

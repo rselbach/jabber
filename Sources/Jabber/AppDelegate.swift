@@ -57,6 +57,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // Hide dock icon (menu bar app only)
         NSApp.setActivationPolicy(.accessory)
 
+        updaterController.checkForUpdatesOnLaunchIfNeeded()
+
         modelLoadTask = Task { [weak self] in
             guard let self else { return }
             await loadModel()
@@ -383,6 +385,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     @objc private func handleModelDownloadState(_ notification: Notification) {
         guard let state = notification.object as? ModelDownloadState else { return }
 
+        updateDownloadTracking(with: state)
+        syncNonDictationUI(forceLoading: shouldForceLoading(for: state))
+    }
+
+    private func updateDownloadTracking(with state: ModelDownloadState) {
         switch state.phase {
         case .started, .progress:
             downloadStatesByModelId[state.modelId] = state
@@ -393,16 +400,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 activeDownloadModelId = downloadStatesByModelId.keys.first
             }
         }
+    }
 
-        let forceLoading = state.phase == .finished
+    private var selectedModelId: String? {
+        UserDefaults.standard.string(forKey: "selectedModel")
+    }
+
+    private func shouldForceLoading(for state: ModelDownloadState) -> Bool {
+        state.phase == .finished
             && isModelLoadInProgress
-            && state.modelId == UserDefaults.standard.string(forKey: "selectedModel")
-        syncNonDictationUI(forceLoading: forceLoading)
+            && state.modelId == selectedModelId
     }
 
     private func currentDownloadForUI() -> ModelDownloadState? {
-        if let selected = UserDefaults.standard.string(forKey: "selectedModel"),
-           let state = downloadStatesByModelId[selected] {
+        if let selectedModelId,
+           let state = downloadStatesByModelId[selectedModelId] {
             return state
         }
         if let activeDownloadModelId,
@@ -422,28 +434,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func resolveNonDictationUI(forceLoading: Bool) -> NonDictationUIState {
-        if case .error = modelState {
+        switch (forceLoading, modelState, isModelLoadInProgress, currentDownloadForUI()) {
+        case (_, .error, _, _):
             return .error
-        }
-
-        if forceLoading {
+        case (true, _, _, _):
             return .loadingModel
-        }
-
-        if isModelLoadInProgress, case .loading = modelState {
+        case (_, .loading, true, _):
             return .loadingModel
-        }
-
-        if let download = currentDownloadForUI() {
+        case (_, _, _, let download?):
             return .downloading(download)
-        }
-
-        switch modelState {
-        case .ready, .notReady:
+        case (_, .ready, _, _), (_, .notReady, _, _):
             return .ready
-        case .error:
-            return .error
-        case .loading:
+        case (_, .loading, _, _):
             return .loadingModel
         }
     }

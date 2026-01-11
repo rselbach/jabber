@@ -104,6 +104,24 @@ actor WhisperService {
         }
     }
 
+    private func formattedVocabularyPrompt() -> String {
+        " " + vocabularyPrompt
+            .components(separatedBy: .newlines)
+            .map { $0.trimmingCharacters(in: .whitespaces) }
+            .filter { !$0.isEmpty }
+            .joined(separator: ", ")
+    }
+
+    private func promptTokens(using kit: WhisperKit) -> [Int] {
+        guard !vocabularyPrompt.isEmpty, let tokenizer = kit.tokenizer else { return [] }
+
+        let formattedPrompt = formattedVocabularyPrompt()
+        guard !formattedPrompt.trimmingCharacters(in: .whitespaces).isEmpty else { return [] }
+
+        return tokenizer.encode(text: formattedPrompt)
+            .filter { $0 < tokenizer.specialTokens.specialTokenBegin }
+    }
+
     func ensureModelLoaded() async throws {
         let desiredModelId = UserDefaults.standard.string(forKey: "selectedModel") ?? "base"
         if whisperKit != nil, loadedModelId == desiredModelId {
@@ -138,23 +156,33 @@ actor WhisperService {
             options.language = selectedLanguage
         }
 
-        if !vocabularyPrompt.isEmpty, let tokenizer = kit.tokenizer {
-            // Format vocabulary as comma-separated text with leading space (Whisper prompt convention)
-            let formattedPrompt = " " + vocabularyPrompt
-                .components(separatedBy: .newlines)
-                .map { $0.trimmingCharacters(in: .whitespaces) }
-                .filter { !$0.isEmpty }
-                .joined(separator: ", ")
-
-            let tokens = tokenizer.encode(text: formattedPrompt).filter { $0 < tokenizer.specialTokens.specialTokenBegin }
-            if !tokens.isEmpty {
-                options.promptTokens = tokens
-            }
+        let tokens = promptTokens(using: kit)
+        if !tokens.isEmpty {
+            options.promptTokens = tokens
         }
 
         let results = try await kit.transcribe(audioArray: samples, decodeOptions: options)
 
         return results.map { $0.text }.joined(separator: " ").trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private func resolveLoadedModel(desiredModelId: String) -> Bool {
+        guard whisperKit != nil else { return false }
+        guard loadedModelId == desiredModelId else {
+            resetLoadedModel()
+            return false
+        }
+
+        setReady(true)
+        notifyState(.ready)
+        return true
+    }
+
+    private func resetLoadedModel() {
+        whisperKit = nil
+        loadedModelId = nil
+        setReady(false)
+        notifyState(.notReady)
     }
 
     /// Loads the specified model, coordinating with concurrent callers.
@@ -171,17 +199,8 @@ actor WhisperService {
                 try await waitForModelLoad()
             }
 
-            if whisperKit != nil, loadedModelId == desiredModelId {
-                setReady(true)
-                notifyState(.ready)
+            if resolveLoadedModel(desiredModelId: desiredModelId) {
                 return
-            }
-
-            if whisperKit != nil, loadedModelId != desiredModelId {
-                whisperKit = nil
-                loadedModelId = nil
-                setReady(false)
-                notifyState(.notReady)
             }
 
             let currentLoadGeneration = loadGeneration

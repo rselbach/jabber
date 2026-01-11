@@ -6,7 +6,7 @@ struct JabberApp: App {
 
     var body: some Scene {
         Settings {
-            SettingsView()
+            SettingsView(updaterController: appDelegate.updaterController)
                 .onAppear {
                     NSApp.setActivationPolicy(.regular)
                     NSApp.activate(ignoringOtherApps: true)

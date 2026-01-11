@@ -15,6 +15,7 @@ struct ModelDownloadState {
     let status: String
     let phase: Phase
     let errorDescription: String?
+    let isCancelled: Bool
 }
 
 @MainActor
@@ -35,6 +36,11 @@ final class ModelManager {
     }
 
     private(set) var models: [Model] = []
+
+    private func updateModel(_ modelId: String, update: (inout Model) -> Void) {
+        guard let index = models.firstIndex(where: { $0.id == modelId }) else { return }
+        update(&models[index])
+    }
 
     private let modelDefinitions: [(id: String, name: String, description: String, sizeHint: String)] = [
         ("tiny", "Tiny", "Fastest, lowest accuracy", "~40MB"),
@@ -96,10 +102,10 @@ final class ModelManager {
         }
 
         if let existing = Constants.ModelPaths.localModelFolder(for: modelId) {
-            if let idx = models.firstIndex(where: { $0.id == modelId }) {
-                models[idx].isDownloaded = true
-                models[idx].isDownloading = false
-                models[idx].downloadProgress = 1.0
+            updateModel(modelId) { model in
+                model.isDownloaded = true
+                model.isDownloading = false
+                model.downloadProgress = 1.0
             }
             return existing
         }
@@ -130,8 +136,8 @@ final class ModelManager {
 
         defer {
             // Always clear downloading state, even on error
-            if let idx = models.firstIndex(where: { $0.id == modelId }) {
-                models[idx].isDownloading = false
+            updateModel(modelId) { model in
+                model.isDownloading = false
             }
         }
 
@@ -143,16 +149,16 @@ final class ModelManager {
                     Task { @MainActor in
                         guard let self else { return }
                         // Look up index each time to avoid stale references
-                        if let idx = self.models.firstIndex(where: { $0.id == modelId }) {
-                            let pct = progress.fractionCompleted
-                            self.models[idx].downloadProgress = pct
-                            self.postDownloadState(
-                                modelId: modelId,
-                                modelName: modelName,
-                                progress: pct,
-                                phase: .progress
-                            )
+                        let pct = progress.fractionCompleted
+                        self.updateModel(modelId) { model in
+                            model.downloadProgress = pct
                         }
+                        self.postDownloadState(
+                            modelId: modelId,
+                            modelName: modelName,
+                            progress: pct,
+                            phase: .progress
+                        )
                     }
                 }
             )
@@ -162,7 +168,7 @@ final class ModelManager {
                 modelName: modelName,
                 progress: models[idx].downloadProgress,
                 phase: .failed,
-                errorDescription: "cancelled"
+                isCancelled: true
             )
             throw CancellationError()
         } catch {
@@ -177,9 +183,9 @@ final class ModelManager {
         }
 
         // Look up index after download completes
-        if let idx = models.firstIndex(where: { $0.id == modelId }) {
-            models[idx].isDownloaded = true
-            models[idx].downloadProgress = 1.0
+        updateModel(modelId) { model in
+            model.isDownloaded = true
+            model.downloadProgress = 1.0
         }
 
         postDownloadState(
@@ -260,13 +266,14 @@ final class ModelManager {
         modelName: String,
         progress: Double,
         phase: ModelDownloadState.Phase,
-        errorDescription: String? = nil
+        errorDescription: String? = nil,
+        isCancelled: Bool = false
     ) {
         let status = downloadStatus(
             modelName: modelName,
             progress: progress,
             phase: phase,
-            errorDescription: errorDescription
+            isCancelled: isCancelled
         )
         NotificationCenter.default.post(
             name: Constants.Notifications.modelDownloadStateDidChange,
@@ -275,7 +282,8 @@ final class ModelManager {
                 progress: progress,
                 status: status,
                 phase: phase,
-                errorDescription: errorDescription
+                errorDescription: errorDescription,
+                isCancelled: isCancelled
             )
         )
     }
@@ -284,7 +292,7 @@ final class ModelManager {
         modelName: String,
         progress: Double,
         phase: ModelDownloadState.Phase,
-        errorDescription: String?
+        isCancelled: Bool
     ) -> String {
         switch phase {
         case .started, .progress:
@@ -292,7 +300,7 @@ final class ModelManager {
         case .finished:
             return "Downloaded \(modelName)"
         case .failed:
-            if errorDescription == "cancelled" {
+            if isCancelled {
                 return "Download cancelled: \(modelName)"
             }
             return "Download failed: \(modelName)"

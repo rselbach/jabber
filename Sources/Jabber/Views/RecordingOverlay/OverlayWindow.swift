@@ -54,18 +54,7 @@ final class OverlayWindow {
 
         let frame = NSRect(x: x, y: y, width: windowWidth, height: windowHeight)
 
-        let panel = NSPanel(
-            contentRect: frame,
-            styleMask: [.borderless, .nonactivatingPanel],
-            backing: .buffered,
-            defer: false
-        )
-
-        panel.level = .floating
-        panel.isOpaque = false
-        panel.backgroundColor = .clear
-        panel.hasShadow = true
-        panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
+        let panel = OverlayPanelFactory.makePanel(frame: frame)
 
         let waveform = WaveformView()
         let container = WaveformContainer(waveformView: waveform)
@@ -78,6 +67,24 @@ final class OverlayWindow {
         self.waveformView = waveform
         self.hostingView = hostingView
         return true
+    }
+}
+
+enum OverlayPanelFactory {
+    static func makePanel(frame: NSRect) -> NSPanel {
+        let panel = NSPanel(
+            contentRect: frame,
+            styleMask: [.borderless, .nonactivatingPanel],
+            backing: .buffered,
+            defer: false
+        )
+
+        panel.level = .floating
+        panel.isOpaque = false
+        panel.backgroundColor = .clear
+        panel.hasShadow = true
+        panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
+        return panel
     }
 }
 

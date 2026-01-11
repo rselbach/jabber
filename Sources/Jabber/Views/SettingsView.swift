@@ -1,6 +1,8 @@
 import SwiftUI
 
 struct SettingsView: View {
+    @ObservedObject var updaterController: UpdaterController
+
     @AppStorage("selectedModel") private var selectedModel = "base"
     @AppStorage("outputMode") private var outputMode = "paste"
     @AppStorage("hotkeyDisplay") private var hotkeyDisplay = "⌥ Space"
@@ -42,6 +44,11 @@ struct SettingsView: View {
         } message: { message in
             Text(message)
         }
+    }
+
+    private func presentError(_ message: String) {
+        errorMessage = message
+        showError = true
     }
 
     private var generalTab: some View {
@@ -89,6 +96,20 @@ struct SettingsView: View {
             } header: {
                 Text("Transcription Language")
             }
+
+            Section {
+                Toggle(
+                    "Check for updates automatically",
+                    isOn: Binding(
+                        get: { updaterController.automaticallyChecksForUpdates },
+                        set: { enabled in
+                            updaterController.setAutomaticallyChecksForUpdates(enabled)
+                        }
+                    )
+                )
+            } header: {
+                Text("Updates")
+            }
         }
         .formStyle(.grouped)
     }
@@ -111,8 +132,7 @@ struct SettingsView: View {
                                 do {
                                     try await modelManager.downloadModel(model.id)
                                 } catch {
-                                    errorMessage = "Failed to download \(model.name): \(error.localizedDescription)"
-                                    showError = true
+                                    presentError("Failed to download \(model.name): \(error.localizedDescription)")
                                 }
                             }
                         },
@@ -120,8 +140,7 @@ struct SettingsView: View {
                             do {
                                 try modelManager.deleteModel(model.id)
                             } catch {
-                                errorMessage = "Failed to delete \(model.name): \(error.localizedDescription)"
-                                showError = true
+                                presentError("Failed to delete \(model.name): \(error.localizedDescription)")
                             }
                         }
                     )
@@ -195,40 +214,7 @@ struct ModelRow: View {
 
             Spacer()
 
-            if model.isDownloading {
-                ProgressView(value: model.downloadProgress)
-                    .progressViewStyle(.linear)
-                    .frame(width: 80)
-
-                Text("\(Int(model.downloadProgress * 100))%")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .frame(width: 35, alignment: .trailing)
-            } else if model.isDownloaded {
-                if isSelected {
-                    Image(systemName: "checkmark.circle.fill")
-                        .foregroundStyle(.tint)
-                } else {
-                    Button("Select") {
-                        onSelect()
-                    }
-                    .buttonStyle(.borderless)
-                }
-
-                Button {
-                    onDelete()
-                } label: {
-                    Image(systemName: "trash")
-                }
-                .buttonStyle(.borderless)
-                .foregroundStyle(.secondary)
-                .help("Delete model")
-            } else {
-                Button("Download") {
-                    onDownload()
-                }
-                .buttonStyle(.bordered)
-            }
+            trailingContent
         }
         .contentShape(Rectangle())
         .onTapGesture {
@@ -237,8 +223,68 @@ struct ModelRow: View {
             }
         }
     }
+
+    @ViewBuilder
+    private var trailingContent: some View {
+        if model.isDownloading {
+            downloadingContent
+        } else if model.isDownloaded {
+            downloadedContent
+        } else {
+            downloadButton
+        }
+    }
+
+    @ViewBuilder
+    private var downloadingContent: some View {
+        ProgressView(value: model.downloadProgress)
+            .progressViewStyle(.linear)
+            .frame(width: 80)
+
+        Text("\(Int(model.downloadProgress * 100))%")
+            .font(.caption)
+            .foregroundStyle(.secondary)
+            .frame(width: 35, alignment: .trailing)
+    }
+
+    @ViewBuilder
+    private var downloadedContent: some View {
+        if isSelected {
+            Image(systemName: "checkmark.circle.fill")
+                .foregroundStyle(.tint)
+        } else {
+            selectButton
+        }
+
+        deleteButton
+    }
+
+    private var selectButton: some View {
+        Button("Select") {
+            onSelect()
+        }
+        .buttonStyle(.borderless)
+    }
+
+    private var deleteButton: some View {
+        Button {
+            onDelete()
+        } label: {
+            Image(systemName: "trash")
+        }
+        .buttonStyle(.borderless)
+        .foregroundStyle(.secondary)
+        .help("Delete model")
+    }
+
+    private var downloadButton: some View {
+        Button("Download") {
+            onDownload()
+        }
+        .buttonStyle(.bordered)
+    }
 }
 
 #Preview {
-    SettingsView()
+    SettingsView(updaterController: UpdaterController())
 }

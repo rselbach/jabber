@@ -112,15 +112,11 @@ final class ModelManager {
         models[idx].isDownloading = true
         models[idx].downloadProgress = 0
 
-        NotificationCenter.default.post(
-            name: Constants.Notifications.modelDownloadStateDidChange,
-            object: ModelDownloadState(
-                modelId: modelId,
-                progress: 0,
-                status: "Downloading \(modelName)... 0%",
-                phase: .started,
-                errorDescription: nil
-            )
+        postDownloadState(
+            modelId: modelId,
+            modelName: modelName,
+            progress: 0,
+            phase: .started
         )
 
         defer {
@@ -141,42 +137,32 @@ final class ModelManager {
                         if let idx = self.models.firstIndex(where: { $0.id == modelId }) {
                             let pct = progress.fractionCompleted
                             self.models[idx].downloadProgress = pct
-                            NotificationCenter.default.post(
-                                name: Constants.Notifications.modelDownloadStateDidChange,
-                                object: ModelDownloadState(
-                                    modelId: modelId,
-                                    progress: pct,
-                                    status: "Downloading \(modelName)... \(Int(pct * 100))%",
-                                    phase: .progress,
-                                    errorDescription: nil
-                                )
+                            self.postDownloadState(
+                                modelId: modelId,
+                                modelName: modelName,
+                                progress: pct,
+                                phase: .progress
                             )
                         }
                     }
                 }
             )
         } catch is CancellationError {
-            NotificationCenter.default.post(
-                name: Constants.Notifications.modelDownloadStateDidChange,
-                object: ModelDownloadState(
-                    modelId: modelId,
-                    progress: models[idx].downloadProgress,
-                    status: "Download cancelled: \(modelName)",
-                    phase: .failed,
-                    errorDescription: "cancelled"
-                )
+            postDownloadState(
+                modelId: modelId,
+                modelName: modelName,
+                progress: models[idx].downloadProgress,
+                phase: .failed,
+                errorDescription: "cancelled"
             )
             throw CancellationError()
         } catch {
-            NotificationCenter.default.post(
-                name: Constants.Notifications.modelDownloadStateDidChange,
-                object: ModelDownloadState(
-                    modelId: modelId,
-                    progress: models[idx].downloadProgress,
-                    status: "Download failed: \(modelName)",
-                    phase: .failed,
-                    errorDescription: error.localizedDescription
-                )
+            postDownloadState(
+                modelId: modelId,
+                modelName: modelName,
+                progress: models[idx].downloadProgress,
+                phase: .failed,
+                errorDescription: error.localizedDescription
             )
             throw error
         }
@@ -187,15 +173,11 @@ final class ModelManager {
             models[idx].downloadProgress = 1.0
         }
 
-        NotificationCenter.default.post(
-            name: Constants.Notifications.modelDownloadStateDidChange,
-            object: ModelDownloadState(
-                modelId: modelId,
-                progress: 1.0,
-                status: "Downloaded \(modelName)",
-                phase: .finished,
-                errorDescription: nil
-            )
+        postDownloadState(
+            modelId: modelId,
+            modelName: modelName,
+            progress: 1.0,
+            phase: .finished
         )
 
         return modelFolder
@@ -262,6 +244,50 @@ final class ModelManager {
             try await Task.sleep(for: .milliseconds(200))
         }
         throw ModelError.modelNotFound(modelId: modelId)
+    }
+
+    private func postDownloadState(
+        modelId: String,
+        modelName: String,
+        progress: Double,
+        phase: ModelDownloadState.Phase,
+        errorDescription: String? = nil
+    ) {
+        let status = downloadStatus(
+            modelName: modelName,
+            progress: progress,
+            phase: phase,
+            errorDescription: errorDescription
+        )
+        NotificationCenter.default.post(
+            name: Constants.Notifications.modelDownloadStateDidChange,
+            object: ModelDownloadState(
+                modelId: modelId,
+                progress: progress,
+                status: status,
+                phase: phase,
+                errorDescription: errorDescription
+            )
+        )
+    }
+
+    private func downloadStatus(
+        modelName: String,
+        progress: Double,
+        phase: ModelDownloadState.Phase,
+        errorDescription: String?
+    ) -> String {
+        switch phase {
+        case .started, .progress:
+            return "Downloading \(modelName)... \(Int(progress * 100))%"
+        case .finished:
+            return "Downloaded \(modelName)"
+        case .failed:
+            if errorDescription == "cancelled" {
+                return "Download cancelled: \(modelName)"
+            }
+            return "Download failed: \(modelName)"
+        }
     }
 }
 

@@ -10,6 +10,15 @@ enum Constants {
 
         /// Posted when a model download starts/progresses/finishes
         static let modelDownloadStateDidChange = Notification.Name("com.rselbach.jabber.modelDownloadStateDidChange")
+
+        /// Posted when the global hotkey configuration changes
+        static let hotkeyDidChange = Notification.Name("com.rselbach.jabber.hotkeyDidChange")
+    }
+
+    /// Default hotkey configuration (Option + Space)
+    enum Hotkey {
+        static let defaultKeyCode: UInt32 = 0x31  // Space
+        static let defaultModifiers: UInt32 = 0x0800  // Option key
     }
 
     /// Supported Whisper transcription languages (from WhisperKit)

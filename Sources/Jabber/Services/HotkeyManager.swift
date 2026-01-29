@@ -194,6 +194,14 @@ final class HotkeyManager {
         case 0x6D: return "F10"
         case 0x67: return "F11"
         case 0x6F: return "F12"
+        case 0x69: return "F13"
+        case 0x6B: return "F14"
+        case 0x71: return "F15"
+        case 0x6A: return "F16"
+        case 0x40: return "F17"
+        case 0x4F: return "F18"
+        case 0x50: return "F19"
+        case 0x5A: return "F20"
         case 0x7B: return "←"  // Left arrow
         case 0x7C: return "→"  // Right arrow
         case 0x7D: return "↓"  // Down arrow

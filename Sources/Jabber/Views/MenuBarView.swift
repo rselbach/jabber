@@ -6,6 +6,12 @@ struct MenuBarView: View {
     @State private var modelManager = ModelManager.shared
     @ObservedObject var updaterController: UpdaterController
 
+    private var hotkeyDisplayString: String {
+        let keyCode = HotkeyManager.savedKeyCode()
+        let modifiers = HotkeyManager.savedModifiers()
+        return HotkeyManager.displayString(keyCode: keyCode, modifiers: modifiers)
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             Text("Jabber")
@@ -14,7 +20,7 @@ struct MenuBarView: View {
             Divider()
 
             VStack(alignment: .leading, spacing: 8) {
-                Text("Press ⌥ Space to dictate")
+                Text("Press \(hotkeyDisplayString) to dictate")
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
 
@@ -75,8 +81,4 @@ struct MenuBarView: View {
             _ = modelManager.selectModel(newValue, previousModelId: oldValue)
         }
     }
-}
-
-#Preview {
-    MenuBarView(updaterController: UpdaterController())
 }

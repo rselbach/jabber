@@ -5,7 +5,6 @@ struct SettingsView: View {
 
     @AppStorage("selectedModel") private var selectedModel = "base"
     @AppStorage("outputMode") private var outputMode = "paste"
-    @AppStorage("hotkeyDisplay") private var hotkeyDisplay = "⌥ Space"
     @AppStorage("vocabularyPrompt") private var vocabularyPrompt = ""
     @AppStorage("selectedLanguage") private var selectedLanguage = Constants.defaultLanguage
 
@@ -73,14 +72,10 @@ struct SettingsView: View {
                 HStack {
                     Text("Press to talk:")
                     Spacer()
-                    Text(hotkeyDisplay)
-                        .padding(.horizontal, 8)
-                        .padding(.vertical, 4)
-                        .background(.quaternary)
-                        .clipShape(RoundedRectangle(cornerRadius: 4))
+                    HotkeyRecorderView()
                 }
 
-                Text("Hotkey customization will be available in a future update.")
+                Text("Click to record a new shortcut. Click again to cancel.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             } header: {
@@ -283,8 +278,4 @@ struct ModelRow: View {
         }
         .buttonStyle(.bordered)
     }
-}
-
-#Preview {
-    SettingsView(updaterController: UpdaterController())
 }

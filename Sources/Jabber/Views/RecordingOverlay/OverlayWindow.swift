@@ -8,6 +8,7 @@ final class OverlayWindow {
     private var waveformView: WaveformView?
     private var hostingView: NSHostingView<WaveformContainer>?
     private let logger = Logger(subsystem: "com.rselbach.jabber", category: "OverlayWindow")
+    private var visibilityToken: UInt64 = 0
 
     func show() {
         if window == nil {
@@ -16,18 +17,28 @@ final class OverlayWindow {
                 return
             }
         }
+        visibilityToken &+= 1
+        window?.alphaValue = 1
         waveformView?.reset()
         window?.orderFront(nil)
     }
 
     func hide() {
+        visibilityToken &+= 1
+        let token = visibilityToken
+
         NSAnimationContext.runAnimationGroup { context in
             context.duration = 0.2
             window?.animator().alphaValue = 0
         } completionHandler: {
             Task { @MainActor [weak self] in
-                self?.window?.orderOut(nil)
-                self?.window?.alphaValue = 1
+                guard let self, let window = self.window else { return }
+                guard token == self.visibilityToken else {
+                    window.alphaValue = 1
+                    return
+                }
+                window.orderOut(nil)
+                window.alphaValue = 1
             }
         }
     }

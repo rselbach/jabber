@@ -64,15 +64,19 @@ final class ModelManager {
 
     func refreshModels() {
         let downloadedIds = Set(installedModelIds())
+        let existingById = Dictionary(uniqueKeysWithValues: models.map { ($0.id, $0) })
         models = modelDefinitions.map { def in
+            let wasDownloading = existingById[def.id]?.isDownloading ?? false
+            let previousProgress = existingById[def.id]?.downloadProgress ?? 0
+            let isDownloaded = downloadedIds.contains(def.id)
             Model(
                 id: def.id,
                 name: def.name,
                 description: def.description,
                 sizeHint: def.sizeHint,
-                isDownloaded: downloadedIds.contains(def.id),
-                isDownloading: false,
-                downloadProgress: 0
+                isDownloaded: isDownloaded,
+                isDownloading: !isDownloaded && wasDownloading,
+                downloadProgress: isDownloaded ? 1.0 : previousProgress
             )
         }
     }

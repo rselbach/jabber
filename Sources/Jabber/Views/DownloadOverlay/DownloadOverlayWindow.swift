@@ -7,6 +7,7 @@ final class DownloadOverlayWindow {
     private var window: NSPanel?
     private let viewModel = DownloadOverlayViewModel()
     private let logger = Logger(subsystem: "com.rselbach.jabber", category: "DownloadOverlayWindow")
+    private var visibilityToken: UInt64 = 0
 
     func show() {
         if window == nil {
@@ -15,17 +16,27 @@ final class DownloadOverlayWindow {
                 return
             }
         }
+        visibilityToken &+= 1
+        window?.alphaValue = 1
         window?.orderFront(nil)
     }
 
     func hide() {
+        visibilityToken &+= 1
+        let token = visibilityToken
+
         NSAnimationContext.runAnimationGroup { context in
             context.duration = 0.3
             window?.animator().alphaValue = 0
         } completionHandler: {
             Task { @MainActor [weak self] in
-                self?.window?.orderOut(nil)
-                self?.window?.alphaValue = 1
+                guard let self, let window = self.window else { return }
+                guard token == self.visibilityToken else {
+                    window.alphaValue = 1
+                    return
+                }
+                window.orderOut(nil)
+                window.alphaValue = 1
             }
         }
     }

@@ -2,8 +2,8 @@ import Foundation
 import WhisperKit
 import os
 
-struct ModelDownloadState {
-    enum Phase: String {
+struct ModelDownloadState: Equatable {
+    enum Phase: String, Equatable {
         case started
         case progress
         case finished

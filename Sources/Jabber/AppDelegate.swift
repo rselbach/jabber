@@ -42,13 +42,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var downloadStatesByModelId: [String: ModelDownloadState] = [:]
     private var activeDownloadModelId: String?
 
-    private enum NonDictationUIState {
-        case ready
-        case downloading(ModelDownloadState)
-        case loadingModel
-        case error
-    }
-
     func applicationDidFinishLaunching(_ notification: Notification) {
         setupMenuBar()
         setupHotkey()
@@ -436,22 +429,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func resolveNonDictationUI(forceLoading: Bool) -> NonDictationUIState {
-        switch (forceLoading, modelState, isModelLoadInProgress, currentDownloadForUI()) {
-        case (_, .error, _, _):
-            return .error
-        case (true, _, _, _):
-            return .loadingModel
-        case (_, .loading, true, _):
-            return .loadingModel
-        case (_, _, _, let download?):
-            return .downloading(download)
-        case (_, .ready, _, _):
-            return .ready
-        case (_, .notReady, _, _):
-            return .loadingModel
-        case (_, .loading, _, _):
-            return .loadingModel
-        }
+        NonDictationUIResolver.resolve(
+            forceLoading: forceLoading,
+            modelState: modelState,
+            isModelLoadInProgress: isModelLoadInProgress,
+            downloadState: currentDownloadForUI()
+        )
     }
 
     private func applyNonDictationUI(_ state: NonDictationUIState) {

@@ -19,7 +19,8 @@ final class OutputManager {
     }
 
     func output(_ text: String) {
-        guard copyToClipboard(text) else {
+        let didCopyToClipboard = copyToClipboard(text)
+        guard didCopyToClipboard else {
             NotificationService.shared.showError(
                 title: "Copy Failed",
                 message: "Could not copy transcription to clipboard.",
@@ -28,19 +29,26 @@ final class OutputManager {
             return
         }
 
-        if mode == .pasteInPlace {
-            guard checkAccessibilityPermission() else {
-                logger.warning("Accessibility permission not granted, text copied to clipboard only")
-                Task { @MainActor in
-                    NotificationService.shared.showWarning(
-                        title: "Accessibility Permission Required",
-                        message: "Text was copied to clipboard. Grant accessibility permission in System Settings to enable auto-paste."
-                    )
-                }
-                return
-            }
-            sendPaste()
+        guard Self.shouldAttemptPaste(mode: mode, didCopyToClipboard: didCopyToClipboard) else {
+            return
         }
+
+        guard checkAccessibilityPermission() else {
+            logger.warning("Accessibility permission not granted, text copied to clipboard only")
+            Task { @MainActor in
+                NotificationService.shared.showWarning(
+                    title: "Accessibility Permission Required",
+                    message: "Text was copied to clipboard. Grant accessibility permission in System Settings to enable auto-paste."
+                )
+            }
+            return
+        }
+
+        sendPaste()
+    }
+
+    static func shouldAttemptPaste(mode: OutputMode, didCopyToClipboard: Bool) -> Bool {
+        didCopyToClipboard && mode == .pasteInPlace
     }
 
     func checkAccessibilityPermission() -> Bool {

@@ -25,6 +25,11 @@ let package = Package(
             resources: [
                 .process("Assets.xcassets")
             ]
+        ),
+        .testTarget(
+            name: "JabberTests",
+            dependencies: ["Jabber"],
+            path: "Tests/JabberTests"
         )
     ]
 )

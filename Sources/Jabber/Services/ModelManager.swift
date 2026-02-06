@@ -69,7 +69,7 @@ final class ModelManager {
             let wasDownloading = existingById[def.id]?.isDownloading ?? false
             let previousProgress = existingById[def.id]?.downloadProgress ?? 0
             let isDownloaded = downloadedIds.contains(def.id)
-            Model(
+            return Model(
                 id: def.id,
                 name: def.name,
                 description: def.description,

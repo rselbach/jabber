@@ -60,7 +60,7 @@ final class HotkeyManager {
 
         let refcon = Unmanaged.passUnretained(self).toOpaque()
 
-        InstallEventHandler(
+        let status = InstallEventHandler(
             GetApplicationEventTarget(),
             { (_, event, refcon) -> OSStatus in
                 guard let refcon, let event else { return OSStatus(eventNotHandledErr) }
@@ -81,6 +81,11 @@ final class HotkeyManager {
             refcon,
             &eventHandlerRef
         )
+
+        if status != noErr {
+            logger.error("Failed to install hotkey event handler with status: \(status)")
+            onRegistrationFailure?(status)
+        }
     }
 }
 

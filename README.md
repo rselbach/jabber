@@ -1,5 +1,3 @@
-this is just a test
-
 # Jabber
 
 A macOS menu bar app for local speech-to-text transcription using [WhisperKit](https://github.com/argmaxinc/WhisperKit).

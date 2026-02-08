@@ -78,6 +78,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             name: Constants.Notifications.modelDownloadStateDidChange,
             object: nil
         )
+
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(handleHotkeyChange),
+            name: Constants.Notifications.hotkeyDidChange,
+            object: nil
+        )
+    }
+
+    @objc private func handleHotkeyChange() {
+        setupHotkey()
     }
 
     @objc private func handleModelChange() {
@@ -197,8 +208,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func setupHotkey() {
-        // Default: Option + Space (0x31 = space, optionKey = 0x0800)
-        hotkeyManager.register(keyCode: 0x31, modifiers: UInt32(Carbon.optionKey))
+        let keyCode = HotkeyManager.savedKeyCode()
+        let modifiers = HotkeyManager.savedModifiers()
+        hotkeyManager.register(keyCode: keyCode, modifiers: modifiers)
 
         hotkeyManager.onKeyDown = { [weak self] in
             Task { @MainActor in

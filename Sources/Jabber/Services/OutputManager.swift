@@ -37,9 +37,10 @@ final class OutputManager {
         guard permissionService.requestAccessibilityPermission() else {
             logger.warning("Accessibility permission not granted, text copied to clipboard only")
             Task { @MainActor in
-                NotificationService.shared.showWarning(
+                NotificationService.shared.showPermissionWarning(
                     title: "Accessibility Permission Required",
-                    message: "Text was copied to clipboard. Grant accessibility permission in System Settings to enable auto-paste."
+                    message: "Text was copied to clipboard. Grant accessibility permission to enable auto-paste.",
+                    section: .accessibility
                 )
             }
             return

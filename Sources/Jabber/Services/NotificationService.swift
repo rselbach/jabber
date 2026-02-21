@@ -54,10 +54,27 @@ final class NotificationService {
         showNotification(title: title, message: message)
     }
 
-    func showNotification(title: String, message: String) {
+    func showPermissionWarning(
+        title: String,
+        message: String,
+        section: PermissionService.PermissionSection
+    ) {
+        showNotification(title: title, message: message, permissionSection: section)
+    }
+
+    func showNotification(
+        title: String,
+        message: String,
+        permissionSection: PermissionService.PermissionSection? = nil
+    ) {
         guard isValidBundle, let center = notificationCenter else {
             logger.info("Using alert fallback for notification: \(title)")
-            showAlert(title: title, message: message, style: .informational)
+            showAlert(
+                title: title,
+                message: message,
+                style: .informational,
+                permissionSection: permissionSection
+            )
             return
         }
         let logger = self.logger
@@ -98,7 +115,12 @@ final class NotificationService {
                 self.isAuthorized = authorised
                 guard authorised else {
                     logger.info("Notification permission not granted, using alert fallback: \(title)")
-                    self.showAlert(title: title, message: message, style: .informational)
+                    self.showAlert(
+                        title: title,
+                        message: message,
+                        style: .informational,
+                        permissionSection: permissionSection
+                    )
                     return
                 }
 
@@ -122,12 +144,27 @@ final class NotificationService {
         }
     }
 
-    private func showAlert(title: String, message: String, style: NSAlert.Style) {
+    private func showAlert(
+        title: String,
+        message: String,
+        style: NSAlert.Style,
+        permissionSection: PermissionService.PermissionSection? = nil
+    ) {
         let alert = NSAlert()
         alert.messageText = title
         alert.informativeText = message
         alert.alertStyle = style
         alert.addButton(withTitle: "OK")
+
+        if let permissionSection {
+            alert.addButton(withTitle: "Open Privacy Settings")
+            let response = alert.runModal()
+            if response == .alertSecondButtonReturn {
+                PermissionService.shared.openPrivacySettings(for: permissionSection)
+            }
+            return
+        }
+
         alert.runModal()
     }
 }

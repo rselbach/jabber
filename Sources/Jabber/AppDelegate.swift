@@ -241,9 +241,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         let hasMicrophonePermission = await permissionService.requestMicrophonePermission()
         guard hasMicrophonePermission else {
-            NotificationService.shared.showWarning(
+            NotificationService.shared.showPermissionWarning(
                 title: "Microphone Permission Required",
-                message: "Jabber needs microphone access to record speech. Grant access in System Settings > Privacy & Security > Microphone."
+                message: "Jabber needs microphone access to record speech.",
+                section: .microphone
             )
             return
         }

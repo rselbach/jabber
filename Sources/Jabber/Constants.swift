@@ -149,8 +149,6 @@ enum Constants {
                 return nil
             }
 
-            let suffixPattern = "-\(modelId)"
-
             for folder in contents {
                 guard isModelFolderCandidate(folder, modelId: modelId) else { continue }
                 let folderURL = base.appendingPathComponent(folder)

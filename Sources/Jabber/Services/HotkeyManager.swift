@@ -26,7 +26,7 @@ final class HotkeyManager {
         unregister()
 
         guard let signature = OSType(fourCharCode: "JBBR") else {
-            let status: OSStatus = paramErr
+            let status = OSStatus(paramErr)
             logger.error("Failed to create hotkey signature with status: \(status)")
             onRegistrationFailure?(status)
             return

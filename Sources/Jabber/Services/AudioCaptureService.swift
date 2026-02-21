@@ -11,7 +11,7 @@ final class AudioCaptureService {
 
     private let queue = DispatchQueue(label: "com.jabber.audiocapture")
     private var lastLevelUpdate: CFAbsoluteTime = 0
-    private var capturedSamples = [Float](repeating: 0, count: Self.maxCapturedSamples)
+    private var capturedSamples: [Float]
     private var capturedSampleCount = 0
     private var capturedSampleWriteIndex = 0
     private var _isCapturing = false
@@ -19,6 +19,10 @@ final class AudioCaptureService {
 
     var onAudioLevel: ((Float) -> Void)?
     var onConversionError: ((Error) -> Void)?
+
+    init() {
+        capturedSamples = Array(repeating: 0, count: Self.maxCapturedSamples)
+    }
 
     private var isCapturing: Bool {
         get { queue.sync { _isCapturing } }
@@ -143,14 +147,14 @@ final class AudioCaptureService {
         let end = min(start + count, Self.maxCapturedSamples)
 
         if end <= Self.maxCapturedSamples {
-            capturedSamples[start..<end] = samples
+            capturedSamples.replaceSubrange(start..<end, with: samples)
         } else {
             let firstPartCount = Self.maxCapturedSamples - start
             let firstPart = samples.prefix(firstPartCount)
             let secondPart = samples.dropFirst(firstPartCount)
 
-            capturedSamples[start..<Self.maxCapturedSamples] = Array(firstPart)
-            capturedSamples[0..<secondPart.count] = Array(secondPart)
+            capturedSamples.replaceSubrange(start..<Self.maxCapturedSamples, with: firstPart)
+            capturedSamples.replaceSubrange(0..<secondPart.count, with: secondPart)
         }
 
         capturedSampleWriteIndex = (start + count) % Self.maxCapturedSamples

@@ -75,7 +75,7 @@ struct SettingsView: View {
                 pendingDeleteModelName = nil
             }
         } message: {
-            Text("Delete \(pendingDeleteModelName ?? \"\")? This action removes local model files and cannot be undone.")
+            Text("Delete \(pendingDeleteModelName ?? "")? This action removes local model files and cannot be undone.")
         }
     }
 

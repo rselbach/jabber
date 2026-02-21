@@ -1,6 +1,10 @@
 import Foundation
 import os
 
+enum AppMode {
+    static let baseModelId = "base"
+}
+
 /// Application-wide constants and notification names
 enum Constants {
     /// Notification names used throughout the application
@@ -110,6 +114,7 @@ enum Constants {
     enum ModelPaths {
         private static let repoName = "argmaxinc/whisperkit-coreml"
         private static let logger = Logger(subsystem: "com.rselbach.jabber", category: "ModelPaths")
+        private static let requiredConfigFileNames = ["config.json"]
 
         /// Returns the base directory where models are stored
         static func modelsBaseURL() -> URL? {
@@ -127,9 +132,14 @@ enum Constants {
         /// - Returns: URL to the model folder if found, nil otherwise
         static func localModelFolder(for modelId: String) -> URL? {
             guard let base = modelsBaseURL() else { return nil }
+            guard !modelId.isEmpty else { return nil }
 
             let fm = FileManager.default
-            guard fm.fileExists(atPath: base.path) else { return nil }
+            var isDirectory: ObjCBool = false
+            guard fm.fileExists(atPath: base.path, isDirectory: &isDirectory),
+                  isDirectory.boolValue else {
+                return nil
+            }
 
             let contents: [String]
             do {
@@ -142,17 +152,11 @@ enum Constants {
             let suffixPattern = "-\(modelId)"
 
             for folder in contents {
-                let matchesExactSuffix = folder.hasSuffix(suffixPattern)
-                let matchesExactName = folder == modelId
-
-                guard matchesExactSuffix || matchesExactName else {
-                    continue
-                }
-
+                guard isModelFolderCandidate(folder, modelId: modelId) else { continue }
                 let folderURL = base.appendingPathComponent(folder)
-                let configPath = folderURL.appendingPathComponent("config.json")
+                guard isModelDirectory(folderURL) else { continue }
 
-                guard fm.fileExists(atPath: configPath.path) else {
+                if !hasModelManifest(at: folderURL) {
                     continue
                 }
 
@@ -160,6 +164,27 @@ enum Constants {
             }
 
             return nil
+        }
+
+        private static func isModelFolderCandidate(_ folderName: String, modelId: String) -> Bool {
+            if folderName == modelId {
+                return true
+            }
+
+            guard folderName.count > modelId.count + 1 else {
+                return false
+            }
+            return folderName.hasSuffix("-\(modelId)")
+        }
+
+        private static func isModelDirectory(_ url: URL) -> Bool {
+            var isDirectory: ObjCBool = false
+            return FileManager.default.fileExists(atPath: url.path, isDirectory: &isDirectory) && isDirectory.boolValue
+        }
+
+        private static func hasModelManifest(at folderURL: URL) -> Bool {
+            let fm = FileManager.default
+            return requiredConfigFileNames.allSatisfy { fm.fileExists(atPath: folderURL.appendingPathComponent($0).path) }
         }
     }
 }

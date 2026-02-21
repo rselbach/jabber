@@ -7,8 +7,10 @@ final class AudioCaptureService {
     private let targetSampleRate: Double = 16_000
     private let converterQueue = DispatchQueue(label: "com.jabber.audioconverter")
     private var converter: AVAudioConverter?
+    private let maxCapturedSamples = 160_000
 
     private let queue = DispatchQueue(label: "com.jabber.audiocapture")
+    private var lastLevelUpdate: CFAbsoluteTime = 0
     private var capturedSamples: [Float] = []
     private var _isCapturing = false
     private let logger = Logger(subsystem: "com.rselbach.jabber", category: "AudioCaptureService")
@@ -82,8 +84,12 @@ final class AudioCaptureService {
         guard isCapturing else { return }
 
         let rms = calculateRms(from: buffer)
-        DispatchQueue.main.async { [weak self] in
-            self?.onAudioLevel?(rms)
+        let now = CFAbsoluteTimeGetCurrent()
+        if now - lastLevelUpdate >= 1.0 / 30.0 {
+            lastLevelUpdate = now
+            DispatchQueue.main.async { [weak self] in
+                self?.onAudioLevel?(rms)
+            }
         }
 
         let conversionResult = convertBuffer(buffer, using: converter)
@@ -97,13 +103,23 @@ final class AudioCaptureService {
 
         guard let convertedBuffer = conversionResult.buffer else { return }
 
-        if let channelData = convertedBuffer.floatChannelData?[0] {
-            let frames = Int(convertedBuffer.frameLength)
-            let samples = Array(UnsafeBufferPointer(start: channelData, count: frames))
+        guard let channelData = convertedBuffer.floatChannelData?[0] else { return }
+        let frames = Int(convertedBuffer.frameLength)
+        guard frames > 0 else { return }
 
-            queue.async { [weak self] in
-                self?.capturedSamples.append(contentsOf: samples)
+        let samples = Array(UnsafeBufferPointer(start: channelData, count: frames))
+        queue.async { [weak self] in
+            guard let self else { return }
+            if samples.count >= self.maxCapturedSamples {
+                self.capturedSamples = Array(samples.suffix(self.maxCapturedSamples))
+                return
             }
+
+            let overflow = self.capturedSamples.count + samples.count - self.maxCapturedSamples
+            if overflow > 0 {
+                self.capturedSamples.removeFirst(overflow)
+            }
+            self.capturedSamples.append(contentsOf: samples)
         }
     }
 
@@ -111,11 +127,13 @@ final class AudioCaptureService {
         guard let channelData = buffer.floatChannelData?[0] else { return 0 }
 
         let frames = Int(buffer.frameLength)
+        guard frames > 0 else { return 0 }
+
         var sum: Float = 0
         for i in 0..<frames {
             sum += channelData[i] * channelData[i]
         }
-        return sqrt(sum / Float(frames))
+        return min(1, sqrt(max(0, sum / Float(frames))))
     }
 
     private func convertBuffer(
@@ -124,9 +142,10 @@ final class AudioCaptureService {
     ) -> (buffer: AVAudioPCMBuffer?, error: Error?) {
         // Convert to 16kHz mono
         let outputFormat = converter.outputFormat
+        let outputFrameCapacity = AVAudioFrameCount(max(1, Int(Double(buffer.frameLength) * outputFormat.sampleRate / buffer.format.sampleRate)))
         guard let convertedBuffer = AVAudioPCMBuffer(
             pcmFormat: outputFormat,
-            frameCapacity: AVAudioFrameCount(targetSampleRate / 10)
+            frameCapacity: outputFrameCapacity
         ) else {
             return (nil, nil)
         }

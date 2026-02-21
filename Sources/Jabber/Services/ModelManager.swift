@@ -83,9 +83,9 @@ final class ModelManager {
 
     func selectModel(_ modelId: String, previousModelId: String?) -> Bool {
         guard downloadedModels.contains(where: { $0.id == modelId }) else { return false }
-        let current = previousModelId ?? UserDefaults.standard.string(forKey: "selectedModel")
+        let current = previousModelId ?? AppSettings.string(AppSettingKey.selectedModel, default: AppMode.baseModelId)
         guard current != modelId else { return false }
-        UserDefaults.standard.set(modelId, forKey: "selectedModel")
+        AppSettings.setString(modelId, forKey: AppSettingKey.selectedModel)
         NotificationCenter.default.post(name: Constants.Notifications.modelDidChange, object: nil)
         return true
     }
@@ -203,7 +203,7 @@ final class ModelManager {
     }
 
     func deleteModel(_ modelId: String) throws {
-        let currentModel = UserDefaults.standard.string(forKey: "selectedModel")
+        let currentModel = AppSettings.string(AppSettingKey.selectedModel, default: AppMode.baseModelId)
 
         // Prevent deleting currently selected model if it's the only one
         if currentModel == modelId && downloadedModels.count == 1 {
@@ -227,10 +227,10 @@ final class ModelManager {
             guard let firstDownloaded = downloadedModels.first?.id else {
                 // This should never happen due to the guard at the top, but be safe
                 logger.error("No models available after deletion, falling back to base")
-                UserDefaults.standard.set("base", forKey: "selectedModel")
+                AppSettings.setString(AppMode.baseModelId, forKey: AppSettingKey.selectedModel)
                 return
             }
-            UserDefaults.standard.set(firstDownloaded, forKey: "selectedModel")
+            AppSettings.setString(firstDownloaded, forKey: AppSettingKey.selectedModel)
             NotificationCenter.default.post(name: Constants.Notifications.modelDidChange, object: nil)
         }
     }
@@ -239,8 +239,8 @@ final class ModelManager {
         if hasAnyDownloadedModel { return }
 
         do {
-            try await downloadModel("base")
-            UserDefaults.standard.set("base", forKey: "selectedModel")
+            try await downloadModel(AppMode.baseModelId)
+            AppSettings.setString(AppMode.baseModelId, forKey: AppSettingKey.selectedModel)
         } catch {
             logger.error("Failed to download base model: \(error.localizedDescription)")
         }

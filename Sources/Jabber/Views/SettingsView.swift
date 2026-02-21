@@ -3,11 +3,11 @@ import SwiftUI
 struct SettingsView: View {
     @ObservedObject var updaterController: UpdaterController
 
-    @AppStorage("selectedModel") private var selectedModel = "base"
-    @AppStorage("outputMode") private var outputMode = "paste"
-    @AppStorage("hotkeyDisplay") private var hotkeyDisplay = "⌥ Space"
-    @AppStorage("vocabularyPrompt") private var vocabularyPrompt = ""
-    @AppStorage("selectedLanguage") private var selectedLanguage = Constants.defaultLanguage
+    @AppStorage(AppSettingKey.selectedModel) private var selectedModel = AppMode.baseModelId
+    @AppStorage(AppSettingKey.outputMode) private var outputMode = OutputManager.OutputMode.pasteInPlace.rawValue
+    @AppStorage(AppSettingKey.hotkeyDisplay) private var hotkeyDisplay = "⌥ Space"
+    @AppStorage(AppSettingKey.vocabularyPrompt) private var vocabularyPrompt = ""
+    @AppStorage(AppSettingKey.selectedLanguage) private var selectedLanguage = Constants.defaultLanguage
 
     @State private var modelManager = ModelManager.shared
     @State private var errorMessage: String?
@@ -60,7 +60,7 @@ struct SettingsView: View {
                 }
                 .pickerStyle(.radioGroup)
 
-                if outputMode == "paste" {
+                if outputMode == OutputManager.OutputMode.pasteInPlace.rawValue {
                     Text("Requires Accessibility permission in System Settings.")
                         .font(.caption)
                         .foregroundStyle(.orange)

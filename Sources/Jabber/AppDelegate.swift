@@ -325,10 +325,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             try Task.checkCancellation()
 
             // Sync vocabulary prompt and language from settings
-            let vocab = UserDefaults.standard.string(forKey: "vocabularyPrompt") ?? ""
+            let vocab = AppSettings.string(AppSettingKey.vocabularyPrompt, default: "")
             await whisperService.setVocabularyPrompt(vocab)
 
-            let language = UserDefaults.standard.string(forKey: "selectedLanguage") ?? Constants.defaultLanguage
+            let language = AppSettings.string(AppSettingKey.selectedLanguage, default: Constants.defaultLanguage)
             await whisperService.setLanguage(language)
 
             try Task.checkCancellation()
@@ -398,7 +398,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private var selectedModelId: String? {
-        UserDefaults.standard.string(forKey: "selectedModel")
+        AppSettings.string(AppSettingKey.selectedModel, default: AppMode.baseModelId)
     }
 
     private func shouldForceLoading(for state: ModelDownloadState) -> Bool {

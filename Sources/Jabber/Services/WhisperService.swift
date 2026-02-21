@@ -93,7 +93,7 @@ actor WhisperService {
             // Invalid code - fall back to auto-detect and notify user
             logger.warning("Invalid language code '\(language)' - falling back to auto-detect")
             selectedLanguage = "auto"
-            UserDefaults.standard.set("auto", forKey: "selectedLanguage")
+            AppSettings.setString("auto", forKey: AppSettingKey.selectedLanguage)
 
             Task { @MainActor in
                 NotificationService.shared.showWarning(
@@ -123,7 +123,7 @@ actor WhisperService {
     }
 
     func ensureModelLoaded() async throws {
-        let desiredModelId = UserDefaults.standard.string(forKey: "selectedModel") ?? "base"
+        let desiredModelId = AppSettings.string(AppSettingKey.selectedModel, default: AppMode.baseModelId)
         if whisperKit != nil, loadedModelId == desiredModelId {
             return
         }
@@ -218,8 +218,8 @@ actor WhisperService {
                 switch error {
                 case .modelNotFound:
                     logger.warning("Unknown model id '\(modelIdToLoad)', falling back to base")
-                    modelIdToLoad = "base"
-                    UserDefaults.standard.set(modelIdToLoad, forKey: "selectedModel")
+                    modelIdToLoad = AppMode.baseModelId
+                    AppSettings.setString(modelIdToLoad, forKey: AppSettingKey.selectedModel)
                     modelFolder = try await ModelManager.shared.ensureModelDownloaded(modelIdToLoad)
                 default:
                     throw error

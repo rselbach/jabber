@@ -14,7 +14,7 @@ final class OutputManager {
     private static let pasteDelay: TimeInterval = 0.05
 
     var mode: OutputMode {
-        let modeString = UserDefaults.standard.string(forKey: "outputMode") ?? "paste"
+        let modeString = AppSettings.string(AppSettingKey.outputMode, default: OutputMode.pasteInPlace.rawValue)
         return OutputMode(rawValue: modeString) ?? .pasteInPlace
     }
 

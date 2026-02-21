@@ -40,6 +40,8 @@ usage() {
 
 main() {
   parse_args "$@"
+
+  validate_environment
   
   echo "==> Building ${APP_NAME} for release..."
   build_app
@@ -68,6 +70,52 @@ main() {
   echo ""
   echo "==> Release complete!"
   echo "    DMG: ${DMG_DIR}/${APP_NAME}.dmg"
+}
+
+require_env() {
+  local name="$1"
+  local value="${!name-}"
+  if [[ -z "${value}" ]]; then
+    echo "Error: ${name} is required." >&2
+    exit 1
+  fi
+}
+
+validate_environment() {
+  local required_commands=(
+    swift
+    xcodebuild
+    codesign
+    hdiutil
+    install_name_tool
+    security
+    curl
+    tar
+    xcrun
+  )
+
+  for cmd in "${required_commands[@]}"; do
+    if ! command -v "${cmd}" >/dev/null 2>&1; then
+      echo "Error: required command '${cmd}' not found." >&2
+      exit 1
+    fi
+  done
+
+  if ! xcrun --find notarytool >/dev/null 2>&1; then
+    echo "Error: xcrun cannot find 'notarytool'." >&2
+    exit 1
+  fi
+
+  if ! xcrun --find stapler >/dev/null 2>&1; then
+    echo "Error: xcrun cannot find 'stapler'." >&2
+    exit 1
+  fi
+
+  require_env SIGNING_IDENTITY
+
+  if [[ "${SKIP_NOTARIZE}" == "false" ]]; then
+    require_env NOTARY_PROFILE
+  fi
 }
 
 parse_args() {

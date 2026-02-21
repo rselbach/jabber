@@ -26,6 +26,18 @@ jobs:
       - name: Select Xcode 16
         run: sudo xcode-select -s /Applications/Xcode_16.2.app/Contents/Developer
 
+      - name: Validate required secrets
+        run: |
+          if [[ -z "${{ secrets.DEVELOPER_ID_CERTIFICATE_P12 }}" ]]; then
+            echo "Error: DEVELOPER_ID_CERTIFICATE_P12 secret is required."
+            exit 1
+          fi
+
+          if [[ -z "${{ secrets.SPARKLE_EDDSA_PRIVATE_KEY }}" ]]; then
+            echo "Error: SPARKLE_EDDSA_PRIVATE_KEY secret is required."
+            exit 1
+          fi
+
       - name: Set version
         id: version
         run: |

@@ -60,6 +60,7 @@ final class NotificationService {
             showAlert(title: title, message: message, style: .informational)
             return
         }
+        let logger = self.logger
 
         if isAuthorized {
             Task { @MainActor in
@@ -82,8 +83,7 @@ final class NotificationService {
             }
             return
         }
-
-        let logger = self.logger
+        
         center.getNotificationSettings { [weak self] settings in
             let authorised: Bool
             switch settings.authorizationStatus {

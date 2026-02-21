@@ -4,6 +4,7 @@ import AppKit
 import Foundation
 import os
 
+@MainActor
 final class PermissionService {
     static let shared = PermissionService()
 

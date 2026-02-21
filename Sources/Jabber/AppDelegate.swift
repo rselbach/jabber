@@ -36,6 +36,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var dictationID = UUID()
 
     private var transcriptionTask: Task<Void, Never>?
+    private var lastModelUnavailableNotice = CFAbsoluteTime(0)
 
     private var modelState: WhisperService.State = .notReady
 
@@ -225,7 +226,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func handleHotkeyDown() {
-        guard whisperService.isReady else { return }
+        guard whisperService.isReady else {
+            let now = CFAbsoluteTimeGetCurrent()
+            if now - lastModelUnavailableNotice > 1.5 {
+                lastModelUnavailableNotice = now
+                NotificationService.shared.showWarning(
+                    title: "Model Not Ready",
+                    message: "Jabber is still preparing the speech model. Try again in a moment."
+                )
+            }
+            return
+        }
 
         switch dictationState {
         case .idle:

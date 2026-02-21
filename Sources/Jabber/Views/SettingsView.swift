@@ -12,6 +12,9 @@ struct SettingsView: View {
     @State private var modelManager = ModelManager.shared
     @State private var errorMessage: String?
     @State private var showError = false
+    @State private var pendingDeleteModelId: String?
+    @State private var pendingDeleteModelName: String?
+    @State private var downloadTasks: [String: Task<Void, Error>] = [:]
 
     @State private var selectedTab = "general"
 
@@ -43,6 +46,36 @@ struct SettingsView: View {
             Button("OK") { }
         } message: { message in
             Text(message)
+        }
+        .alert("Delete model", isPresented: Binding(
+            get: { pendingDeleteModelId != nil },
+            set: { isPresented in
+                if !isPresented {
+                    pendingDeleteModelId = nil
+                    pendingDeleteModelName = nil
+                }
+            }
+        )) {
+            Button("Delete", role: .destructive) {
+                guard let modelId = pendingDeleteModelId,
+                      let modelName = pendingDeleteModelName else {
+                    pendingDeleteModelId = nil
+                    return
+                }
+                do {
+                    try modelManager.deleteModel(modelId)
+                } catch {
+                    presentError("Failed to delete \(modelName): \(error.localizedDescription)")
+                }
+                pendingDeleteModelId = nil
+                pendingDeleteModelName = nil
+            }
+            Button("Cancel", role: .cancel) {
+                pendingDeleteModelId = nil
+                pendingDeleteModelName = nil
+            }
+        } message: {
+            Text("Delete \(pendingDeleteModelName ?? \"\")? This action removes local model files and cannot be undone.")
         }
     }
 
@@ -128,20 +161,31 @@ struct SettingsView: View {
                             selectedModel = model.id
                         },
                         onDownload: {
-                            Task {
+                            guard downloadTasks[model.id] == nil else { return }
+
+                            downloadTasks[model.id] = Task {
+                                defer {
+                                    Task { @MainActor in
+                                        downloadTasks[model.id] = nil
+                                    }
+                                }
+
                                 do {
                                     try await modelManager.downloadModel(model.id)
+                                } catch is CancellationError {
+                                    return
                                 } catch {
                                     presentError("Failed to download \(model.name): \(error.localizedDescription)")
                                 }
                             }
                         },
                         onDelete: {
-                            do {
-                                try modelManager.deleteModel(model.id)
-                            } catch {
-                                presentError("Failed to delete \(model.name): \(error.localizedDescription)")
-                            }
+                            pendingDeleteModelId = model.id
+                            pendingDeleteModelName = model.name
+                        },
+                        onCancelDownload: {
+                            downloadTasks[model.id]?.cancel()
+                            downloadTasks[model.id] = nil
                         }
                     )
                 }
@@ -194,6 +238,7 @@ struct ModelRow: View {
     let onSelect: () -> Void
     let onDownload: () -> Void
     let onDelete: () -> Void
+    let onCancelDownload: () -> Void
 
     var body: some View {
         HStack {
@@ -245,6 +290,11 @@ struct ModelRow: View {
             .font(.caption)
             .foregroundStyle(.secondary)
             .frame(width: 35, alignment: .trailing)
+
+        Button("Cancel") {
+            onCancelDownload()
+        }
+        .buttonStyle(.borderless)
     }
 
     @ViewBuilder

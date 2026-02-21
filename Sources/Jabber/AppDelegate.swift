@@ -12,6 +12,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private let audioCapture = AudioCaptureService()
     private let whisperService = WhisperService()
     private let outputManager = OutputManager()
+    private let permissionService = PermissionService.shared
     private let overlayWindow = OverlayWindow()
     private let downloadOverlay = DownloadOverlayWindow()
     let updaterController = UpdaterController()
@@ -203,7 +204,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         hotkeyManager.onKeyDown = { [weak self] in
             Task { @MainActor in
-                self?.handleHotkeyDown()
+                await self?.handleHotkeyDown()
             }
         }
 
@@ -225,7 +226,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
-    private func handleHotkeyDown() {
+    private func handleHotkeyDown() async {
         guard whisperService.isReady else {
             let now = CFAbsoluteTimeGetCurrent()
             if now - lastModelUnavailableNotice > 1.5 {
@@ -235,6 +236,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                     message: "Jabber is still preparing the speech model. Try again in a moment."
                 )
             }
+            return
+        }
+
+        let hasMicrophonePermission = await permissionService.requestMicrophonePermission()
+        guard hasMicrophonePermission else {
+            NotificationService.shared.showWarning(
+                title: "Microphone Permission Required",
+                message: "Jabber needs microphone access to record speech. Grant access in System Settings > Privacy & Security > Microphone."
+            )
             return
         }
 

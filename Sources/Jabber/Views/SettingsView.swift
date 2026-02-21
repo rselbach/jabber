@@ -94,9 +94,21 @@ struct SettingsView: View {
                 .pickerStyle(.radioGroup)
 
                 if outputMode == OutputManager.OutputMode.pasteInPlace.rawValue {
-                    Text("Requires Accessibility permission in System Settings.")
+                    Button("Open Accessibility Settings") {
+                        PermissionService.shared.openPrivacySettings(for: .accessibility)
+                    }
+                    .buttonStyle(.borderless)
+
+                    let isAccessibilityTrusted = PermissionService.shared.hasAccessibilityPermission()
+                    if !isAccessibilityTrusted {
+                        Text("Accessibility permission is currently disabled. Open Settings to enable it.")
+                            .font(.caption)
+                            .foregroundStyle(.orange)
+                    }
+                } else {
+                    Text("Output will be copied to the clipboard only.")
                         .font(.caption)
-                        .foregroundStyle(.orange)
+                        .foregroundStyle(.secondary)
                 }
             } header: {
                 Text("Output")

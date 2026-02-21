@@ -5,6 +5,7 @@ import os
 
 @MainActor
 final class OutputManager {
+    private let permissionService = PermissionService.shared
     enum OutputMode: String {
         case clipboard
         case pasteInPlace = "paste"
@@ -33,7 +34,7 @@ final class OutputManager {
             return
         }
 
-        guard checkAccessibilityPermission() else {
+        guard permissionService.requestAccessibilityPermission() else {
             logger.warning("Accessibility permission not granted, text copied to clipboard only")
             Task { @MainActor in
                 NotificationService.shared.showWarning(
@@ -49,22 +50,6 @@ final class OutputManager {
 
     static func shouldAttemptPaste(mode: OutputMode, didCopyToClipboard: Bool) -> Bool {
         didCopyToClipboard && mode == .pasteInPlace
-    }
-
-    func checkAccessibilityPermission() -> Bool {
-        let trusted = AXIsProcessTrusted()
-
-        if !trusted {
-            // Prompt user to grant permission
-            let options = [kAXTrustedCheckOptionPrompt.takeUnretainedValue(): true] as CFDictionary
-            _ = AXIsProcessTrustedWithOptions(options)
-
-            // Check again - permission might be granted now
-            // Note: If just granted, may require app relaunch to take effect
-            return AXIsProcessTrusted()
-        }
-
-        return true
     }
 
     private func copyToClipboard(_ text: String) -> Bool {

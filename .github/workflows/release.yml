@@ -82,6 +82,10 @@ jobs:
           
           # Copy Sparkle.framework into the bundle
           SPARKLE_PATH=$(find .build -name "Sparkle.framework" -type d | head -1)
+          if [[ -z "${SPARKLE_PATH}" ]]; then
+            echo "Sparkle.framework not found in .build"
+            exit 1
+          fi
           cp -R "${SPARKLE_PATH}" "${CONTENTS}/Frameworks/"
           
           # Add rpath for Frameworks directory

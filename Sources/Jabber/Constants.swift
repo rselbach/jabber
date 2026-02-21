@@ -184,7 +184,18 @@ enum Constants {
 
         private static func hasModelManifest(at folderURL: URL) -> Bool {
             let fm = FileManager.default
-            return requiredConfigFileNames.allSatisfy { fm.fileExists(atPath: folderURL.appendingPathComponent($0).path) }
+            guard requiredConfigFileNames.allSatisfy({ fm.fileExists(atPath: folderURL.appendingPathComponent($0).path) }) else {
+                return false
+            }
+
+            let configPath = folderURL.appendingPathComponent("config.json").path
+            guard let data = fm.contents(atPath: configPath) else {
+                return false
+            }
+            guard (try? JSONSerialization.jsonObject(with: data, options: .fragmentsAllowed)) != nil else {
+                return false
+            }
+            return true
         }
     }
 }

@@ -116,10 +116,12 @@ create_bundle() {
     echo "    Copied Sparkle.framework"
   else
     sparkle_path=$(find "${PROJECT_ROOT}/.build" -name "Sparkle.framework" -type d | head -1)
-    if [[ -n "${sparkle_path}" ]]; then
-      cp -R "${sparkle_path}" "${frameworks}/"
-      echo "    Copied Sparkle.framework"
+    if [[ -z "${sparkle_path}" ]]; then
+      echo "Error: Sparkle.framework not found in .build artifacts" >&2
+      exit 1
     fi
+    cp -R "${sparkle_path}" "${frameworks}/"
+    echo "    Copied Sparkle.framework"
   fi
   
   # Add rpath for Frameworks directory

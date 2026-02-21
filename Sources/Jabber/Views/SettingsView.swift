@@ -88,8 +88,8 @@ struct SettingsView: View {
         Form {
             Section {
                 Picker("After transcription", selection: $outputMode) {
-                    Text("Copy to clipboard").tag("clipboard")
-                    Text("Paste into active app").tag("paste")
+                    Text("Copy to clipboard").tag(OutputManager.OutputMode.clipboard.rawValue)
+                    Text("Paste into active app").tag(OutputManager.OutputMode.pasteInPlace.rawValue)
                 }
                 .pickerStyle(.radioGroup)
 

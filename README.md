@@ -1,5 +1,3 @@
-this is just a test
-
 # Jabber
 
 A macOS menu bar app for local speech-to-text transcription using [WhisperKit](https://github.com/argmaxinc/WhisperKit).
@@ -40,6 +38,21 @@ For a release build with signing:
 1. Launch Jabber — it lives in your menu bar
 2. Click the icon or use the global hotkey to start dictation
 3. Speak, and text appears wherever your cursor is
+
+## Permissions
+
+Jabber requires two macOS permissions to provide the full experience:
+
+- **Microphone**: required to capture speech.
+- **Accessibility**: required for paste-into-current-app mode.
+
+On first launch or first use, macOS may ask for microphone permission and may open a system permission prompt for accessibility when you use paste mode.
+
+If permission prompts do not appear:
+
+- Open **System Settings > Privacy & Security**
+- Enable Jabber for **Microphone**
+- Enable Jabber for **Accessibility**
 
 ## Auto-Updates
 

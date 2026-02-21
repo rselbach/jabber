@@ -61,6 +61,28 @@ final class NotificationService {
             return
         }
 
+        if isAuthorized {
+            Task { @MainActor in
+                let content = UNMutableNotificationContent()
+                content.title = title
+                content.body = message
+                content.sound = .default
+
+                let request = UNNotificationRequest(
+                    identifier: UUID().uuidString,
+                    content: content,
+                    trigger: nil
+                )
+
+                do {
+                    try await center.add(request)
+                } catch {
+                    logger.error("Failed to show notification: \(error.localizedDescription)")
+                }
+            }
+            return
+        }
+
         let logger = self.logger
         center.getNotificationSettings { [weak self] settings in
             let authorised: Bool

@@ -7,11 +7,13 @@ final class AudioCaptureService {
     private let targetSampleRate: Double = 16_000
     private let converterQueue = DispatchQueue(label: "com.jabber.audioconverter")
     private var converter: AVAudioConverter?
-    private let maxCapturedSamples = 160_000
+    private static let maxCapturedSamples = 160_000
 
     private let queue = DispatchQueue(label: "com.jabber.audiocapture")
     private var lastLevelUpdate: CFAbsoluteTime = 0
-    private var capturedSamples: [Float] = []
+    private var capturedSamples = [Float](repeating: 0, count: Self.maxCapturedSamples)
+    private var capturedSampleCount = 0
+    private var capturedSampleWriteIndex = 0
     private var _isCapturing = false
     private let logger = Logger(subsystem: "com.rselbach.jabber", category: "AudioCaptureService")
 
@@ -34,7 +36,11 @@ final class AudioCaptureService {
     func startCapture() throws {
         guard !isCapturing else { return }
 
-        queue.sync { capturedSamples.removeAll() }
+        queue.sync {
+            capturedSamples = Array(repeating: 0, count: Self.maxCapturedSamples)
+            capturedSampleCount = 0
+            capturedSampleWriteIndex = 0
+        }
 
         let inputNode = engine.inputNode
         let inputFormat = inputNode.inputFormat(forBus: 0)
@@ -75,7 +81,15 @@ final class AudioCaptureService {
     }
 
     func currentSamples() -> [Float] {
-        queue.sync { capturedSamples }
+        queue.sync {
+            guard capturedSampleCount > 0 else { return [] }
+            if capturedSampleCount < Self.maxCapturedSamples {
+                return Array(capturedSamples[0..<capturedSampleCount])
+            }
+
+            return Array(capturedSamples[capturedSampleWriteIndex..<Self.maxCapturedSamples]) +
+                Array(capturedSamples[0..<capturedSampleWriteIndex])
+        }
     }
 
     private func processBuffer(_ buffer: AVAudioPCMBuffer) {
@@ -110,16 +124,23 @@ final class AudioCaptureService {
         let samples = Array(UnsafeBufferPointer(start: channelData, count: frames))
         queue.async { [weak self] in
             guard let self else { return }
-            if samples.count >= self.maxCapturedSamples {
-                self.capturedSamples = Array(samples.suffix(self.maxCapturedSamples))
+            if samples.count >= Self.maxCapturedSamples {
+                self.capturedSamples = Array(samples.suffix(Self.maxCapturedSamples))
+                self.capturedSampleCount = Self.maxCapturedSamples
+                self.capturedSampleWriteIndex = 0
                 return
             }
 
-            let overflow = self.capturedSamples.count + samples.count - self.maxCapturedSamples
-            if overflow > 0 {
-                self.capturedSamples.removeFirst(overflow)
+            for sample in samples {
+                self.capturedSamples[self.capturedSampleWriteIndex] = sample
+                self.capturedSampleWriteIndex += 1
+                if self.capturedSampleWriteIndex >= Self.maxCapturedSamples {
+                    self.capturedSampleWriteIndex = 0
+                }
+                if self.capturedSampleCount < Self.maxCapturedSamples {
+                    self.capturedSampleCount += 1
+                }
             }
-            self.capturedSamples.append(contentsOf: samples)
         }
     }
 

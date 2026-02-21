@@ -70,6 +70,12 @@ struct MenuBarView: View {
         .frame(width: 280)
         .onAppear {
             modelManager.refreshModels()
+
+            if !modelManager.downloadedModels.contains(where: { $0.id == selectedModel }),
+               let fallbackModel = modelManager.downloadedModels.first?.id {
+                selectedModel = fallbackModel
+                _ = modelManager.selectModel(fallbackModel, previousModelId: nil)
+            }
         }
         .onChange(of: selectedModel) { oldValue, newValue in
             _ = modelManager.selectModel(newValue, previousModelId: oldValue)

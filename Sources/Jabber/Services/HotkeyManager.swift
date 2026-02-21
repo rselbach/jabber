@@ -25,8 +25,15 @@ final class HotkeyManager {
     func register(keyCode: UInt32, modifiers: UInt32) {
         unregister()
 
+        guard let signature = OSType(fourCharCode: "JBBR") else {
+            let status: OSStatus = paramErr
+            logger.error("Failed to create hotkey signature with status: \(status)")
+            onRegistrationFailure?(status)
+            return
+        }
+
         let hotKeyID = EventHotKeyID(
-            signature: OSType(fourCharCode: "JBBR")!,
+            signature: signature,
             id: 1
         )
 

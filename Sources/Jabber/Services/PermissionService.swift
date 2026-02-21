@@ -9,8 +9,11 @@ final class PermissionService {
 
     private let logger = Logger(subsystem: "com.rselbach.jabber", category: "PermissionService")
     private let microphonePermissionStatusCache: TimeInterval = 2.0
+    private let accessibilityPermissionStatusCache: TimeInterval = 2.0
     private var lastMicrophoneStatusCheck: Date = .distantPast
     private var lastMicrophonePermissionResult: Bool = false
+    private var lastAccessibilityStatusCheck: Date = .distantPast
+    private var lastAccessibilityPermissionResult: Bool = false
 
     enum PermissionSection: String {
         case microphone = "Microphone"
@@ -55,11 +58,23 @@ final class PermissionService {
 
         let options = [kAXTrustedCheckOptionPrompt.takeUnretainedValue(): true] as CFDictionary
         _ = AXIsProcessTrustedWithOptions(options)
-        return AXIsProcessTrusted()
+        let updated = AXIsProcessTrusted()
+
+        lastAccessibilityStatusCheck = Date()
+        lastAccessibilityPermissionResult = updated
+        return updated
     }
 
     func hasAccessibilityPermission() -> Bool {
-        AXIsProcessTrusted()
+        let now = Date()
+        if now.timeIntervalSince(lastAccessibilityStatusCheck) < accessibilityPermissionStatusCache {
+            return lastAccessibilityPermissionResult
+        }
+
+        let isTrusted = AXIsProcessTrusted()
+        lastAccessibilityStatusCheck = now
+        lastAccessibilityPermissionResult = isTrusted
+        return isTrusted
     }
 
     func openPrivacySettings(for section: PermissionSection) {

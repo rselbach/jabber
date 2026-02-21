@@ -36,6 +36,8 @@ final class ModelManager {
     }
 
     private(set) var models: [Model] = []
+    private var lastDownloadProgressReport: [String: CFAbsoluteTime] = [:]
+    private let downloadProgressReportInterval: TimeInterval = 0.1
 
     private func updateModel(_ modelId: String, update: (inout Model) -> Void) {
         guard let index = models.firstIndex(where: { $0.id == modelId }) else { return }
@@ -139,6 +141,7 @@ final class ModelManager {
         )
 
         defer {
+            lastDownloadProgressReport[modelId] = nil
             // Always clear downloading state, even on error
             updateModel(modelId) { model in
                 model.isDownloading = false
@@ -152,15 +155,23 @@ final class ModelManager {
                 progressCallback: { [weak self] progress in
                     Task { @MainActor in
                         guard let self else { return }
+                        let now = CFAbsoluteTimeGetCurrent()
+                        let progressValue = progress.fractionCompleted
+
+                        guard self.shouldPublishDownloadProgress(
+                            modelId: modelId,
+                            progress: progressValue,
+                            now: now
+                        ) else { return }
+
                         // Look up index each time to avoid stale references
-                        let pct = progress.fractionCompleted
                         self.updateModel(modelId) { model in
-                            model.downloadProgress = pct
+                            model.downloadProgress = progressValue
                         }
                         self.postDownloadState(
                             modelId: modelId,
                             modelName: modelName,
-                            progress: pct,
+                            progress: progressValue,
                             phase: .progress
                         )
                     }
@@ -290,6 +301,23 @@ final class ModelManager {
                 isCancelled: isCancelled
             )
         )
+    }
+
+    private func shouldPublishDownloadProgress(
+        modelId: String,
+        progress: Double,
+        now: CFAbsoluteTime
+    ) -> Bool {
+        guard progress < 1.0 else {
+            lastDownloadProgressReport[modelId] = 0
+            return true
+        }
+
+        let lastReport = lastDownloadProgressReport[modelId] ?? 0
+        guard now - lastReport >= downloadProgressReportInterval else { return false }
+
+        lastDownloadProgressReport[modelId] = now
+        return true
     }
 
     private func downloadStatus(

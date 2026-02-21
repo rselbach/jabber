@@ -124,24 +124,37 @@ final class AudioCaptureService {
         let samples = Array(UnsafeBufferPointer(start: channelData, count: frames))
         queue.async { [weak self] in
             guard let self else { return }
-            if samples.count >= Self.maxCapturedSamples {
-                self.capturedSamples = Array(samples.suffix(Self.maxCapturedSamples))
-                self.capturedSampleCount = Self.maxCapturedSamples
-                self.capturedSampleWriteIndex = 0
-                return
-            }
-
-            for sample in samples {
-                self.capturedSamples[self.capturedSampleWriteIndex] = sample
-                self.capturedSampleWriteIndex += 1
-                if self.capturedSampleWriteIndex >= Self.maxCapturedSamples {
-                    self.capturedSampleWriteIndex = 0
-                }
-                if self.capturedSampleCount < Self.maxCapturedSamples {
-                    self.capturedSampleCount += 1
-                }
-            }
+            self.appendSamples(samples)
         }
+    }
+
+    private func appendSamples(_ samples: [Float]) {
+        guard !samples.isEmpty else { return }
+
+        if samples.count >= Self.maxCapturedSamples {
+            capturedSamples = Array(samples.suffix(Self.maxCapturedSamples))
+            capturedSampleCount = Self.maxCapturedSamples
+            capturedSampleWriteIndex = 0
+            return
+        }
+
+        let count = samples.count
+        let start = capturedSampleWriteIndex
+        let end = min(start + count, Self.maxCapturedSamples)
+
+        if end <= Self.maxCapturedSamples {
+            capturedSamples[start..<end] = samples
+        } else {
+            let firstPartCount = Self.maxCapturedSamples - start
+            let firstPart = samples.prefix(firstPartCount)
+            let secondPart = samples.dropFirst(firstPartCount)
+
+            capturedSamples[start..<Self.maxCapturedSamples] = Array(firstPart)
+            capturedSamples[0..<secondPart.count] = Array(secondPart)
+        }
+
+        capturedSampleWriteIndex = (start + count) % Self.maxCapturedSamples
+        capturedSampleCount = min(Self.maxCapturedSamples, capturedSampleCount + count)
     }
 
     private func calculateRms(from buffer: AVAudioPCMBuffer) -> Float {

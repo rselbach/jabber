@@ -125,39 +125,49 @@ final class AudioCaptureService {
         let frames = Int(convertedBuffer.frameLength)
         guard frames > 0 else { return }
 
-        let samples = Array(UnsafeBufferPointer(start: channelData, count: frames))
-        queue.async { [weak self] in
-            guard let self else { return }
+        let samples = UnsafeBufferPointer(start: channelData, count: frames)
+        queue.sync {
+            guard isCapturing else { return }
             self.appendSamples(samples)
         }
     }
 
-    private func appendSamples(_ samples: [Float]) {
-        guard !samples.isEmpty else { return }
+    private func appendSamples(_ samples: UnsafeBufferPointer<Float>) {
+        let count = samples.count
+        guard count > 0 else { return }
 
-        if samples.count >= Self.maxCapturedSamples {
-            capturedSamples = Array(samples.suffix(Self.maxCapturedSamples))
+        if count >= Self.maxCapturedSamples {
+            let sourceStart = count - Self.maxCapturedSamples
+            for sampleIndex in 0..<Self.maxCapturedSamples {
+                capturedSamples[sampleIndex] = samples[sourceStart + sampleIndex]
+            }
             capturedSampleCount = Self.maxCapturedSamples
             capturedSampleWriteIndex = 0
             return
         }
 
-        let count = samples.count
         let start = capturedSampleWriteIndex
-        let end = min(start + count, Self.maxCapturedSamples)
+        let tailRoom = Self.maxCapturedSamples - start
 
-        if end <= Self.maxCapturedSamples {
-            capturedSamples.replaceSubrange(start..<end, with: samples)
+        if count <= tailRoom {
+            for sampleIndex in 0..<count {
+                capturedSamples[start + sampleIndex] = samples[sampleIndex]
+            }
+            capturedSampleWriteIndex = start + count
         } else {
-            let firstPartCount = Self.maxCapturedSamples - start
-            let firstPart = samples.prefix(firstPartCount)
-            let secondPart = samples.dropFirst(firstPartCount)
+            let firstPartCount = tailRoom
+            for sampleIndex in 0..<firstPartCount {
+                capturedSamples[start + sampleIndex] = samples[sampleIndex]
+            }
 
-            capturedSamples.replaceSubrange(start..<Self.maxCapturedSamples, with: firstPart)
-            capturedSamples.replaceSubrange(0..<secondPart.count, with: secondPart)
+            let secondPartCount = count - firstPartCount
+            for sampleIndex in 0..<secondPartCount {
+                capturedSamples[sampleIndex] = samples[firstPartCount + sampleIndex]
+            }
+
+            capturedSampleWriteIndex = secondPartCount
         }
 
-        capturedSampleWriteIndex = (start + count) % Self.maxCapturedSamples
         capturedSampleCount = min(Self.maxCapturedSamples, capturedSampleCount + count)
     }
 

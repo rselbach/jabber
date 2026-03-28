@@ -94,6 +94,15 @@ final class ModelManager {
 
     func ensureModelDownloaded(_ modelId: String) async throws -> URL {
         if let existing = Constants.ModelPaths.localModelFolder(for: modelId) {
+            // Verify integrity of existing model before returning
+            do {
+                _ = try ModelIntegrity.verifyModel(at: existing, modelId: modelId)
+            } catch {
+                // Model exists but failed verification - re-download
+                logger.warning("Existing model '\(modelId)' failed integrity check, re-downloading: \(error.localizedDescription)")
+                try FileManager.default.removeItem(at: existing)
+                return try await downloadModel(modelId)
+            }
             return existing
         }
         return try await downloadModel(modelId)
@@ -197,6 +206,22 @@ final class ModelManager {
             throw error
         }
 
+        // Verify model integrity after download
+        do {
+            _ = try ModelIntegrity.verifyModel(at: modelFolder, modelId: modelId)
+        } catch {
+            // Clean up corrupted/tampered download
+            try? FileManager.default.removeItem(at: modelFolder)
+            postDownloadState(
+                modelId: modelId,
+                modelName: modelName,
+                progress: 0,
+                phase: .failed,
+                errorDescription: error.localizedDescription
+            )
+            throw error
+        }
+
         // Look up index after download completes
         updateModel(modelId) { model in
             model.isDownloaded = true
@@ -230,6 +255,9 @@ final class ModelManager {
         }
 
         try FileManager.default.removeItem(at: modelPath)
+
+        // Clear stored hash for deleted model
+        ModelIntegrity.clearStoredHash(modelId: modelId)
 
         refreshModels()
 
@@ -343,6 +371,7 @@ final class ModelManager {
 enum ModelError: Error, LocalizedError {
     case cannotDeleteActiveModel
     case downloadTimeout(modelId: String)
+    case integrityCheckFailed(modelId: String, expected: String, actual: String)
     case modelNotFound(modelId: String)
 
     var errorDescription: String? {
@@ -351,6 +380,8 @@ enum ModelError: Error, LocalizedError {
             return "Cannot delete the currently active model. Please select a different model first."
         case .downloadTimeout(let modelId):
             return "Download timed out for model '\(modelId)'."
+        case .integrityCheckFailed(let modelId, _, _):
+            return "Model '\(modelId)' failed integrity verification. The downloaded files may be corrupted or tampered with. Please try downloading again."
         case .modelNotFound(let modelId):
             return "Model '\(modelId)' not found or already deleted."
         }

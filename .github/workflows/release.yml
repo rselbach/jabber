@@ -171,8 +171,24 @@ jobs:
           mv .build/dmg/Jabber.dmg ".build/dmg/Jabber-${{ steps.version.outputs.version }}.dmg"
 
       - name: Download Sparkle tools
+        env:
+          # SHA-256 of Sparkle-2.8.1.tar.xz
+          # Get this from: curl -sL <url> | sha256sum
+          # Update when upgrading Sparkle version
+          SPARKLE_SHA256: "a875e5902d1eb732155dab7a99268e47d8253e3df39fc7c3de8c212073a9d7fe"
         run: |
           curl -L -o /tmp/Sparkle.tar.xz "https://github.com/sparkle-project/Sparkle/releases/download/2.8.1/Sparkle-2.8.1.tar.xz"
+          
+          # Verify checksum
+          COMPUTED_SHA256=$(sha256sum /tmp/Sparkle.tar.xz | cut -d' ' -f1)
+          if [[ "${COMPUTED_SHA256}" != "${SPARKLE_SHA256}" ]]; then
+            echo "Error: Sparkle download checksum mismatch!"
+            echo "Expected: ${SPARKLE_SHA256}"
+            echo "Got:      ${COMPUTED_SHA256}"
+            exit 1
+          fi
+          echo "Sparkle checksum verified: ${COMPUTED_SHA256}"
+          
           mkdir -p /tmp/sparkle
           tar -xf /tmp/Sparkle.tar.xz -C /tmp/sparkle
 

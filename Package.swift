@@ -1,24 +1,25 @@
-// swift-tools-version: 5.9
+// swift-tools-version: 5.10
 
 import PackageDescription
 
 let package = Package(
     name: "Jabber",
     platforms: [
-        .macOS(.v14)
+        .macOS("26.0")
     ],
     products: [
         .executable(name: "Jabber", targets: ["Jabber"])
     ],
     dependencies: [
-        .package(url: "https://github.com/argmaxinc/WhisperKit.git", from: "0.15.0"),
+        .package(url: "https://github.com/soniqo/speech-swift", revision: "373f0101c9e9fe9b540362c0b45a2c618ce84a6c"),
         .package(url: "https://github.com/sparkle-project/Sparkle.git", from: "2.8.0")
     ],
     targets: [
         .executableTarget(
             name: "Jabber",
             dependencies: [
-                "WhisperKit",
+                .product(name: "AudioCommon", package: "speech-swift"),
+                .product(name: "Qwen3ASR", package: "speech-swift"),
                 .product(name: "Sparkle", package: "Sparkle")
             ],
             path: "Sources/Jabber",

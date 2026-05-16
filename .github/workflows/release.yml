@@ -17,14 +17,14 @@ permissions:
 
 jobs:
   build:
-    runs-on: macos-14
+    runs-on: macos-latest
     
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Select Xcode 16
-        run: sudo xcode-select -s /Applications/Xcode_16.2.app/Contents/Developer
+      - name: Show Xcode version
+        run: xcodebuild -version
 
       - name: Validate required secrets
         run: |
@@ -56,7 +56,9 @@ jobs:
           /usr/libexec/PlistBuddy -c "Set :CFBundleVersion ${{ github.run_number }}" Info.plist
 
       - name: Build release
-        run: swift build -c release
+        run: |
+          swift build -c release
+          ./scripts/build_mlx_metallib.sh release
 
       - name: Import signing certificate
         env:
@@ -90,6 +92,7 @@ jobs:
           mkdir -p "${CONTENTS}/MacOS" "${CONTENTS}/Resources" "${CONTENTS}/Frameworks"
           
           cp .build/release/Jabber "${CONTENTS}/MacOS/Jabber"
+          cp .build/release/mlx.metallib "${CONTENTS}/MacOS/mlx.metallib"
           cp Info.plist "${CONTENTS}/Info.plist"
           
           # Copy Sparkle.framework into the bundle
@@ -106,7 +109,7 @@ jobs:
           xcrun actool Sources/Jabber/Assets.xcassets \
             --compile "${CONTENTS}/Resources" \
             --platform macosx \
-            --minimum-deployment-target 14.0 \
+            --minimum-deployment-target 26.0 \
             --app-icon AppIcon \
             --output-partial-info-plist .build/release-bundle/AssetInfo.plist
 
@@ -228,7 +231,7 @@ jobs:
           printf '%s\n' "      <pubDate>${DATE}</pubDate>" >> _site/appcast.xml
           printf '%s\n' "      <sparkle:version>${{ github.run_number }}</sparkle:version>" >> _site/appcast.xml
           printf '%s\n' "      <sparkle:shortVersionString>${VERSION}</sparkle:shortVersionString>" >> _site/appcast.xml
-          printf '%s\n' "      <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>" >> _site/appcast.xml
+          printf '%s\n' "      <sparkle:minimumSystemVersion>26.0</sparkle:minimumSystemVersion>" >> _site/appcast.xml
           printf '%s\n' "      <enclosure url=\"https://github.com/rselbach/jabber/releases/download/v${VERSION}/Jabber-${VERSION}.dmg\" ${SPARKLE_SIGNATURE} type=\"application/octet-stream\"/>" >> _site/appcast.xml
           printf '%s\n' '    </item>' >> _site/appcast.xml
           printf '%s\n' '  </channel>' >> _site/appcast.xml

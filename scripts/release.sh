@@ -139,6 +139,7 @@ parse_args() {
 build_app() {
   cd "${PROJECT_ROOT}"
   swift build -c release
+  ./scripts/build_mlx_metallib.sh release
 }
 
 create_bundle() {
@@ -153,6 +154,9 @@ create_bundle() {
   
   # Copy executable
   cp "${PROJECT_ROOT}/.build/release/Jabber" "${macos}/${APP_NAME}"
+
+  # Copy MLX Metal shader library next to the executable for Qwen3-ASR.
+  cp "${PROJECT_ROOT}/.build/release/mlx.metallib" "${macos}/mlx.metallib"
   
   # Copy Info.plist
   cp "${PROJECT_ROOT}/Info.plist" "${contents}/Info.plist"
@@ -195,7 +199,7 @@ compile_assets() {
     if ! xcrun actool "${assets_path}" \
       --compile "${resources_dir}" \
       --platform macosx \
-      --minimum-deployment-target 14.0 \
+      --minimum-deployment-target 26.0 \
       --app-icon AppIcon \
       --output-partial-info-plist "${BUILD_DIR}/AssetInfo.plist"; then
       echo "Error: failed to compile assets at ${assets_path}" >&2

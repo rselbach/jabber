@@ -10,7 +10,7 @@ enum NonDictationUIState: Equatable {
 enum NonDictationUIResolver {
     static func resolve(
         forceLoading: Bool,
-        modelState: WhisperService.State,
+        modelState: TranscriptionService.State,
         isModelLoadInProgress: Bool,
         downloadState: ModelDownloadState?
     ) -> NonDictationUIState {

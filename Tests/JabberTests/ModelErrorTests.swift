@@ -12,15 +12,6 @@ final class ModelErrorTests: XCTestCase {
         XCTAssertEqual(error.errorDescription, "Download timed out for model 'base'.")
     }
     
-    func testIntegrityCheckFailedErrorDescription() {
-        let error = ModelError.integrityCheckFailed(
-            modelId: "base",
-            expected: "abc123",
-            actual: "def456"
-        )
-        XCTAssertEqual(error.errorDescription, "Model 'base' failed integrity verification. The downloaded files may be corrupted or tampered with. Please try downloading again.")
-    }
-    
     func testModelNotFoundErrorDescription() {
         let error = ModelError.modelNotFound(modelId: "nonexistent")
         XCTAssertEqual(error.errorDescription, "Model 'nonexistent' not found or already deleted.")

@@ -10,7 +10,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private let hotkeyManager = HotkeyManager()
     private let audioCapture = AudioCaptureService()
-    private let whisperService = WhisperService()
+    private let transcriptionService = TranscriptionService()
     private let outputManager = OutputManager()
     private let permissionService = PermissionService.shared
     private let overlayWindow = OverlayWindow()
@@ -39,7 +39,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var transcriptionTask: Task<Void, Never>?
     private var lastModelUnavailableNotice = CFAbsoluteTime(0)
 
-    private var modelState: WhisperService.State = .notReady
+    private var modelState: TranscriptionService.State = .notReady
 
     private var downloadStatesByModelId: [String: ModelDownloadState] = [:]
     private var activeDownloadModelId: String?
@@ -87,7 +87,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         cancelDictation()
         modelLoadTask = Task { [weak self] in
             guard let self else { return }
-            await whisperService.unloadModel()
+            await transcriptionService.unloadModel()
             if Task.isCancelled { return }
             await loadModel()
         }
@@ -104,14 +104,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             }
         }
 
-        whisperService.setStateCallback { [weak self] state in
+        transcriptionService.setStateCallback { [weak self] state in
             Task { @MainActor in
                 self?.handleModelState(state)
             }
         }
 
         do {
-            try await whisperService.ensureModelLoaded()
+            try await transcriptionService.ensureModelLoaded()
         } catch is CancellationError {
             return
         } catch {
@@ -140,7 +140,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
-    private func handleModelState(_ state: WhisperService.State) {
+    private func handleModelState(_ state: TranscriptionService.State) {
         modelState = state
 
         switch state {
@@ -227,7 +227,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func handleHotkeyDown() async {
-        guard whisperService.isReady else {
+        guard transcriptionService.isReady else {
             let now = CFAbsoluteTimeGetCurrent()
             if now - lastModelUnavailableNotice > 1.5 {
                 lastModelUnavailableNotice = now
@@ -278,7 +278,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func startDictation() {
-        guard whisperService.isReady else {
+        guard transcriptionService.isReady else {
             // Model not ready yet, ignore
             return
         }
@@ -348,14 +348,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
             // Sync vocabulary prompt and language from settings
             let vocab = AppSettings.string(AppSettingKey.vocabularyPrompt, default: "")
-            await whisperService.setVocabularyPrompt(vocab)
+            await transcriptionService.setVocabularyPrompt(vocab)
 
             let language = AppSettings.string(AppSettingKey.selectedLanguage, default: Constants.defaultLanguage)
-            await whisperService.setLanguage(language)
+            await transcriptionService.setLanguage(language)
 
             try Task.checkCancellation()
 
-            let text = try await whisperService.transcribe(samples: samples)
+            let text = try await transcriptionService.transcribe(samples: samples)
 
             try Task.checkCancellation()
 
@@ -420,7 +420,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private var selectedModelId: String? {
-        AppSettings.string(AppSettingKey.selectedModel, default: AppMode.baseModelId)
+        ModelManager.shared.selectedModelId()
     }
 
     private func shouldForceLoading(for state: ModelDownloadState) -> Bool {

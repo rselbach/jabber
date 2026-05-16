@@ -3,20 +3,58 @@ import os
 
 enum AppMode {
     static let baseModelId = "base"
+    static let mediumModelId = "medium"
+    static let largeModelId = "large"
+
+    struct Qwen3ASRVariant {
+        let modelId: String
+        let huggingFaceModelId: String
+        let name: String
+        let description: String
+        let sizeHint: String
+    }
+
+    static let qwen3ASRVariants: [Qwen3ASRVariant] = [
+        .init(
+            modelId: baseModelId,
+            huggingFaceModelId: "aufklarer/Qwen3-ASR-0.6B-MLX-4bit",
+            name: "Base",
+            description: "Fast, accurate Qwen3-ASR 0.6B 4-bit",
+            sizeHint: "~700MB"
+        ),
+        .init(
+            modelId: mediumModelId,
+            huggingFaceModelId: "mlx-community/Qwen3-ASR-1.7B-4bit",
+            name: "Medium",
+            description: "Larger Qwen3-ASR 1.7B 4-bit",
+            sizeHint: "~1.6GB"
+        ),
+        .init(
+            modelId: largeModelId,
+            huggingFaceModelId: "aufklarer/Qwen3-ASR-1.7B-MLX-8bit",
+            name: "Large",
+            description: "Highest precision Qwen3-ASR 1.7B 8-bit",
+            sizeHint: "~2.5GB"
+        )
+    ]
+
+    static func qwen3ASRVariant(for modelId: String) -> Qwen3ASRVariant? {
+        qwen3ASRVariants.first { $0.modelId == modelId }
+    }
 }
 
 /// Application-wide constants and notification names
 enum Constants {
     /// Notification names used throughout the application
     enum Notifications {
-        /// Posted when the selected Whisper model changes
+        /// Posted when the selected transcription model changes
         static let modelDidChange = Notification.Name("com.rselbach.jabber.modelDidChange")
 
         /// Posted when a model download starts/progresses/finishes
         static let modelDownloadStateDidChange = Notification.Name("com.rselbach.jabber.modelDownloadStateDidChange")
     }
 
-    /// Supported Whisper transcription languages (from WhisperKit)
+    /// Supported transcription languages
     static let languages: [String: String] = [
         "afrikaans": "af", "albanian": "sq", "amharic": "am", "arabic": "ar",
         "armenian": "hy", "assamese": "as", "azerbaijani": "az", "bashkir": "ba",
@@ -48,7 +86,7 @@ enum Constants {
         "vietnamese": "vi", "welsh": "cy", "yiddish": "yi", "yoruba": "yo"
     ]
 
-    // some language codes have multiple names in WhisperKit; pick one for UI
+    // some language codes have multiple names; pick one for UI
     private static let preferredLanguageNameByCode: [String: String] = [
         "ca": "catalan",
         "es": "spanish",
@@ -102,7 +140,7 @@ enum Constants {
             return "auto"
         }
 
-        // Check if the system language is supported by Whisper
+        // Check if the system language is supported by the transcription model
         if validLanguageCodes.contains(languageCode) {
             return languageCode
         }
@@ -110,90 +148,4 @@ enum Constants {
         return "auto"
     }()
 
-    /// Helper for locating Whisper model files
-    enum ModelPaths {
-        private static let repoName = "argmaxinc/whisperkit-coreml"
-        private static let logger = Logger(subsystem: "com.rselbach.jabber", category: "ModelPaths")
-        private static let requiredConfigFileNames = ["config.json"]
-
-        /// Returns the base directory where models are stored
-        static func modelsBaseURL() -> URL? {
-            guard let docs = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first else {
-                return nil
-            }
-            return docs
-                .appendingPathComponent("huggingface")
-                .appendingPathComponent("models")
-                .appendingPathComponent(repoName)
-        }
-
-        /// Finds the local folder for a specific model ID
-        /// - Parameter modelId: The model identifier (e.g., "base", "tiny", "large-v3")
-        /// - Returns: URL to the model folder if found, nil otherwise
-        static func localModelFolder(for modelId: String) -> URL? {
-            guard let base = modelsBaseURL() else { return nil }
-            guard !modelId.isEmpty else { return nil }
-
-            let fm = FileManager.default
-            var isDirectory: ObjCBool = false
-            guard fm.fileExists(atPath: base.path, isDirectory: &isDirectory),
-                  isDirectory.boolValue else {
-                return nil
-            }
-
-            let contents: [String]
-            do {
-                contents = try fm.contentsOfDirectory(atPath: base.path)
-            } catch {
-                logger.warning("Failed to read model directory at \(base.path): \(error.localizedDescription)")
-                return nil
-            }
-
-            for folder in contents {
-                guard isModelFolderCandidate(folder, modelId: modelId) else { continue }
-                let folderURL = base.appendingPathComponent(folder)
-                guard isModelDirectory(folderURL) else { continue }
-
-                if !hasModelManifest(at: folderURL) {
-                    continue
-                }
-
-                return folderURL
-            }
-
-            return nil
-        }
-
-        private static func isModelFolderCandidate(_ folderName: String, modelId: String) -> Bool {
-            if folderName == modelId {
-                return true
-            }
-
-            guard folderName.count > modelId.count + 1 else {
-                return false
-            }
-            return folderName.hasSuffix("-\(modelId)")
-        }
-
-        private static func isModelDirectory(_ url: URL) -> Bool {
-            var isDirectory: ObjCBool = false
-            return FileManager.default.fileExists(atPath: url.path, isDirectory: &isDirectory) && isDirectory.boolValue
-        }
-
-        private static func hasModelManifest(at folderURL: URL) -> Bool {
-            let fm = FileManager.default
-            guard requiredConfigFileNames.allSatisfy({ fm.fileExists(atPath: folderURL.appendingPathComponent($0).path) }) else {
-                return false
-            }
-
-            let configPath = folderURL.appendingPathComponent("config.json").path
-            guard let data = fm.contents(atPath: configPath) else {
-                return false
-            }
-            guard (try? JSONSerialization.jsonObject(with: data, options: .fragmentsAllowed)) != nil else {
-                return false
-            }
-            return true
-        }
-    }
 }

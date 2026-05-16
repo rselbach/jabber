@@ -69,6 +69,7 @@ struct MenuBarView: View {
         .padding()
         .frame(width: 280)
         .onAppear {
+            _ = modelManager.migrateSelectedModelIfNeeded()
             modelManager.refreshModels()
 
             if !modelManager.downloadedModels.contains(where: { $0.id == selectedModel }),

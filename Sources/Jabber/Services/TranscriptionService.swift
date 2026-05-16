@@ -1,14 +1,14 @@
 import Foundation
-import WhisperKit
+import Qwen3ASR
 import os
 
-/// Thread-safe observer for WhisperService state changes.
+/// Thread-safe observer for transcription service state changes.
 /// Uses @unchecked Sendable because NSLock-protected mutable state cannot be verified
 /// by the compiler, but manual synchronization with NSLock ensures thread safety.
-final class WhisperStateObserver: @unchecked Sendable {
+final class TranscriptionStateObserver: @unchecked Sendable {
     private let lock = NSLock()
     private var _isReady = false
-    private var _stateCallback: (@Sendable (WhisperService.State) -> Void)?
+    private var _stateCallback: (@Sendable (TranscriptionService.State) -> Void)?
 
     var isReady: Bool {
         lock.lock()
@@ -22,13 +22,13 @@ final class WhisperStateObserver: @unchecked Sendable {
         lock.unlock()
     }
 
-    func setCallback(_ callback: @escaping @Sendable (WhisperService.State) -> Void) {
+    func setCallback(_ callback: @escaping @Sendable (TranscriptionService.State) -> Void) {
         lock.lock()
         _stateCallback = callback
         lock.unlock()
     }
 
-    func notifyState(_ state: WhisperService.State) {
+    func notifyState(_ state: TranscriptionService.State) {
         lock.lock()
         let callback = _stateCallback
         lock.unlock()
@@ -36,8 +36,8 @@ final class WhisperStateObserver: @unchecked Sendable {
     }
 }
 
-actor WhisperService {
-    private var whisperKit: WhisperKit?
+actor TranscriptionService {
+    private var qwen3ASR: Qwen3ASRModel?
     private var isLoading = false
     private var loadedModelId: String?
 
@@ -47,8 +47,8 @@ actor WhisperService {
     /// of clobbering the new state.
     private var loadGeneration: UInt64 = 0
 
-    nonisolated let stateObserver = WhisperStateObserver()
-    private let logger = Logger(subsystem: "com.rselbach.jabber", category: "WhisperService")
+    nonisolated let stateObserver = TranscriptionStateObserver()
+    private let logger = Logger(subsystem: "com.rselbach.jabber", category: "TranscriptionService")
     private static let loadTimeout: Duration = .seconds(600)
 
     enum State: Sendable {
@@ -112,19 +112,10 @@ actor WhisperService {
             .joined(separator: ", ")
     }
 
-    private func promptTokens(using kit: WhisperKit) -> [Int] {
-        guard !vocabularyPrompt.isEmpty, let tokenizer = kit.tokenizer else { return [] }
-
-        let formattedPrompt = formattedVocabularyPrompt()
-        guard !formattedPrompt.trimmingCharacters(in: .whitespaces).isEmpty else { return [] }
-
-        return tokenizer.encode(text: formattedPrompt)
-            .filter { $0 < tokenizer.specialTokens.specialTokenBegin }
-    }
-
     func ensureModelLoaded() async throws {
-        let desiredModelId = AppSettings.string(AppSettingKey.selectedModel, default: AppMode.baseModelId)
-        if whisperKit != nil, loadedModelId == desiredModelId {
+        let desiredModelId = await ModelManager.shared.selectedModelId()
+        if loadedModelId == desiredModelId,
+           qwen3ASR != nil {
             return
         }
         try await loadModel(desiredModelId: desiredModelId)
@@ -132,7 +123,7 @@ actor WhisperService {
 
     func unloadModel() async {
         loadGeneration &+= 1
-        whisperKit = nil
+        qwen3ASR = nil
         loadedModelId = nil
         setReady(false)
         notifyState(.notReady)
@@ -143,31 +134,17 @@ actor WhisperService {
     }
 
     func transcribe(samples: [Float]) async throws -> String {
-        let kit = try await getWhisperKit()
+        try await ensureModelLoaded()
 
-        var options = DecodingOptions()
-
-        // Configure language based on user preference
-        if selectedLanguage == "auto" {
-            options.detectLanguage = true
-            options.language = nil
-        } else {
-            options.detectLanguage = false
-            options.language = selectedLanguage
+        guard let qwen3ASR else {
+            throw TranscriptionError.loadFailed
         }
 
-        let tokens = promptTokens(using: kit)
-        if !tokens.isEmpty {
-            options.promptTokens = tokens
-        }
-
-        let results = try await kit.transcribe(audioArray: samples, decodeOptions: options)
-
-        return results.map { $0.text }.joined(separator: " ").trimmingCharacters(in: .whitespacesAndNewlines)
+        return transcribeWithQwen3ASR(qwen3ASR, samples: samples)
     }
 
     private func resolveLoadedModel(desiredModelId: String) -> Bool {
-        guard whisperKit != nil else { return false }
+        guard qwen3ASR != nil else { return false }
         guard loadedModelId == desiredModelId else {
             resetLoadedModel()
             return false
@@ -179,10 +156,22 @@ actor WhisperService {
     }
 
     private func resetLoadedModel() {
-        whisperKit = nil
+        qwen3ASR = nil
         loadedModelId = nil
         setReady(false)
         notifyState(.notReady)
+    }
+
+    private func transcribeWithQwen3ASR(_ model: Qwen3ASRModel, samples: [Float]) -> String {
+        let context = formattedVocabularyPrompt().trimmingCharacters(in: .whitespacesAndNewlines)
+        let options = Qwen3DecodingOptions(
+            language: selectedLanguage == "auto" ? nil : selectedLanguage,
+            context: context.isEmpty ? nil : context,
+            repetitionPenalty: 1.15
+        )
+
+        return model.transcribe(audio: samples, sampleRate: 16_000, options: options)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
     /// Loads the specified model, coordinating with concurrent callers.
@@ -211,16 +200,15 @@ actor WhisperService {
             guard loadGeneration == currentLoadGeneration else { throw CancellationError() }
 
             var modelIdToLoad = desiredModelId
-            let modelFolder: URL
             do {
-                modelFolder = try await ModelManager.shared.ensureModelDownloaded(modelIdToLoad)
+                _ = try await ModelManager.shared.ensureModelDownloaded(modelIdToLoad)
             } catch let error as ModelError {
                 switch error {
                 case .modelNotFound:
                     logger.warning("Unknown model id '\(modelIdToLoad)', falling back to base")
                     modelIdToLoad = AppMode.baseModelId
                     AppSettings.setString(modelIdToLoad, forKey: AppSettingKey.selectedModel)
-                    modelFolder = try await ModelManager.shared.ensureModelDownloaded(modelIdToLoad)
+                    _ = try await ModelManager.shared.ensureModelDownloaded(modelIdToLoad)
                 default:
                     throw error
                 }
@@ -231,25 +219,21 @@ actor WhisperService {
 
             notifyState(.loading)
 
-            let kit = try await WhisperKit(modelFolder: modelFolder.path)
+            guard let huggingFaceModelId = ModelManager.qwen3ASRHuggingFaceModelId(for: modelIdToLoad) else {
+                throw ModelError.modelNotFound(modelId: modelIdToLoad)
+            }
+
+            let model = try await Qwen3ASRModel.fromPretrained(modelId: huggingFaceModelId)
 
             try Task.checkCancellation()
             guard loadGeneration == currentLoadGeneration else { throw CancellationError() }
 
-            whisperKit = kit
+            qwen3ASR = model
             loadedModelId = modelIdToLoad
             setReady(true)
             notifyState(.ready)
             return
         }
-    }
-
-    private func getWhisperKit() async throws -> WhisperKit {
-        try await ensureModelLoaded()
-        guard let kit = whisperKit else {
-            throw WhisperError.loadFailed
-        }
-        return kit
     }
 
     private func waitForModelLoad() async throws {
@@ -261,7 +245,7 @@ actor WhisperService {
             let elapsed = ContinuousClock.now - startTime
             if elapsed > Self.loadTimeout {
                 logger.error("Timeout waiting for model to load")
-                throw WhisperError.loadTimeout
+                throw TranscriptionError.loadTimeout
             }
 
             try await Task.sleep(for: backoffDelay)
@@ -272,7 +256,7 @@ actor WhisperService {
     }
 }
 
-enum WhisperError: Error, LocalizedError {
+enum TranscriptionError: Error, LocalizedError {
     case loadFailed
     case loadTimeout
     case transcriptionFailed

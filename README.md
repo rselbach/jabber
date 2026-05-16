@@ -1,6 +1,6 @@
 # Jabber
 
-A macOS menu bar app for local speech-to-text transcription using [WhisperKit](https://github.com/argmaxinc/WhisperKit).
+A macOS menu bar app for local speech-to-text transcription using Qwen3-ASR and MLX.
 
 All audio is processed entirely on-device — nothing leaves your Mac.
 
@@ -13,8 +13,8 @@ All audio is processed entirely on-device — nothing leaves your Mac.
 
 ## Requirements
 
-- macOS 14.0+
-- Apple Silicon recommended (Intel works but slower)
+- macOS 26.0+ (Tahoe)
+- Apple Silicon required
 
 ## Installation
 
@@ -24,6 +24,7 @@ Download the latest DMG from [Releases](../../releases), open it, and drag Jabbe
 
 ```bash
 swift build
+./scripts/build_mlx_metallib.sh debug
 ```
 
 For a release build with signing:
@@ -38,6 +39,12 @@ For a release build with signing:
 1. Launch Jabber — it lives in your menu bar
 2. Click the icon or use the global hotkey to start dictation
 3. Speak, and text appears wherever your cursor is
+
+Model options are available in Settings:
+
+- Base: Qwen3-ASR 0.6B 4-bit (~700MB)
+- Medium: Qwen3-ASR 1.7B 4-bit (~1.6GB)
+- Large: Qwen3-ASR 1.7B 8-bit (~2.5GB)
 
 ## Permissions
 

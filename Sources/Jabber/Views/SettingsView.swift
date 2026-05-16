@@ -40,6 +40,7 @@ struct SettingsView: View {
         }
         .frame(width: 520, height: 560)
         .onAppear {
+            _ = modelManager.migrateSelectedModelIfNeeded()
             modelManager.refreshModels()
         }
         .alert("Error", isPresented: $showError, presenting: errorMessage) { _ in

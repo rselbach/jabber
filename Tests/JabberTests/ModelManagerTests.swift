@@ -8,6 +8,12 @@ final class ModelManagerTests: XCTestCase {
     override func setUp() {
         super.setUp()
         modelManager = ModelManager.shared
+        AppSettings.setString(AppMode.baseModelId, forKey: AppSettingKey.selectedModel)
+    }
+
+    override func tearDown() {
+        AppSettings.setString(AppMode.baseModelId, forKey: AppSettingKey.selectedModel)
+        super.tearDown()
     }
     
     func testModelDefinitionsExist() {
@@ -15,11 +21,60 @@ final class ModelManagerTests: XCTestCase {
         
         // Verify known models exist
         let modelIds = modelManager.models.map { $0.id }
-        XCTAssertTrue(modelIds.contains("tiny"), "Should have tiny model")
         XCTAssertTrue(modelIds.contains("base"), "Should have base model")
-        XCTAssertTrue(modelIds.contains("small"), "Should have small model")
         XCTAssertTrue(modelIds.contains("medium"), "Should have medium model")
-        XCTAssertTrue(modelIds.contains("large-v3"), "Should have large-v3 model")
+        XCTAssertTrue(modelIds.contains("large"), "Should have large model")
+        XCTAssertEqual(modelIds.count, 3, "Should only expose the three Qwen3-ASR models")
+    }
+
+    func testQwen3ASRVariantsResolveHuggingFaceIds() {
+        XCTAssertEqual(
+            ModelManager.qwen3ASRHuggingFaceModelId(for: AppMode.baseModelId),
+            "aufklarer/Qwen3-ASR-0.6B-MLX-4bit"
+        )
+        XCTAssertEqual(
+            ModelManager.qwen3ASRHuggingFaceModelId(for: AppMode.mediumModelId),
+            "mlx-community/Qwen3-ASR-1.7B-4bit"
+        )
+        XCTAssertEqual(
+            ModelManager.qwen3ASRHuggingFaceModelId(for: AppMode.largeModelId),
+            "aufklarer/Qwen3-ASR-1.7B-MLX-8bit"
+        )
+        XCTAssertNil(ModelManager.qwen3ASRHuggingFaceModelId(for: "tiny"))
+    }
+
+    func testMigrateLegacyUnavailableModelIds() {
+        AppSettings.setString("small", forKey: AppSettingKey.selectedModel)
+        XCTAssertTrue(modelManager.migrateSelectedModelIfNeeded())
+        XCTAssertEqual(AppSettings.string(AppSettingKey.selectedModel, default: ""), AppMode.baseModelId)
+
+        AppSettings.setString("large-v3", forKey: AppSettingKey.selectedModel)
+        XCTAssertTrue(modelManager.migrateSelectedModelIfNeeded())
+        XCTAssertEqual(AppSettings.string(AppSettingKey.selectedModel, default: ""), AppMode.largeModelId)
+    }
+
+    func testMigrateExperimentalQwenModelIds() {
+        AppSettings.setString("qwen3-asr-0.6b-mlx-4bit", forKey: AppSettingKey.selectedModel)
+        XCTAssertTrue(modelManager.migrateSelectedModelIfNeeded())
+        XCTAssertEqual(AppSettings.string(AppSettingKey.selectedModel, default: ""), AppMode.baseModelId)
+
+        AppSettings.setString("qwen3-asr-1.7b-mlx-4bit", forKey: AppSettingKey.selectedModel)
+        XCTAssertTrue(modelManager.migrateSelectedModelIfNeeded())
+        XCTAssertEqual(AppSettings.string(AppSettingKey.selectedModel, default: ""), AppMode.mediumModelId)
+
+        AppSettings.setString("qwen3-asr-1.7b-mlx-8bit", forKey: AppSettingKey.selectedModel)
+        XCTAssertTrue(modelManager.migrateSelectedModelIfNeeded())
+        XCTAssertEqual(AppSettings.string(AppSettingKey.selectedModel, default: ""), AppMode.largeModelId)
+    }
+
+    func testValidAndUnknownSelectedModelMigration() {
+        AppSettings.setString(AppMode.mediumModelId, forKey: AppSettingKey.selectedModel)
+        XCTAssertFalse(modelManager.migrateSelectedModelIfNeeded())
+        XCTAssertEqual(AppSettings.string(AppSettingKey.selectedModel, default: ""), AppMode.mediumModelId)
+
+        AppSettings.setString("totally-unknown-model", forKey: AppSettingKey.selectedModel)
+        XCTAssertTrue(modelManager.migrateSelectedModelIfNeeded())
+        XCTAssertEqual(AppSettings.string(AppSettingKey.selectedModel, default: ""), AppMode.baseModelId)
     }
     
     func testModelPropertiesAreSet() {
@@ -29,8 +84,8 @@ final class ModelManagerTests: XCTestCase {
         }
         
         XCTAssertEqual(baseModel.name, "Base")
-        XCTAssertEqual(baseModel.description, "Balanced speed/accuracy")
-        XCTAssertEqual(baseModel.sizeHint, "~140MB")
+        XCTAssertEqual(baseModel.description, "Fast, accurate Qwen3-ASR 0.6B 4-bit")
+        XCTAssertEqual(baseModel.sizeHint, "~700MB")
     }
     
     func testSelectModelReturnsFalseForNonExistentModel() {
@@ -104,7 +159,7 @@ final class ModelManagerTests: XCTestCase {
         )
         
         let state2 = ModelDownloadState(
-            modelId: "tiny",
+            modelId: "large",
             progress: 0.5,
             status: "Downloading...",
             phase: .progress,

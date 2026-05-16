@@ -27,12 +27,12 @@ final class TypedSettingsTests: XCTestCase {
     
     func testSettingAndGettingValues() {
         // Set custom values
-        TypedSettings[.selectedModel] = "tiny"
+        TypedSettings[.selectedModel] = "medium"
         TypedSettings[.selectedLanguage] = "en"
         TypedSettings[.vocabularyPrompt] = "medical terminology"
         
         // Verify they're stored
-        XCTAssertEqual(TypedSettings[.selectedModel], "tiny")
+        XCTAssertEqual(TypedSettings[.selectedModel], "medium")
         XCTAssertEqual(TypedSettings[.selectedLanguage], "en")
         XCTAssertEqual(TypedSettings[.vocabularyPrompt], "medical terminology")
     }
@@ -46,15 +46,15 @@ final class TypedSettingsTests: XCTestCase {
     }
     
     func testIsSetReturnsTrueForSetValues() {
-        TypedSettings[.selectedModel] = "small"
+        TypedSettings[.selectedModel] = "large"
         
         XCTAssertTrue(TypedSettings.isSet(.selectedModel), "isSet should return true for explicitly set value")
     }
     
     func testRemoveResetsToDefault() {
         // Set a non-default value
-        TypedSettings[.selectedModel] = "large-v3"
-        XCTAssertEqual(TypedSettings[.selectedModel], "large-v3")
+        TypedSettings[.selectedModel] = AppMode.largeModelId
+        XCTAssertEqual(TypedSettings[.selectedModel], AppMode.largeModelId)
         
         // Remove it
         TypedSettings.remove(.selectedModel)

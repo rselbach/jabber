@@ -7,13 +7,11 @@ final class AudioCaptureService {
     private let targetSampleRate: Double = 16_000
     private let converterQueue = DispatchQueue(label: "com.jabber.audioconverter")
     private var converter: AVAudioConverter?
-    private static let maxCapturedSamples = 160_000
+    private static let initialCapturedSampleCapacity = 16_000 * 60
 
     private let queue = DispatchQueue(label: "com.jabber.audiocapture")
     private var lastLevelUpdate: CFAbsoluteTime = 0
     private var capturedSamples: [Float]
-    private var capturedSampleCount = 0
-    private var capturedSampleWriteIndex = 0
     private var _isCapturing = false
     private let logger = Logger(subsystem: "com.rselbach.jabber", category: "AudioCaptureService")
 
@@ -21,7 +19,8 @@ final class AudioCaptureService {
     var onConversionError: ((Error) -> Void)?
 
     init() {
-        capturedSamples = Array(repeating: 0, count: Self.maxCapturedSamples)
+        capturedSamples = []
+        capturedSamples.reserveCapacity(Self.initialCapturedSampleCapacity)
     }
 
     private var isCapturing: Bool {
@@ -41,9 +40,7 @@ final class AudioCaptureService {
         guard !isCapturing else { return }
 
         queue.sync {
-            capturedSamples = Array(repeating: 0, count: Self.maxCapturedSamples)
-            capturedSampleCount = 0
-            capturedSampleWriteIndex = 0
+            resetCapturedSamples()
         }
 
         let inputNode = engine.inputNode
@@ -67,7 +64,9 @@ final class AudioCaptureService {
             self?.processBuffer(buffer)
         }
 
-        isCapturing = true
+        queue.sync {
+            _isCapturing = true
+        }
         do {
             try engine.start()
         } catch {
@@ -77,8 +76,12 @@ final class AudioCaptureService {
     }
 
     func stopCapture() {
-        guard isCapturing else { return }
-        isCapturing = false
+        let wasCapturing = queue.sync {
+            guard _isCapturing else { return false }
+            _isCapturing = false
+            return true
+        }
+        guard wasCapturing else { return }
         engine.inputNode.removeTap(onBus: 0)
         engine.stop()
         setConverter(nil)
@@ -86,13 +89,7 @@ final class AudioCaptureService {
 
     func currentSamples() -> [Float] {
         queue.sync {
-            guard capturedSampleCount > 0 else { return [] }
-            if capturedSampleCount < Self.maxCapturedSamples {
-                return Array(capturedSamples[0..<capturedSampleCount])
-            }
-
-            return Array(capturedSamples[capturedSampleWriteIndex..<Self.maxCapturedSamples]) +
-                Array(capturedSamples[0..<capturedSampleWriteIndex])
+            capturedSamples
         }
     }
 
@@ -127,48 +124,17 @@ final class AudioCaptureService {
 
         let samples = UnsafeBufferPointer(start: channelData, count: frames)
         queue.sync {
-            guard isCapturing else { return }
+            guard _isCapturing else { return }
             self.appendSamples(samples)
         }
     }
 
+    private func resetCapturedSamples() {
+        capturedSamples.removeAll(keepingCapacity: true)
+    }
+
     private func appendSamples(_ samples: UnsafeBufferPointer<Float>) {
-        let count = samples.count
-        guard count > 0 else { return }
-
-        if count >= Self.maxCapturedSamples {
-            let sourceStart = count - Self.maxCapturedSamples
-            for sampleIndex in 0..<Self.maxCapturedSamples {
-                capturedSamples[sampleIndex] = samples[sourceStart + sampleIndex]
-            }
-            capturedSampleCount = Self.maxCapturedSamples
-            capturedSampleWriteIndex = 0
-            return
-        }
-
-        let start = capturedSampleWriteIndex
-        let tailRoom = Self.maxCapturedSamples - start
-
-        if count <= tailRoom {
-            for sampleIndex in 0..<count {
-                capturedSamples[start + sampleIndex] = samples[sampleIndex]
-            }
-            capturedSampleWriteIndex = start + count
-        } else {
-            let firstPartCount = tailRoom
-            for sampleIndex in 0..<firstPartCount {
-                capturedSamples[start + sampleIndex] = samples[sampleIndex]
-            }
-
-            let secondPartCount = count - firstPartCount
-            for sampleIndex in 0..<secondPartCount {
-                capturedSamples[sampleIndex] = samples[firstPartCount + sampleIndex]
-            }
-
-            capturedSampleWriteIndex = secondPartCount
-        }
-
-        capturedSampleCount = min(Self.maxCapturedSamples, capturedSampleCount + count)
+        capturedSamples.append(contentsOf: samples)
     }
 
     private func calculateRms(from buffer: AVAudioPCMBuffer) -> Float {

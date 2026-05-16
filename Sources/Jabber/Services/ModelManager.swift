@@ -1,5 +1,5 @@
 import Foundation
-import WhisperKit
+import AudioCommon
 import os
 
 struct ModelDownloadState: Equatable {
@@ -24,6 +24,14 @@ final class ModelManager {
     static let shared = ModelManager()
     private let logger = Logger(subsystem: "com.rselbach.jabber", category: "ModelManager")
     private static let downloadWaitTimeout: Duration = .seconds(600)
+    private static let legacyModelIdMigration: [String: String] = [
+        "tiny": AppMode.baseModelId,
+        "small": AppMode.baseModelId,
+        "large-v3": AppMode.largeModelId,
+        "qwen3-asr-0.6b-mlx-4bit": AppMode.baseModelId,
+        "qwen3-asr-1.7b-mlx-4bit": AppMode.mediumModelId,
+        "qwen3-asr-1.7b-mlx-8bit": AppMode.largeModelId
+    ]
 
     struct Model: Identifiable {
         let id: String
@@ -39,20 +47,29 @@ final class ModelManager {
     private var lastDownloadProgressReport: [String: CFAbsoluteTime] = [:]
     private let downloadProgressReportInterval: TimeInterval = 0.1
 
+    private struct ModelDefinition {
+        let id: String
+        let name: String
+        let description: String
+        let sizeHint: String
+    }
+
     private func updateModel(_ modelId: String, update: (inout Model) -> Void) {
         guard let index = models.firstIndex(where: { $0.id == modelId }) else { return }
         update(&models[index])
     }
 
-    private let modelDefinitions: [(id: String, name: String, description: String, sizeHint: String)] = [
-        ("tiny", "Tiny", "Fastest, lowest accuracy", "~40MB"),
-        ("base", "Base", "Balanced speed/accuracy", "~140MB"),
-        ("small", "Small", "Good accuracy", "~460MB"),
-        ("medium", "Medium", "Very accurate", "~1.5GB"),
-        ("large-v3", "Large v3", "Best accuracy", "~3GB")
-    ]
+    private let modelDefinitions: [ModelDefinition] = AppMode.qwen3ASRVariants.map {
+        .init(
+            id: $0.modelId,
+            name: $0.name,
+            description: $0.description,
+            sizeHint: $0.sizeHint
+        )
+    }
 
     private init() {
+        migrateSelectedModelIfNeeded()
         refreshModels()
     }
 
@@ -64,7 +81,36 @@ final class ModelManager {
         !downloadedModels.isEmpty
     }
 
+    func selectedModelId() -> String {
+        migrateSelectedModelIfNeeded()
+        return AppSettings.string(AppSettingKey.selectedModel, default: AppMode.baseModelId)
+    }
+
+    @discardableResult
+    func migrateSelectedModelIfNeeded(notify: Bool = false) -> Bool {
+        let current = AppSettings.string(AppSettingKey.selectedModel, default: AppMode.baseModelId)
+        let migrated: String
+
+        if let legacyReplacement = Self.legacyModelIdMigration[current] {
+            migrated = legacyReplacement
+        } else if Self.isQwen3ASRModel(current) {
+            return false
+        } else {
+            migrated = AppMode.baseModelId
+        }
+
+        guard migrated != current else { return false }
+
+        logger.info("Migrating selected model from '\(current)' to '\(migrated)'")
+        AppSettings.setString(migrated, forKey: AppSettingKey.selectedModel)
+        if notify {
+            NotificationCenter.default.post(name: Constants.Notifications.modelDidChange, object: nil)
+        }
+        return true
+    }
+
     func refreshModels() {
+        migrateSelectedModelIfNeeded()
         let downloadedIds = Set(installedModelIds())
         let existingById = Dictionary(uniqueKeysWithValues: models.map { ($0.id, $0) })
         models = modelDefinitions.map { def in
@@ -93,16 +139,7 @@ final class ModelManager {
     }
 
     func ensureModelDownloaded(_ modelId: String) async throws -> URL {
-        if let existing = Constants.ModelPaths.localModelFolder(for: modelId) {
-            // Verify integrity of existing model before returning
-            do {
-                _ = try ModelIntegrity.verifyModel(at: existing, modelId: modelId)
-            } catch {
-                // Model exists but failed verification - re-download
-                logger.warning("Existing model '\(modelId)' failed integrity check, re-downloading: \(error.localizedDescription)")
-                try FileManager.default.removeItem(at: existing)
-                return try await downloadModel(modelId)
-            }
+        if let existing = qwen3ASRModelFolder(for: modelId) {
             return existing
         }
         return try await downloadModel(modelId)
@@ -116,7 +153,7 @@ final class ModelManager {
             throw ModelError.modelNotFound(modelId: modelId)
         }
 
-        if let existing = Constants.ModelPaths.localModelFolder(for: modelId) {
+        if let existing = localModelFolder(for: modelId) {
             updateModel(modelId) { model in
                 model.isDownloaded = true
                 model.isDownloading = false
@@ -132,7 +169,7 @@ final class ModelManager {
 
         if models[idx].isDownloading {
             try await waitForDownloadToFinish(modelId: modelId)
-            if let existing = Constants.ModelPaths.localModelFolder(for: modelId) {
+            if let existing = localModelFolder(for: modelId) {
                 return existing
             }
             throw ModelError.modelNotFound(modelId: modelId)
@@ -159,33 +196,7 @@ final class ModelManager {
 
         let modelFolder: URL
         do {
-            modelFolder = try await WhisperKit.download(
-                variant: modelId,
-                progressCallback: { [weak self] progress in
-                    Task { @MainActor in
-                        guard let self else { return }
-                        let now = CFAbsoluteTimeGetCurrent()
-                        let progressValue = progress.fractionCompleted
-
-                        guard self.shouldPublishDownloadProgress(
-                            modelId: modelId,
-                            progress: progressValue,
-                            now: now
-                        ) else { return }
-
-                        // Look up index each time to avoid stale references
-                        self.updateModel(modelId) { model in
-                            model.downloadProgress = progressValue
-                        }
-                        self.postDownloadState(
-                            modelId: modelId,
-                            modelName: modelName,
-                            progress: progressValue,
-                            phase: .progress
-                        )
-                    }
-                }
-            )
+            modelFolder = try await downloadQwen3ASRModel(modelId: modelId, modelName: modelName)
         } catch is CancellationError {
             postDownloadState(
                 modelId: modelId,
@@ -200,22 +211,6 @@ final class ModelManager {
                 modelId: modelId,
                 modelName: modelName,
                 progress: models[idx].downloadProgress,
-                phase: .failed,
-                errorDescription: error.localizedDescription
-            )
-            throw error
-        }
-
-        // Verify model integrity after download
-        do {
-            _ = try ModelIntegrity.verifyModel(at: modelFolder, modelId: modelId)
-        } catch {
-            // Clean up corrupted/tampered download
-            try? FileManager.default.removeItem(at: modelFolder)
-            postDownloadState(
-                modelId: modelId,
-                modelName: modelName,
-                progress: 0,
                 phase: .failed,
                 errorDescription: error.localizedDescription
             )
@@ -246,7 +241,7 @@ final class ModelManager {
             throw ModelError.cannotDeleteActiveModel
         }
 
-        guard let modelPath = Constants.ModelPaths.localModelFolder(for: modelId) else {
+        guard let modelPath = localModelFolder(for: modelId) else {
             throw ModelError.modelNotFound(modelId: modelId)
         }
 
@@ -255,9 +250,6 @@ final class ModelManager {
         }
 
         try FileManager.default.removeItem(at: modelPath)
-
-        // Clear stored hash for deleted model
-        ModelIntegrity.clearStoredHash(modelId: modelId)
 
         refreshModels()
 
@@ -287,8 +279,118 @@ final class ModelManager {
 
     private func installedModelIds() -> [String] {
         return modelDefinitions.compactMap { def in
-            Constants.ModelPaths.localModelFolder(for: def.id) != nil ? def.id : nil
+            localModelFolder(for: def.id) != nil ? def.id : nil
         }
+    }
+
+    nonisolated static func isQwen3ASRModel(_ modelId: String) -> Bool {
+        AppMode.qwen3ASRVariant(for: modelId) != nil
+    }
+
+    nonisolated static func qwen3ASRHuggingFaceModelId(for modelId: String) -> String? {
+        AppMode.qwen3ASRVariant(for: modelId)?.huggingFaceModelId
+    }
+
+    func isQwen3ASRModel(_ modelId: String) -> Bool {
+        Self.isQwen3ASRModel(modelId)
+    }
+
+    private func localModelFolder(for modelId: String) -> URL? {
+        qwen3ASRModelFolder(for: modelId)
+    }
+
+    private func downloadQwen3ASRModel(modelId: String, modelName: String) async throws -> URL {
+        guard let huggingFaceModelId = Self.qwen3ASRHuggingFaceModelId(for: modelId) else {
+            throw ModelError.modelNotFound(modelId: modelId)
+        }
+
+        let modelFolder = try HuggingFaceDownloader.getCacheDirectory(for: huggingFaceModelId)
+
+        try await HuggingFaceDownloader.downloadWeights(
+            modelId: huggingFaceModelId,
+            to: modelFolder,
+            additionalFiles: ["vocab.json", "merges.txt", "tokenizer_config.json"],
+            progressHandler: { [weak self] progress in
+                Task { @MainActor in
+                    self?.publishDownloadProgress(
+                        modelId: modelId,
+                        modelName: modelName,
+                        progress: progress,
+                        status: "Downloading weights..."
+                    )
+                }
+            }
+        )
+        return modelFolder
+    }
+
+    private func qwen3ASRModelFolder(for modelId: String) -> URL? {
+        guard let huggingFaceModelId = Self.qwen3ASRHuggingFaceModelId(for: modelId) else {
+            return nil
+        }
+
+        let fm = FileManager.default
+        let candidates = [
+            qwen3ASRCacheFolder(for: huggingFaceModelId),
+            qwen3ASROldCacheFolder(for: huggingFaceModelId)
+        ]
+        return candidates.first { folder in
+            guard fm.fileExists(atPath: folder.path) else { return false }
+            guard let contents = try? fm.contentsOfDirectory(at: folder, includingPropertiesForKeys: nil) else {
+                return false
+            }
+            return contents.contains { $0.pathExtension == "safetensors" }
+        }
+    }
+
+    private func qwen3ASRCacheFolder(for huggingFaceModelId: String) -> URL {
+        let components = huggingFaceModelId.split(separator: "/", maxSplits: 1).map(String.init)
+        guard components.count == 2 else {
+            return qwen3ASROldCacheFolder(for: huggingFaceModelId)
+        }
+
+        return qwen3ASRCacheBase()
+            .appendingPathComponent("models")
+            .appendingPathComponent(components[0])
+            .appendingPathComponent(components[1])
+    }
+
+    private func qwen3ASROldCacheFolder(for huggingFaceModelId: String) -> URL {
+        qwen3ASRCacheBase()
+            .appendingPathComponent(HuggingFaceDownloader.sanitizedCacheKey(for: huggingFaceModelId))
+    }
+
+    private func qwen3ASRCacheBase() -> URL {
+        let environment = ProcessInfo.processInfo.environment
+        if let override = environment["QWEN3_CACHE_DIR"] ?? environment["QWEN3_ASR_CACHE_DIR"],
+           !override.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            return URL(fileURLWithPath: override, isDirectory: true)
+                .appendingPathComponent("qwen3-speech", isDirectory: true)
+        }
+
+        let caches = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first!
+        return caches.appendingPathComponent("qwen3-speech", isDirectory: true)
+    }
+
+    private func publishDownloadProgress(
+        modelId: String,
+        modelName: String,
+        progress: Double,
+        status: String? = nil
+    ) {
+        let now = CFAbsoluteTimeGetCurrent()
+        guard shouldPublishDownloadProgress(modelId: modelId, progress: progress, now: now) else { return }
+
+        updateModel(modelId) { model in
+            model.downloadProgress = progress
+        }
+        postDownloadState(
+            modelId: modelId,
+            modelName: modelName,
+            progress: progress,
+            phase: .progress,
+            statusOverride: status
+        )
     }
 
     private func waitForDownloadToFinish(modelId: String) async throws {
@@ -309,10 +411,11 @@ final class ModelManager {
         modelName: String,
         progress: Double,
         phase: ModelDownloadState.Phase,
+        statusOverride: String? = nil,
         errorDescription: String? = nil,
         isCancelled: Bool = false
     ) {
-        let status = downloadStatus(
+        let status = statusOverride ?? downloadStatus(
             modelName: modelName,
             progress: progress,
             phase: phase,
@@ -371,7 +474,6 @@ final class ModelManager {
 enum ModelError: Error, LocalizedError {
     case cannotDeleteActiveModel
     case downloadTimeout(modelId: String)
-    case integrityCheckFailed(modelId: String, expected: String, actual: String)
     case modelNotFound(modelId: String)
 
     var errorDescription: String? {
@@ -380,8 +482,6 @@ enum ModelError: Error, LocalizedError {
             return "Cannot delete the currently active model. Please select a different model first."
         case .downloadTimeout(let modelId):
             return "Download timed out for model '\(modelId)'."
-        case .integrityCheckFailed(let modelId, _, _):
-            return "Model '\(modelId)' failed integrity verification. The downloaded files may be corrupted or tampered with. Please try downloading again."
         case .modelNotFound(let modelId):
             return "Model '\(modelId)' not found or already deleted."
         }

@@ -31,6 +31,11 @@ final class OutputManagerTests: XCTestCase {
         )
     }
 
+    func testRequiresAccessibilityPermissionOnlyForPasteMode() {
+        XCTAssertTrue(OutputManager.requiresAccessibilityPermission(mode: .pasteInPlace))
+        XCTAssertFalse(OutputManager.requiresAccessibilityPermission(mode: .clipboard))
+    }
+
     func testPasteboardSnapshotRestoresStringContents() {
         let pasteboard = NSPasteboard.withUniqueName()
         pasteboard.clearContents()

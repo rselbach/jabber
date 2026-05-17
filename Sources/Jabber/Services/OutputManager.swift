@@ -19,6 +19,10 @@ final class OutputManager {
         OutputMode(rawValue: TypedSettings[.outputMode]) ?? .pasteInPlace
     }
 
+    var requiresAccessibilityPermission: Bool {
+        Self.requiresAccessibilityPermission(mode: mode)
+    }
+
     func output(_ text: String) {
         let selectedMode = mode
         let pasteboard = NSPasteboard.general
@@ -63,6 +67,10 @@ final class OutputManager {
 
     static func shouldAttemptPaste(mode: OutputMode, didCopyToClipboard: Bool) -> Bool {
         didCopyToClipboard && mode == .pasteInPlace
+    }
+
+    static func requiresAccessibilityPermission(mode: OutputMode) -> Bool {
+        mode == .pasteInPlace
     }
 
     private func copyToClipboard(_ text: String, pasteboard: NSPasteboard) -> Bool {

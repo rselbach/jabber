@@ -256,6 +256,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             return
         }
 
+        guard ensureOutputPermissionReady() else { return }
+
         switch dictationState {
         case .idle:
             startDictation()
@@ -269,6 +271,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func handleHotkeyUp() {
         guard dictationState == .recording else { return }
         stopDictationAndTranscribe()
+    }
+
+    private func ensureOutputPermissionReady() -> Bool {
+        guard outputManager.requiresAccessibilityPermission else { return true }
+        guard !permissionService.hasAccessibilityPermission() else { return true }
+        guard permissionService.requestAccessibilityPermission() else {
+            NotificationService.shared.showPermissionWarning(
+                title: "Accessibility Permission Required",
+                message: "Grant accessibility permission before dictating in paste mode, or switch output to Copy to clipboard in Settings.",
+                section: .accessibility
+            )
+            return false
+        }
+        return true
     }
 
     @objc private func togglePopover() {

@@ -1,7 +1,6 @@
 # Swift/SwiftPM
 .build/
 .swiftpm/
-Package.resolved
 
 .claude/
 .opencode/

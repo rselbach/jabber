@@ -1,0 +1,29 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  build-and-test:
+    runs-on: macos-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Show Xcode version
+        run: xcodebuild -version
+
+      - name: Test
+        run: swift test
+
+      - name: Build release
+        run: swift build -c release
+
+      - name: Build MLX Metal library
+        run: ./scripts/build_mlx_metallib.sh debug

@@ -328,7 +328,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         updateStatusIcon(state: .transcribing)
 
         let samples = audioCapture.currentSamples()
-        guard !samples.isEmpty else {
+        let speechAssessment = AudioSpeechDetector.assess(samples: samples)
+        guard speechAssessment.shouldTranscribe else {
+            if speechAssessment.shouldShowNoSpeechWarning {
+                showNoSpeechDetectedWarning()
+            }
             finishDictation(dictationID: dictationID)
             return
         }
@@ -362,10 +366,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             if !text.isEmpty {
                 outputManager.output(text)
             } else {
-                NotificationService.shared.showWarning(
-                    title: "No Speech Detected",
-                    message: "Could not detect any speech in the recording. Try speaking louder or closer to the microphone."
-                )
+                showNoSpeechDetectedWarning()
             }
         } catch is CancellationError {
             // cancellation is ok
@@ -379,6 +380,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
 
         finishDictation(dictationID: dictationID)
+    }
+
+    private func showNoSpeechDetectedWarning() {
+        NotificationService.shared.showWarning(
+            title: "No Speech Detected",
+            message: "Could not detect any speech in the recording. Try speaking louder or closer to the microphone."
+        )
     }
 
     private func finishDictation(dictationID: UUID) {

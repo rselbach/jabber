@@ -119,6 +119,12 @@ jobs:
           codesign --force --options runtime --deep \
             --sign "Developer ID Application" \
             .build/release-bundle/Jabber.app/Contents/Frameworks/Sparkle.framework
+
+          # Sign MLX's Metal library before signing the executable/app bundle.
+          # codesign treats files in Contents/MacOS as nested code objects.
+          codesign --force --options runtime \
+            --sign "Developer ID Application" \
+            .build/release-bundle/Jabber.app/Contents/MacOS/mlx.metallib
           
           # Sign the main executable
           codesign --force --options runtime \

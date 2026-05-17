@@ -216,6 +216,12 @@ sign_app() {
   codesign --force --options runtime --deep \
     --sign "${SIGNING_IDENTITY}" \
     "${app_bundle}/Contents/Frameworks/Sparkle.framework"
+
+  # Sign MLX's Metal library before signing the executable/app bundle.
+  # codesign treats files in Contents/MacOS as nested code objects.
+  codesign --force --options runtime \
+    --sign "${SIGNING_IDENTITY}" \
+    "${app_bundle}/Contents/MacOS/mlx.metallib"
   
   # Sign the main executable
   codesign --force --options runtime \

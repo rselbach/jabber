@@ -14,7 +14,6 @@ struct SettingsView: View {
     @State private var showError = false
     @State private var pendingDeleteModelId: String?
     @State private var pendingDeleteModelName: String?
-    @State private var downloadTasks: [String: Task<Void, Error>] = [:]
 
     @State private var selectedTab = "general"
 
@@ -47,6 +46,14 @@ struct SettingsView: View {
             Button("OK") { }
         } message: { message in
             Text(message)
+        }
+        .onReceive(NotificationCenter.default.publisher(for: Constants.Notifications.modelDownloadStateDidChange)) { notification in
+            guard let state = notification.object as? ModelDownloadState else { return }
+            guard state.phase == .failed, !state.isCancelled else { return }
+
+            let modelName = modelManager.models.first { $0.id == state.modelId }?.name ?? state.modelId
+            let details = state.errorDescription ?? state.status
+            presentError("Failed to download \(modelName): \(details)")
         }
         .alert("Delete model", isPresented: Binding(
             get: { pendingDeleteModelId != nil },
@@ -174,31 +181,14 @@ struct SettingsView: View {
                             selectedModel = model.id
                         },
                         onDownload: {
-                            guard downloadTasks[model.id] == nil else { return }
-
-                            downloadTasks[model.id] = Task {
-                                defer {
-                                    Task { @MainActor in
-                                        downloadTasks[model.id] = nil
-                                    }
-                                }
-
-                                do {
-                                    try await modelManager.downloadModel(model.id)
-                                } catch is CancellationError {
-                                    return
-                                } catch {
-                                    presentError("Failed to download \(model.name): \(error.localizedDescription)")
-                                }
-                            }
+                            _ = modelManager.startDownload(model.id)
                         },
                         onDelete: {
                             pendingDeleteModelId = model.id
                             pendingDeleteModelName = model.name
                         },
                         onCancelDownload: {
-                            downloadTasks[model.id]?.cancel()
-                            downloadTasks[model.id] = nil
+                            modelManager.cancelDownload(model.id)
                         }
                     )
                 }

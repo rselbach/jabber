@@ -45,7 +45,13 @@ final class ModelManager {
 
     private(set) var models: [Model] = []
     private var lastDownloadProgressReport: [String: CFAbsoluteTime] = [:]
+    private var activeDownloads: [String: ActiveDownload] = [:]
     private let downloadProgressReportInterval: TimeInterval = 0.1
+
+    private struct ActiveDownload {
+        let id: UUID
+        let task: Task<URL, Error>
+    }
 
     private struct ModelDefinition {
         let id: String
@@ -143,6 +149,45 @@ final class ModelManager {
             return existing
         }
         return try await downloadModel(modelId)
+    }
+
+    @discardableResult
+    func startDownload(_ modelId: String) -> Bool {
+        guard activeDownloads[modelId] == nil else { return false }
+        guard models.contains(where: { $0.id == modelId }) else {
+            logger.warning("Attempted to start download for non-existent model: \(modelId)")
+            return false
+        }
+
+        let downloadID = UUID()
+        let task = Task { [weak self] in
+            guard let self else { throw CancellationError() }
+            return try await self.downloadModel(modelId)
+        }
+        activeDownloads[modelId] = ActiveDownload(id: downloadID, task: task)
+
+        Task { [weak self] in
+            do {
+                _ = try await task.value
+            } catch is CancellationError {
+                // Cancellation state is published by downloadModel.
+            } catch {
+                self?.logger.error("Model download failed for \(modelId): \(error.localizedDescription)")
+            }
+            self?.clearActiveDownload(modelId: modelId, downloadID: downloadID)
+        }
+
+        return true
+    }
+
+    func cancelDownload(_ modelId: String) {
+        guard let activeDownload = activeDownloads[modelId] else { return }
+        activeDownload.task.cancel()
+    }
+
+    private func clearActiveDownload(modelId: String, downloadID: UUID) {
+        guard activeDownloads[modelId]?.id == downloadID else { return }
+        activeDownloads[modelId] = nil
     }
 
     @discardableResult

@@ -92,6 +92,15 @@ final class ModelManagerTests: XCTestCase {
         let result = modelManager.selectModel("nonexistent", previousModelId: nil)
         XCTAssertFalse(result, "Should not select non-existent model")
     }
+
+    func testStartDownloadReturnsFalseForNonExistentModel() {
+        let result = modelManager.startDownload("nonexistent")
+        XCTAssertFalse(result, "Should not start download for non-existent model")
+    }
+
+    func testCancelDownloadForNonExistentModelDoesNotCrash() {
+        modelManager.cancelDownload("nonexistent")
+    }
     
     func testSelectModelReturnsFalseWhenModelNotDownloaded() {
         // Find a model that isn't downloaded

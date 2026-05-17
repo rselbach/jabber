@@ -5,6 +5,7 @@ struct MenuBarView: View {
     @AppStorage(AppSettingKey.selectedModel) private var selectedModel = AppMode.baseModelId
     @AppStorage(AppSettingKey.selectedLanguage) private var selectedLanguage = Constants.defaultLanguage
     @AppStorage(AppSettingKey.outputMode) private var outputMode = OutputManager.OutputMode.pasteInPlace.rawValue
+    @AppStorage(AppSettingKey.hotkeyDisplay) private var hotkeyDisplay = HotkeyShortcut.defaultShortcut.displayString
     @State private var modelManager = ModelManager.shared
     @State private var permissionRefreshTick = false
     @ObservedObject var updaterController: UpdaterController
@@ -35,7 +36,7 @@ struct MenuBarView: View {
             }
 
             VStack(alignment: .leading, spacing: 8) {
-                Text("Press ⌥ Space to dictate")
+                Text("Press \(hotkeyDisplay) to dictate")
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
 

@@ -6,7 +6,9 @@ struct SettingsView: View {
 
     @AppStorage(AppSettingKey.selectedModel) private var selectedModel = AppMode.baseModelId
     @AppStorage(AppSettingKey.outputMode) private var outputMode = OutputManager.OutputMode.pasteInPlace.rawValue
-    @AppStorage(AppSettingKey.hotkeyDisplay) private var hotkeyDisplay = "⌥ Space"
+    @AppStorage(AppSettingKey.hotkeyKeyCode) private var hotkeyKeyCode = Int(HotkeyShortcut.defaultShortcut.keyCode)
+    @AppStorage(AppSettingKey.hotkeyModifiers) private var hotkeyModifiers = Int(HotkeyShortcut.defaultShortcut.modifiers)
+    @AppStorage(AppSettingKey.hotkeyDisplay) private var hotkeyDisplay = HotkeyShortcut.defaultShortcut.displayString
     @AppStorage(AppSettingKey.vocabularyPrompt) private var vocabularyPrompt = ""
     @AppStorage(AppSettingKey.selectedLanguage) private var selectedLanguage = Constants.defaultLanguage
 
@@ -113,6 +115,13 @@ struct SettingsView: View {
         OutputManager.OutputMode(rawValue: outputMode) ?? .pasteInPlace
     }
 
+    private var hotkeyShortcut: HotkeyShortcut {
+        HotkeyShortcut(
+            keyCode: UInt32(max(0, hotkeyKeyCode)),
+            modifiers: UInt32(max(0, hotkeyModifiers))
+        )
+    }
+
     private var generalTab: some View {
         Form {
             setupSection
@@ -156,11 +165,20 @@ struct SettingsView: View {
                         .clipShape(RoundedRectangle(cornerRadius: 4))
                 }
 
-                Text("Hotkey customization will be available in a future update.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+                HotkeyRecorderView(
+                    shortcut: hotkeyShortcut,
+                    onShortcutChange: applyHotkeyShortcut
+                )
+
+                Button("Reset to ⌥ Space") {
+                    applyHotkeyShortcut(.defaultShortcut)
+                }
+                .buttonStyle(.borderless)
+                .disabled(hotkeyShortcut == .defaultShortcut)
             } header: {
                 Text("Hotkey")
+            } footer: {
+                Text("Shortcuts must include Command, Control, or Option so Jabber does not steal every innocent keystroke like a gremlin.")
             }
 
             Section {
@@ -224,6 +242,16 @@ struct SettingsView: View {
         if !modelManager.startDownload(AppMode.baseModelId) {
             modelManager.refreshModels()
         }
+    }
+
+    private func applyHotkeyShortcut(_ shortcut: HotkeyShortcut) {
+        hotkeyKeyCode = Int(shortcut.keyCode)
+        hotkeyModifiers = Int(shortcut.modifiers)
+        hotkeyDisplay = shortcut.displayString
+        NotificationCenter.default.post(
+            name: Constants.Notifications.hotkeyDidChange,
+            object: shortcut
+        )
     }
 
     private var modelsTab: some View {

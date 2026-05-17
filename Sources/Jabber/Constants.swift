@@ -52,6 +52,13 @@ enum Constants {
 
         /// Posted when a model download starts/progresses/finishes
         static let modelDownloadStateDidChange = Notification.Name("com.rselbach.jabber.modelDownloadStateDidChange")
+
+        /// Posted when the global dictation hotkey changes
+        static let hotkeyDidChange = Notification.Name("com.rselbach.jabber.hotkeyDidChange")
+
+        /// Posted while the Settings UI is recording a new hotkey
+        static let hotkeyCaptureDidBegin = Notification.Name("com.rselbach.jabber.hotkeyCaptureDidBegin")
+        static let hotkeyCaptureDidEnd = Notification.Name("com.rselbach.jabber.hotkeyCaptureDidEnd")
     }
 
     /// Supported transcription languages

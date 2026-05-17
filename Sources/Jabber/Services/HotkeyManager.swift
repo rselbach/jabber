@@ -18,18 +18,27 @@ final class HotkeyManager {
     deinit {
         unregister()
         if let handler = eventHandlerRef {
-            RemoveEventHandler(handler)
+            let status = RemoveEventHandler(handler)
+            if status != noErr {
+                logger.error("Failed to remove hotkey event handler with status: \(status)")
+            }
         }
     }
 
-    func register(keyCode: UInt32, modifiers: UInt32) {
+    @discardableResult
+    func register(_ shortcut: HotkeyShortcut) -> OSStatus {
+        register(keyCode: shortcut.keyCode, modifiers: shortcut.modifiers)
+    }
+
+    @discardableResult
+    func register(keyCode: UInt32, modifiers: UInt32) -> OSStatus {
         unregister()
 
         guard let signature = OSType(fourCharCode: "JBBR") else {
             let status = OSStatus(paramErr)
             logger.error("Failed to create hotkey signature with status: \(status)")
             onRegistrationFailure?(status)
-            return
+            return status
         }
 
         let hotKeyID = EventHotKeyID(
@@ -50,11 +59,15 @@ final class HotkeyManager {
             logger.error("Failed to register hotkey with status: \(status)")
             onRegistrationFailure?(status)
         }
+        return status
     }
 
     func unregister() {
         if let ref = hotKeyRef {
-            UnregisterEventHotKey(ref)
+            let status = UnregisterEventHotKey(ref)
+            if status != noErr {
+                logger.error("Failed to unregister hotkey with status: \(status)")
+            }
             hotKeyRef = nil
         }
     }

@@ -1,5 +1,4 @@
 import AppKit
-import Carbon
 import SwiftUI
 import os
 
@@ -83,6 +82,27 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             self,
             selector: #selector(handleModelDownloadState(_:)),
             name: Constants.Notifications.modelDownloadStateDidChange,
+            object: nil
+        )
+
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(handleHotkeyChange),
+            name: Constants.Notifications.hotkeyDidChange,
+            object: nil
+        )
+
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(handleHotkeyCaptureBegin),
+            name: Constants.Notifications.hotkeyCaptureDidBegin,
+            object: nil
+        )
+
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(handleHotkeyCaptureEnd),
+            name: Constants.Notifications.hotkeyCaptureDidEnd,
             object: nil
         )
     }
@@ -204,9 +224,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func setupHotkey() {
-        // Default: Option + Space (0x31 = space, optionKey = 0x0800)
-        hotkeyManager.register(keyCode: 0x31, modifiers: UInt32(Carbon.optionKey))
-
         hotkeyManager.onKeyDown = { [weak self] in
             Task { @MainActor in
                 await self?.handleHotkeyDown()
@@ -222,13 +239,32 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         hotkeyManager.onRegistrationFailure = { [weak self] status in
             Task { @MainActor in
                 self?.logger.error("Hotkey registration failed with status: \(status)")
+                let display = TypedSettings.hotkeyShortcut.displayString
                 NotificationService.shared.showError(
                     title: "Hotkey Registration Failed",
-                    message: "Could not register the global hotkey (⌥ Space). It may be in use by another application.",
+                    message: "Could not register the global hotkey (\(display)). It may be in use by another application. OSStatus: \(status)",
                     critical: false
                 )
             }
         }
+
+        registerConfiguredHotkey()
+    }
+
+    @objc private func handleHotkeyChange() {
+        registerConfiguredHotkey()
+    }
+
+    @objc private func handleHotkeyCaptureBegin() {
+        hotkeyManager.unregister()
+    }
+
+    @objc private func handleHotkeyCaptureEnd() {
+        registerConfiguredHotkey()
+    }
+
+    private func registerConfiguredHotkey() {
+        hotkeyManager.register(TypedSettings.hotkeyShortcut)
     }
 
     private func handleHotkeyDown() async {

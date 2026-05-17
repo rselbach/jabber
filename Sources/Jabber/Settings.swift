@@ -45,6 +45,29 @@ enum BoolSetting: Sendable {
     }
 }
 
+enum IntSetting: Sendable {
+    case hotkeyKeyCode
+    case hotkeyModifiers
+
+    var key: String {
+        switch self {
+        case .hotkeyKeyCode:
+            return AppSettingKey.hotkeyKeyCode
+        case .hotkeyModifiers:
+            return AppSettingKey.hotkeyModifiers
+        }
+    }
+
+    var `default`: Int {
+        switch self {
+        case .hotkeyKeyCode:
+            return Int(HotkeyShortcut.defaultShortcut.keyCode)
+        case .hotkeyModifiers:
+            return Int(HotkeyShortcut.defaultShortcut.modifiers)
+        }
+    }
+}
+
 // MARK: - Default Values
 
 extension TypedSetting where T == String {
@@ -58,7 +81,7 @@ extension TypedSetting where T == String {
         case .outputMode:
             return "paste"
         case .hotkeyDisplay:
-            return "⌥ Space"
+            return HotkeyShortcut.defaultShortcut.displayString
         case .vocabularyPrompt:
             return ""
         }
@@ -94,6 +117,15 @@ struct SettingsStore {
         }
     }
 
+    subscript(setting: IntSetting) -> Int {
+        get {
+            userDefaults.object(forKey: setting.key) as? Int ?? setting.default
+        }
+        nonmutating set {
+            userDefaults.set(newValue, forKey: setting.key)
+        }
+    }
+
     func remove(_ setting: TypedSetting<String>) {
         userDefaults.removeObject(forKey: setting.key)
     }
@@ -102,11 +134,19 @@ struct SettingsStore {
         userDefaults.removeObject(forKey: setting.key)
     }
 
+    func remove(_ setting: IntSetting) {
+        userDefaults.removeObject(forKey: setting.key)
+    }
+
     func isSet(_ setting: TypedSetting<String>) -> Bool {
         userDefaults.object(forKey: setting.key) != nil
     }
 
     func isSet(_ setting: BoolSetting) -> Bool {
+        userDefaults.object(forKey: setting.key) != nil
+    }
+
+    func isSet(_ setting: IntSetting) -> Bool {
         userDefaults.object(forKey: setting.key) != nil
     }
 }
@@ -135,6 +175,16 @@ enum TypedSettings {
         }
     }
 
+    /// Get an integer setting value
+    static subscript(setting: IntSetting) -> Int {
+        get {
+            store[setting]
+        }
+        set {
+            store[setting] = newValue
+        }
+    }
+
     /// Remove a string setting value (reset to default)
     static func remove(_ setting: TypedSetting<String>) {
         store.remove(setting)
@@ -142,6 +192,11 @@ enum TypedSettings {
 
     /// Remove a boolean setting value (reset to default)
     static func remove(_ setting: BoolSetting) {
+        store.remove(setting)
+    }
+
+    /// Remove an integer setting value (reset to default)
+    static func remove(_ setting: IntSetting) {
         store.remove(setting)
     }
     
@@ -152,6 +207,11 @@ enum TypedSettings {
 
     /// Check if a boolean setting has been explicitly set
     static func isSet(_ setting: BoolSetting) -> Bool {
+        store.isSet(setting)
+    }
+
+    /// Check if an integer setting has been explicitly set
+    static func isSet(_ setting: IntSetting) -> Bool {
         store.isSet(setting)
     }
 }

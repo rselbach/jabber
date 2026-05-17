@@ -11,6 +11,7 @@
 #         --apple-id "your@email.com" \
 #         --team-id "YOUR_TEAM_ID" \
 #         --password "app-specific-password"
+#     Or APPLE_ID, APPLE_TEAM_ID, and APPLE_APP_PASSWORD in the environment.
 #
 # Usage:
 #   ./scripts/release.sh [--skip-notarize]
@@ -81,6 +82,23 @@ require_env() {
   fi
 }
 
+has_apple_id_notary_credentials() {
+  [[ -n "${APPLE_ID-}" ]] && \
+    [[ -n "${APPLE_TEAM_ID-}" ]] && \
+    [[ -n "${APPLE_APP_PASSWORD-}" ]]
+}
+
+validate_notary_credentials() {
+  if [[ -n "${APPLE_ID-}${APPLE_TEAM_ID-}${APPLE_APP_PASSWORD-}" ]]; then
+    require_env APPLE_ID
+    require_env APPLE_TEAM_ID
+    require_env APPLE_APP_PASSWORD
+    return
+  fi
+
+  require_env NOTARY_PROFILE
+}
+
 validate_environment() {
   local required_commands=(
     swift
@@ -89,8 +107,6 @@ validate_environment() {
     hdiutil
     install_name_tool
     security
-    curl
-    tar
     xcrun
   )
 
@@ -101,20 +117,20 @@ validate_environment() {
     fi
   done
 
-  if ! xcrun --find notarytool >/dev/null 2>&1; then
-    echo "Error: xcrun cannot find 'notarytool'." >&2
-    exit 1
-  fi
-
-  if ! xcrun --find stapler >/dev/null 2>&1; then
-    echo "Error: xcrun cannot find 'stapler'." >&2
-    exit 1
-  fi
-
   require_env SIGNING_IDENTITY
 
   if [[ "${SKIP_NOTARIZE}" == "false" ]]; then
-    require_env NOTARY_PROFILE
+    if ! xcrun --find notarytool >/dev/null 2>&1; then
+      echo "Error: xcrun cannot find 'notarytool'." >&2
+      exit 1
+    fi
+
+    if ! xcrun --find stapler >/dev/null 2>&1; then
+      echo "Error: xcrun cannot find 'stapler'." >&2
+      exit 1
+    fi
+
+    validate_notary_credentials
   fi
 }
 
@@ -281,9 +297,17 @@ notarize_dmg() {
   local dmg_path="${DMG_DIR}/${APP_NAME}.dmg"
   
   echo "    Submitting to Apple for notarization..."
-  xcrun notarytool submit "${dmg_path}" \
-    --keychain-profile "${NOTARY_PROFILE}" \
-    --wait
+  if has_apple_id_notary_credentials; then
+    xcrun notarytool submit "${dmg_path}" \
+      --apple-id "${APPLE_ID}" \
+      --team-id "${APPLE_TEAM_ID}" \
+      --password "${APPLE_APP_PASSWORD}" \
+      --wait
+  else
+    xcrun notarytool submit "${dmg_path}" \
+      --keychain-profile "${NOTARY_PROFILE}" \
+      --wait
+  fi
   
   echo "    Notarization complete"
 }

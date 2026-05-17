@@ -33,6 +33,26 @@ jobs:
             exit 1
           fi
 
+          if [[ -z "${{ secrets.DEVELOPER_ID_CERTIFICATE_PASSWORD }}" ]]; then
+            echo "Error: DEVELOPER_ID_CERTIFICATE_PASSWORD secret is required."
+            exit 1
+          fi
+
+          if [[ -z "${{ secrets.APPLE_ID }}" ]]; then
+            echo "Error: APPLE_ID secret is required."
+            exit 1
+          fi
+
+          if [[ -z "${{ secrets.APPLE_TEAM_ID }}" ]]; then
+            echo "Error: APPLE_TEAM_ID secret is required."
+            exit 1
+          fi
+
+          if [[ -z "${{ secrets.APPLE_APP_PASSWORD }}" ]]; then
+            echo "Error: APPLE_APP_PASSWORD secret is required."
+            exit 1
+          fi
+
           if [[ -z "${{ secrets.SPARKLE_EDDSA_PRIVATE_KEY }}" ]]; then
             echo "Error: SPARKLE_EDDSA_PRIVATE_KEY secret is required."
             exit 1
@@ -54,11 +74,6 @@ jobs:
         run: |
           /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString ${{ steps.version.outputs.version }}" Info.plist
           /usr/libexec/PlistBuddy -c "Set :CFBundleVersion ${{ github.run_number }}" Info.plist
-
-      - name: Build release
-        run: |
-          swift build -c release
-          ./scripts/build_mlx_metallib.sh release
 
       - name: Import signing certificate
         env:
@@ -85,95 +100,13 @@ jobs:
           
           rm "${RUNNER_TEMP}/certificate.p12"
 
-      - name: Create app bundle
-        run: |
-          APP_BUNDLE=".build/release-bundle/Jabber.app"
-          CONTENTS="${APP_BUNDLE}/Contents"
-          mkdir -p "${CONTENTS}/MacOS" "${CONTENTS}/Resources" "${CONTENTS}/Frameworks"
-          
-          cp .build/release/Jabber "${CONTENTS}/MacOS/Jabber"
-          cp .build/release/mlx.metallib "${CONTENTS}/MacOS/mlx.metallib"
-          cp Info.plist "${CONTENTS}/Info.plist"
-          
-          # Copy Sparkle.framework into the bundle
-          SPARKLE_PATH=$(find .build -name "Sparkle.framework" -type d | head -1)
-          if [[ -z "${SPARKLE_PATH}" ]]; then
-            echo "Sparkle.framework not found in .build"
-            exit 1
-          fi
-          cp -R "${SPARKLE_PATH}" "${CONTENTS}/Frameworks/"
-          
-          # Add rpath for Frameworks directory
-          install_name_tool -add_rpath @executable_path/../Frameworks "${CONTENTS}/MacOS/Jabber"
-          
-          xcrun actool Sources/Jabber/Assets.xcassets \
-            --compile "${CONTENTS}/Resources" \
-            --platform macosx \
-            --minimum-deployment-target 26.0 \
-            --app-icon AppIcon \
-            --output-partial-info-plist .build/release-bundle/AssetInfo.plist
-
-      - name: Sign app bundle
-        run: |
-          # Sign Sparkle.framework first
-          codesign --force --options runtime --deep \
-            --sign "Developer ID Application" \
-            .build/release-bundle/Jabber.app/Contents/Frameworks/Sparkle.framework
-
-          # Sign MLX's Metal library before signing the executable/app bundle.
-          # codesign treats files in Contents/MacOS as nested code objects.
-          codesign --force --options runtime \
-            --sign "Developer ID Application" \
-            .build/release-bundle/Jabber.app/Contents/MacOS/mlx.metallib
-          
-          # Sign the main executable
-          codesign --force --options runtime \
-            --entitlements Jabber.entitlements \
-            --sign "Developer ID Application" \
-            .build/release-bundle/Jabber.app/Contents/MacOS/Jabber
-          
-          # Sign the app bundle
-          codesign --force --options runtime \
-            --entitlements Jabber.entitlements \
-            --sign "Developer ID Application" \
-            .build/release-bundle/Jabber.app
-          
-          codesign --verify --deep --strict --verbose=2 .build/release-bundle/Jabber.app
-
-      - name: Create DMG
-        run: |
-          mkdir -p .build/dmg/staging
-          cp -R .build/release-bundle/Jabber.app .build/dmg/staging/
-          ln -s /Applications .build/dmg/staging/Applications
-          
-          hdiutil create -volname "Jabber" \
-            -srcfolder .build/dmg/staging \
-            -ov -format UDRW \
-            .build/dmg/Jabber-temp.dmg
-          
-          hdiutil convert .build/dmg/Jabber-temp.dmg \
-            -format UDZO \
-            -imagekey zlib-level=9 \
-            -o .build/dmg/Jabber.dmg
-          
-          rm .build/dmg/Jabber-temp.dmg
-          rm -rf .build/dmg/staging
-          
-          codesign --force --sign "Developer ID Application" .build/dmg/Jabber.dmg
-
-      - name: Notarize DMG
+      - name: Build, sign, and notarize DMG
         env:
           APPLE_ID: ${{ secrets.APPLE_ID }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
           APPLE_APP_PASSWORD: ${{ secrets.APPLE_APP_PASSWORD }}
-        run: |
-          xcrun notarytool submit .build/dmg/Jabber.dmg \
-            --apple-id "${APPLE_ID}" \
-            --team-id "${APPLE_TEAM_ID}" \
-            --password "${APPLE_APP_PASSWORD}" \
-            --wait
-          
-          xcrun stapler staple .build/dmg/Jabber.dmg
+          SIGNING_IDENTITY: Developer ID Application
+        run: ./scripts/release.sh
 
       - name: Rename DMG with version
         run: |
@@ -182,14 +115,14 @@ jobs:
       - name: Download Sparkle tools
         env:
           # SHA-256 of Sparkle-2.8.1.tar.xz
-          # Get this from: curl -sL <url> | sha256sum
+          # Get this from: curl -sL <url> | shasum -a 256
           # Update when upgrading Sparkle version
           SPARKLE_SHA256: "5cddb7695674ef7704268f38eccaee80e3accbf19e61c1689efff5b6116d85be"
         run: |
           curl -L -o /tmp/Sparkle.tar.xz "https://github.com/sparkle-project/Sparkle/releases/download/2.8.1/Sparkle-2.8.1.tar.xz"
           
           # Verify checksum
-          COMPUTED_SHA256=$(sha256sum /tmp/Sparkle.tar.xz | cut -d' ' -f1)
+          COMPUTED_SHA256=$(shasum -a 256 /tmp/Sparkle.tar.xz | cut -d' ' -f1)
           if [[ "${COMPUTED_SHA256}" != "${SPARKLE_SHA256}" ]]; then
             echo "Error: Sparkle download checksum mismatch!"
             echo "Expected: ${SPARKLE_SHA256}"
@@ -264,7 +197,9 @@ jobs:
       - name: Cleanup keychain
         if: always()
         run: |
-          security delete-keychain "${RUNNER_TEMP}/signing.keychain-db" || true
+          if ! security delete-keychain "${RUNNER_TEMP}/signing.keychain-db"; then
+            echo "Warning: failed to delete temporary keychain ${RUNNER_TEMP}/signing.keychain-db" >&2
+          fi
 
   deploy-appcast:
     needs: build

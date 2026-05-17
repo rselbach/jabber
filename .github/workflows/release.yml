@@ -184,7 +184,7 @@ jobs:
           # SHA-256 of Sparkle-2.8.1.tar.xz
           # Get this from: curl -sL <url> | sha256sum
           # Update when upgrading Sparkle version
-          SPARKLE_SHA256: "a875e5902d1eb732155dab7a99268e47d8253e3df39fc7c3de8c212073a9d7fe"
+          SPARKLE_SHA256: "5cddb7695674ef7704268f38eccaee80e3accbf19e61c1689efff5b6116d85be"
         run: |
           curl -L -o /tmp/Sparkle.tar.xz "https://github.com/sparkle-project/Sparkle/releases/download/2.8.1/Sparkle-2.8.1.tar.xz"
           

@@ -13,6 +13,7 @@ final class OutputManager {
 
     private let logger = Logger(subsystem: "com.rselbach.jabber", category: "OutputManager")
     private static let pasteDelay: TimeInterval = 0.05
+    private static let clipboardRestoreDelay: TimeInterval = 0.5
 
     var mode: OutputMode {
         let modeString = AppSettings.string(AppSettingKey.outputMode, default: OutputMode.pasteInPlace.rawValue)
@@ -20,8 +21,17 @@ final class OutputManager {
     }
 
     func output(_ text: String) {
-        let didCopyToClipboard = copyToClipboard(text)
+        let selectedMode = mode
+        let pasteboard = NSPasteboard.general
+        let previousClipboard = selectedMode == .pasteInPlace
+            ? PasteboardSnapshot.capture(from: pasteboard)
+            : nil
+
+        let didCopyToClipboard = copyToClipboard(text, pasteboard: pasteboard)
         guard didCopyToClipboard else {
+            if let previousClipboard {
+                restoreClipboard(previousClipboard, expectedChangeCount: pasteboard.changeCount)
+            }
             NotificationService.shared.showError(
                 title: "Copy Failed",
                 message: "Could not copy transcription to clipboard.",
@@ -30,7 +40,7 @@ final class OutputManager {
             return
         }
 
-        guard Self.shouldAttemptPaste(mode: mode, didCopyToClipboard: didCopyToClipboard) else {
+        guard Self.shouldAttemptPaste(mode: selectedMode, didCopyToClipboard: didCopyToClipboard) else {
             return
         }
 
@@ -46,15 +56,17 @@ final class OutputManager {
             return
         }
 
-        sendPaste()
+        sendPaste(
+            restoring: previousClipboard,
+            expectedPasteboardChangeCount: pasteboard.changeCount
+        )
     }
 
     static func shouldAttemptPaste(mode: OutputMode, didCopyToClipboard: Bool) -> Bool {
         didCopyToClipboard && mode == .pasteInPlace
     }
 
-    private func copyToClipboard(_ text: String) -> Bool {
-        let pasteboard = NSPasteboard.general
+    private func copyToClipboard(_ text: String, pasteboard: NSPasteboard) -> Bool {
         pasteboard.clearContents()
         let success = pasteboard.setString(text, forType: .string)
         if !success {
@@ -63,12 +75,13 @@ final class OutputManager {
         return success
     }
 
-    private func sendPaste() {
-        // Small delay to ensure the target app is ready
+    private func sendPaste(
+        restoring previousClipboard: PasteboardSnapshot?,
+        expectedPasteboardChangeCount: Int
+    ) {
         DispatchQueue.main.asyncAfter(deadline: .now() + Self.pasteDelay) { [weak self] in
             guard let self else { return }
 
-            // Synthesize Cmd+V
             let src = CGEventSource(stateID: .hidSystemState)
 
             guard let keyDown = CGEvent(keyboardEventSource: src, virtualKey: KeyCode.v, keyDown: true),
@@ -89,11 +102,75 @@ final class OutputManager {
 
             keyDown.post(tap: .cghidEventTap)
             keyUp.post(tap: .cghidEventTap)
+
+            guard let previousClipboard else { return }
+            self.scheduleClipboardRestore(
+                previousClipboard,
+                expectedChangeCount: expectedPasteboardChangeCount
+            )
+        }
+    }
+
+    private func scheduleClipboardRestore(
+        _ snapshot: PasteboardSnapshot,
+        expectedChangeCount: Int
+    ) {
+        DispatchQueue.main.asyncAfter(deadline: .now() + Self.clipboardRestoreDelay) { [weak self] in
+            self?.restoreClipboard(snapshot, expectedChangeCount: expectedChangeCount)
+        }
+    }
+
+    private func restoreClipboard(_ snapshot: PasteboardSnapshot, expectedChangeCount: Int) {
+        let pasteboard = NSPasteboard.general
+        guard pasteboard.changeCount == expectedChangeCount else {
+            logger.info("Skipping clipboard restore because the pasteboard changed")
+            return
+        }
+
+        guard snapshot.restore(to: pasteboard) else {
+            logger.warning("Failed to restore previous clipboard contents")
+            return
         }
     }
 }
 
-// Virtual key codes for keyboard events
+struct PasteboardSnapshot: Equatable {
+    private let items: [[NSPasteboard.PasteboardType: Data]]
+
+    static func capture(from pasteboard: NSPasteboard) -> PasteboardSnapshot {
+        let items = pasteboard.pasteboardItems ?? []
+        let capturedItems = items.map { item in
+            var capturedTypes: [NSPasteboard.PasteboardType: Data] = [:]
+            for type in item.types {
+                if let data = item.data(forType: type) {
+                    capturedTypes[type] = data
+                }
+            }
+            return capturedTypes
+        }
+
+        return PasteboardSnapshot(items: capturedItems)
+    }
+
+    func restore(to pasteboard: NSPasteboard) -> Bool {
+        pasteboard.clearContents()
+        guard !items.isEmpty else { return true }
+
+        var pasteboardItems: [NSPasteboardItem] = []
+        pasteboardItems.reserveCapacity(items.count)
+
+        for item in items {
+            let pasteboardItem = NSPasteboardItem()
+            for (type, data) in item {
+                guard pasteboardItem.setData(data, forType: type) else { return false }
+            }
+            pasteboardItems.append(pasteboardItem)
+        }
+
+        return pasteboard.writeObjects(pasteboardItems)
+    }
+}
+
 private enum KeyCode {
     static let v: CGKeyCode = 0x09
 }

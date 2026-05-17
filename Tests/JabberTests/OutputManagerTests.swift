@@ -1,3 +1,4 @@
+import AppKit
 import XCTest
 @testable import Jabber
 
@@ -28,5 +29,28 @@ final class OutputManagerTests: XCTestCase {
                 didCopyToClipboard: true
             )
         )
+    }
+
+    func testPasteboardSnapshotRestoresStringContents() {
+        let pasteboard = NSPasteboard.withUniqueName()
+        pasteboard.clearContents()
+        XCTAssertTrue(pasteboard.setString("Troy Barnes", forType: .string))
+        let snapshot = PasteboardSnapshot.capture(from: pasteboard)
+
+        pasteboard.clearContents()
+        XCTAssertTrue(pasteboard.setString("Abed Nadir", forType: .string))
+
+        XCTAssertTrue(snapshot.restore(to: pasteboard))
+        XCTAssertEqual(pasteboard.string(forType: .string), "Troy Barnes")
+    }
+
+    func testPasteboardSnapshotRestoresEmptyClipboard() {
+        let pasteboard = NSPasteboard.withUniqueName()
+        pasteboard.clearContents()
+        let snapshot = PasteboardSnapshot.capture(from: pasteboard)
+        XCTAssertTrue(pasteboard.setString("Señor Chang", forType: .string))
+
+        XCTAssertTrue(snapshot.restore(to: pasteboard))
+        XCTAssertNil(pasteboard.string(forType: .string))
     }
 }

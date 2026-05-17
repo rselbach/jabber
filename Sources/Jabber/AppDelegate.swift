@@ -240,7 +240,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                     title: "Model Not Ready",
                     message: "Jabber is still preparing the speech model. Try again in a moment."
                 )
-                showSetupPopover()
+                showSetupPopoverIfNeeded()
             }
             return
         }
@@ -257,7 +257,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 message: "Jabber needs microphone access to record speech.",
                 section: .microphone
             )
-            showSetupPopover()
+            showSetupPopoverIfNeeded()
             return
         }
 
@@ -287,7 +287,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 message: "Grant accessibility permission before dictating in paste mode, or switch output to Copy to clipboard in Settings.",
                 section: .accessibility
             )
-            showSetupPopover()
+            showSetupPopoverIfNeeded()
             return false
         }
         return true
@@ -334,6 +334,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             hasDownloadedModel: ModelManager.shared.hasAnyDownloadedModel,
             isDownloadingModel: ModelManager.shared.models.contains { $0.isDownloading }
         )
+    }
+
+    private func showSetupPopoverIfNeeded() {
+        guard !currentSetupReadiness().isComplete else { return }
+        showSetupPopover()
     }
 
     private func showSetupPopover() {

@@ -3,32 +3,38 @@ import Foundation
 enum NonDictationUIState: Equatable {
     case ready
     case downloading(ModelDownloadState)
-    case loadingModel
+    case loadingModel(status: String, progress: Double?)
     case error
 }
 
 enum NonDictationUIResolver {
+    private static let defaultLoadingStatus = "Loading model..."
+
     static func resolve(
         forceLoading: Bool,
         modelState: TranscriptionService.State,
-        isModelLoadInProgress: Bool,
         downloadState: ModelDownloadState?
     ) -> NonDictationUIState {
-        switch (forceLoading, modelState, isModelLoadInProgress, downloadState) {
-        case (_, .error, _, _):
+        switch (forceLoading, modelState, downloadState) {
+        case (_, .error, _):
             return .error
-        case (true, _, _, _):
-            return .loadingModel
-        case (_, .loading, true, _):
-            return .loadingModel
-        case (_, _, _, let download?):
+        case (true, _, _):
+            return loadingState(for: modelState)
+        case (_, _, let download?):
             return .downloading(download)
-        case (_, .ready, _, _):
+        case (_, .ready, _):
             return .ready
-        case (_, .notReady, _, _):
-            return .loadingModel
-        case (_, .loading, _, _):
-            return .loadingModel
+        case (_, .notReady, _):
+            return .loadingModel(status: defaultLoadingStatus, progress: nil)
+        case (_, .loading, _):
+            return loadingState(for: modelState)
         }
+    }
+
+    private static func loadingState(for modelState: TranscriptionService.State) -> NonDictationUIState {
+        guard case .loading(let status, let progress) = modelState else {
+            return .loadingModel(status: defaultLoadingStatus, progress: nil)
+        }
+        return .loadingModel(status: status, progress: progress)
     }
 }

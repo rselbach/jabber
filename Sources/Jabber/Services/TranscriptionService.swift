@@ -53,7 +53,7 @@ actor TranscriptionService {
 
     enum State: Sendable {
         case notReady
-        case loading
+        case loading(status: String, progress: Double?)
         case ready
         case error(String)
     }
@@ -199,6 +199,8 @@ actor TranscriptionService {
             try Task.checkCancellation()
             guard loadGeneration == currentLoadGeneration else { throw CancellationError() }
 
+            notifyState(.loading(status: "Preparing model...", progress: nil))
+
             var modelIdToLoad = desiredModelId
             let modelFolder: URL
             do {
@@ -218,7 +220,7 @@ actor TranscriptionService {
             try Task.checkCancellation()
             guard loadGeneration == currentLoadGeneration else { throw CancellationError() }
 
-            notifyState(.loading)
+            notifyState(.loading(status: "Loading model...", progress: nil))
 
             guard let huggingFaceModelId = ModelManager.qwen3ASRHuggingFaceModelId(for: modelIdToLoad) else {
                 throw ModelError.modelNotFound(modelId: modelIdToLoad)
@@ -227,7 +229,16 @@ actor TranscriptionService {
             let model = try await Qwen3ASRModel.fromPretrained(
                 modelId: huggingFaceModelId,
                 cacheDir: modelFolder,
-                offlineMode: true
+                offlineMode: true,
+                progressHandler: { [weak self] progress, status in
+                    Task {
+                        await self?.publishModelLoadProgress(
+                            status: status,
+                            progress: progress,
+                            generation: currentLoadGeneration
+                        )
+                    }
+                }
             )
 
             try Task.checkCancellation()
@@ -239,6 +250,15 @@ actor TranscriptionService {
             notifyState(.ready)
             return
         }
+    }
+
+    private func publishModelLoadProgress(status: String, progress: Double, generation: UInt64) {
+        guard isLoading, loadGeneration == generation else { return }
+
+        let trimmedStatus = status.trimmingCharacters(in: .whitespacesAndNewlines)
+        let displayStatus = trimmedStatus.isEmpty ? "Loading model..." : trimmedStatus
+        let boundedProgress = min(max(progress, 0), 1)
+        notifyState(.loading(status: displayStatus, progress: boundedProgress))
     }
 
     private func waitForModelLoad() async throws {

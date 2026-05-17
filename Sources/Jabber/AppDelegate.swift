@@ -454,7 +454,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         NonDictationUIResolver.resolve(
             forceLoading: forceLoading,
             modelState: modelState,
-            isModelLoadInProgress: isModelLoadInProgress,
             downloadState: currentDownloadForUI()
         )
     }
@@ -468,9 +467,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             downloadOverlay.show()
             downloadOverlay.updateProgress(download.progress, status: download.status)
             updateStatusIcon(state: .downloading)
-        case .loadingModel:
+        case .loadingModel(let status, let progress):
             downloadOverlay.show()
-            downloadOverlay.updateProgress(0, status: "Loading model...", indeterminate: true)
+            if let progress {
+                downloadOverlay.updateProgress(progress, status: status)
+            } else {
+                downloadOverlay.updateProgress(0, status: status, indeterminate: true)
+            }
             updateStatusIcon(state: .downloading)
         case .error:
             downloadOverlay.hide()

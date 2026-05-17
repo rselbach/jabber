@@ -16,8 +16,7 @@ final class OutputManager {
     private static let clipboardRestoreDelay: TimeInterval = 0.5
 
     var mode: OutputMode {
-        let modeString = AppSettings.string(AppSettingKey.outputMode, default: OutputMode.pasteInPlace.rawValue)
-        return OutputMode(rawValue: modeString) ?? .pasteInPlace
+        OutputMode(rawValue: TypedSettings[.outputMode]) ?? .pasteInPlace
     }
 
     func output(_ text: String) {

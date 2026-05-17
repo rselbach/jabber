@@ -8,11 +8,11 @@ final class ModelManagerTests: XCTestCase {
     override func setUp() {
         super.setUp()
         modelManager = ModelManager.shared
-        AppSettings.setString(AppMode.baseModelId, forKey: AppSettingKey.selectedModel)
+        TypedSettings[.selectedModel] = AppMode.baseModelId
     }
 
     override func tearDown() {
-        AppSettings.setString(AppMode.baseModelId, forKey: AppSettingKey.selectedModel)
+        TypedSettings[.selectedModel] = AppMode.baseModelId
         super.tearDown()
     }
     
@@ -44,37 +44,37 @@ final class ModelManagerTests: XCTestCase {
     }
 
     func testMigrateLegacyUnavailableModelIds() {
-        AppSettings.setString("small", forKey: AppSettingKey.selectedModel)
+        TypedSettings[.selectedModel] = "small"
         XCTAssertTrue(modelManager.migrateSelectedModelIfNeeded())
-        XCTAssertEqual(AppSettings.string(AppSettingKey.selectedModel, default: ""), AppMode.baseModelId)
+        XCTAssertEqual(TypedSettings[.selectedModel], AppMode.baseModelId)
 
-        AppSettings.setString("large-v3", forKey: AppSettingKey.selectedModel)
+        TypedSettings[.selectedModel] = "large-v3"
         XCTAssertTrue(modelManager.migrateSelectedModelIfNeeded())
-        XCTAssertEqual(AppSettings.string(AppSettingKey.selectedModel, default: ""), AppMode.largeModelId)
+        XCTAssertEqual(TypedSettings[.selectedModel], AppMode.largeModelId)
     }
 
     func testMigrateExperimentalQwenModelIds() {
-        AppSettings.setString("qwen3-asr-0.6b-mlx-4bit", forKey: AppSettingKey.selectedModel)
+        TypedSettings[.selectedModel] = "qwen3-asr-0.6b-mlx-4bit"
         XCTAssertTrue(modelManager.migrateSelectedModelIfNeeded())
-        XCTAssertEqual(AppSettings.string(AppSettingKey.selectedModel, default: ""), AppMode.baseModelId)
+        XCTAssertEqual(TypedSettings[.selectedModel], AppMode.baseModelId)
 
-        AppSettings.setString("qwen3-asr-1.7b-mlx-4bit", forKey: AppSettingKey.selectedModel)
+        TypedSettings[.selectedModel] = "qwen3-asr-1.7b-mlx-4bit"
         XCTAssertTrue(modelManager.migrateSelectedModelIfNeeded())
-        XCTAssertEqual(AppSettings.string(AppSettingKey.selectedModel, default: ""), AppMode.mediumModelId)
+        XCTAssertEqual(TypedSettings[.selectedModel], AppMode.mediumModelId)
 
-        AppSettings.setString("qwen3-asr-1.7b-mlx-8bit", forKey: AppSettingKey.selectedModel)
+        TypedSettings[.selectedModel] = "qwen3-asr-1.7b-mlx-8bit"
         XCTAssertTrue(modelManager.migrateSelectedModelIfNeeded())
-        XCTAssertEqual(AppSettings.string(AppSettingKey.selectedModel, default: ""), AppMode.largeModelId)
+        XCTAssertEqual(TypedSettings[.selectedModel], AppMode.largeModelId)
     }
 
     func testValidAndUnknownSelectedModelMigration() {
-        AppSettings.setString(AppMode.mediumModelId, forKey: AppSettingKey.selectedModel)
+        TypedSettings[.selectedModel] = AppMode.mediumModelId
         XCTAssertFalse(modelManager.migrateSelectedModelIfNeeded())
-        XCTAssertEqual(AppSettings.string(AppSettingKey.selectedModel, default: ""), AppMode.mediumModelId)
+        XCTAssertEqual(TypedSettings[.selectedModel], AppMode.mediumModelId)
 
-        AppSettings.setString("totally-unknown-model", forKey: AppSettingKey.selectedModel)
+        TypedSettings[.selectedModel] = "totally-unknown-model"
         XCTAssertTrue(modelManager.migrateSelectedModelIfNeeded())
-        XCTAssertEqual(AppSettings.string(AppSettingKey.selectedModel, default: ""), AppMode.baseModelId)
+        XCTAssertEqual(TypedSettings[.selectedModel], AppMode.baseModelId)
     }
     
     func testModelPropertiesAreSet() {
@@ -116,7 +116,7 @@ final class ModelManagerTests: XCTestCase {
     
     func testSelectModelReturnsFalseForSameModel() {
         // Get currently selected model
-        let currentModel = AppSettings.string(AppSettingKey.selectedModel, default: AppMode.baseModelId)
+        let currentModel = TypedSettings[.selectedModel]
         let result = modelManager.selectModel(currentModel, previousModelId: currentModel)
         XCTAssertFalse(result, "Should return false when selecting same model")
     }

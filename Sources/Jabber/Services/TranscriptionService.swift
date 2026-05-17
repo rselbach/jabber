@@ -93,7 +93,7 @@ actor TranscriptionService {
             // Invalid code - fall back to auto-detect and notify user
             logger.warning("Invalid language code '\(language)' - falling back to auto-detect")
             selectedLanguage = "auto"
-            AppSettings.setString("auto", forKey: AppSettingKey.selectedLanguage)
+            TypedSettings[.selectedLanguage] = "auto"
 
             Task { @MainActor in
                 NotificationService.shared.showWarning(
@@ -210,7 +210,7 @@ actor TranscriptionService {
                 case .modelNotFound:
                     logger.warning("Unknown model id '\(modelIdToLoad)', falling back to base")
                     modelIdToLoad = AppMode.baseModelId
-                    AppSettings.setString(modelIdToLoad, forKey: AppSettingKey.selectedModel)
+                    TypedSettings[.selectedModel] = modelIdToLoad
                     modelFolder = try await ModelManager.shared.ensureModelDownloaded(modelIdToLoad)
                 default:
                     throw error

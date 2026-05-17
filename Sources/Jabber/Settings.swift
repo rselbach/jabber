@@ -18,11 +18,11 @@ enum TypedSetting<T>: Sendable {
     /// The UserDefaults key for this setting
     var key: String {
         switch self {
-        case .selectedModel: return "selectedModel"
-        case .selectedLanguage: return "selectedLanguage"
-        case .outputMode: return "outputMode"
-        case .hotkeyDisplay: return "hotkeyDisplay"
-        case .vocabularyPrompt: return "vocabularyPrompt"
+        case .selectedModel: return AppSettingKey.selectedModel
+        case .selectedLanguage: return AppSettingKey.selectedLanguage
+        case .outputMode: return AppSettingKey.outputMode
+        case .hotkeyDisplay: return AppSettingKey.hotkeyDisplay
+        case .vocabularyPrompt: return AppSettingKey.vocabularyPrompt
         }
     }
 }

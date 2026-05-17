@@ -371,10 +371,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             try Task.checkCancellation()
 
             // Sync vocabulary prompt and language from settings
-            let vocab = AppSettings.string(AppSettingKey.vocabularyPrompt, default: "")
+            let vocab = TypedSettings[.vocabularyPrompt]
             await transcriptionService.setVocabularyPrompt(vocab)
 
-            let language = AppSettings.string(AppSettingKey.selectedLanguage, default: Constants.defaultLanguage)
+            let language = TypedSettings[.selectedLanguage]
             await transcriptionService.setLanguage(language)
 
             try Task.checkCancellation()

@@ -89,12 +89,12 @@ final class ModelManager {
 
     func selectedModelId() -> String {
         migrateSelectedModelIfNeeded()
-        return AppSettings.string(AppSettingKey.selectedModel, default: AppMode.baseModelId)
+        return TypedSettings[.selectedModel]
     }
 
     @discardableResult
     func migrateSelectedModelIfNeeded(notify: Bool = false) -> Bool {
-        let current = AppSettings.string(AppSettingKey.selectedModel, default: AppMode.baseModelId)
+        let current = TypedSettings[.selectedModel]
         let migrated: String
 
         if let legacyReplacement = Self.legacyModelIdMigration[current] {
@@ -108,7 +108,7 @@ final class ModelManager {
         guard migrated != current else { return false }
 
         logger.info("Migrating selected model from '\(current)' to '\(migrated)'")
-        AppSettings.setString(migrated, forKey: AppSettingKey.selectedModel)
+        TypedSettings[.selectedModel] = migrated
         if notify {
             NotificationCenter.default.post(name: Constants.Notifications.modelDidChange, object: nil)
         }
@@ -137,9 +137,9 @@ final class ModelManager {
 
     func selectModel(_ modelId: String, previousModelId: String?) -> Bool {
         guard downloadedModels.contains(where: { $0.id == modelId }) else { return false }
-        let current = previousModelId ?? AppSettings.string(AppSettingKey.selectedModel, default: AppMode.baseModelId)
+        let current = previousModelId ?? TypedSettings[.selectedModel]
         guard current != modelId else { return false }
-        AppSettings.setString(modelId, forKey: AppSettingKey.selectedModel)
+        TypedSettings[.selectedModel] = modelId
         NotificationCenter.default.post(name: Constants.Notifications.modelDidChange, object: nil)
         return true
     }
@@ -279,7 +279,7 @@ final class ModelManager {
     }
 
     func deleteModel(_ modelId: String) throws {
-        let currentModel = AppSettings.string(AppSettingKey.selectedModel, default: AppMode.baseModelId)
+        let currentModel = TypedSettings[.selectedModel]
 
         // Prevent deleting currently selected model if it's the only one
         if currentModel == modelId && downloadedModels.count == 1 {
@@ -303,10 +303,10 @@ final class ModelManager {
             guard let firstDownloaded = downloadedModels.first?.id else {
                 // This should never happen due to the guard at the top, but be safe
                 logger.error("No models available after deletion, falling back to base")
-                AppSettings.setString(AppMode.baseModelId, forKey: AppSettingKey.selectedModel)
+                TypedSettings[.selectedModel] = AppMode.baseModelId
                 return
             }
-            AppSettings.setString(firstDownloaded, forKey: AppSettingKey.selectedModel)
+            TypedSettings[.selectedModel] = firstDownloaded
             NotificationCenter.default.post(name: Constants.Notifications.modelDidChange, object: nil)
         }
     }
@@ -316,7 +316,7 @@ final class ModelManager {
 
         do {
             try await downloadModel(AppMode.baseModelId)
-            AppSettings.setString(AppMode.baseModelId, forKey: AppSettingKey.selectedModel)
+            TypedSettings[.selectedModel] = AppMode.baseModelId
         } catch {
             logger.error("Failed to download base model: \(error.localizedDescription)")
         }

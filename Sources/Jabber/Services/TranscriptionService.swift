@@ -200,15 +200,16 @@ actor TranscriptionService {
             guard loadGeneration == currentLoadGeneration else { throw CancellationError() }
 
             var modelIdToLoad = desiredModelId
+            let modelFolder: URL
             do {
-                _ = try await ModelManager.shared.ensureModelDownloaded(modelIdToLoad)
+                modelFolder = try await ModelManager.shared.ensureModelDownloaded(modelIdToLoad)
             } catch let error as ModelError {
                 switch error {
                 case .modelNotFound:
                     logger.warning("Unknown model id '\(modelIdToLoad)', falling back to base")
                     modelIdToLoad = AppMode.baseModelId
                     AppSettings.setString(modelIdToLoad, forKey: AppSettingKey.selectedModel)
-                    _ = try await ModelManager.shared.ensureModelDownloaded(modelIdToLoad)
+                    modelFolder = try await ModelManager.shared.ensureModelDownloaded(modelIdToLoad)
                 default:
                     throw error
                 }
@@ -223,7 +224,11 @@ actor TranscriptionService {
                 throw ModelError.modelNotFound(modelId: modelIdToLoad)
             }
 
-            let model = try await Qwen3ASRModel.fromPretrained(modelId: huggingFaceModelId)
+            let model = try await Qwen3ASRModel.fromPretrained(
+                modelId: huggingFaceModelId,
+                cacheDir: modelFolder,
+                offlineMode: true
+            )
 
             try Task.checkCancellation()
             guard loadGeneration == currentLoadGeneration else { throw CancellationError() }

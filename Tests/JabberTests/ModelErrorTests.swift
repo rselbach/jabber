@@ -12,6 +12,14 @@ final class ModelErrorTests: XCTestCase {
         XCTAssertEqual(error.errorDescription, "Download timed out for model 'base'.")
     }
     
+    func testIncompleteModelInstallationErrorDescription() {
+        let error = ModelError.incompleteModelInstallation(
+            modelId: "base",
+            details: "missing files: vocab.json"
+        )
+        XCTAssertEqual(error.errorDescription, "Model 'base' is incomplete: missing files: vocab.json.")
+    }
+
     func testModelNotFoundErrorDescription() {
         let error = ModelError.modelNotFound(modelId: "nonexistent")
         XCTAssertEqual(error.errorDescription, "Model 'nonexistent' not found or already deleted.")

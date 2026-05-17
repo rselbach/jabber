@@ -304,11 +304,11 @@ final class ModelManager {
             throw ModelError.modelNotFound(modelId: modelId)
         }
 
-        let modelFolder = try HuggingFaceDownloader.getCacheDirectory(for: huggingFaceModelId)
+        let downloadFolder = try HuggingFaceDownloader.getCacheDirectory(for: huggingFaceModelId)
 
         try await HuggingFaceDownloader.downloadWeights(
             modelId: huggingFaceModelId,
-            to: modelFolder,
+            to: downloadFolder,
             additionalFiles: ["vocab.json", "merges.txt", "tokenizer_config.json"],
             progressHandler: { [weak self] progress in
                 Task { @MainActor in
@@ -321,7 +321,20 @@ final class ModelManager {
                 }
             }
         )
-        return modelFolder
+
+        let validation = ModelInstallationValidator.validateQwen3ASRModelFolder(at: downloadFolder)
+        if validation.isComplete {
+            return downloadFolder
+        }
+
+        if let verifiedFolder = qwen3ASRModelFolder(for: modelId) {
+            return verifiedFolder
+        }
+
+        throw ModelError.incompleteModelInstallation(
+            modelId: modelId,
+            details: validation.failureDescription
+        )
     }
 
     private func qwen3ASRModelFolder(for modelId: String) -> URL? {
@@ -329,18 +342,21 @@ final class ModelManager {
             return nil
         }
 
-        let fm = FileManager.default
         let candidates = [
             qwen3ASRCacheFolder(for: huggingFaceModelId),
             qwen3ASROldCacheFolder(for: huggingFaceModelId)
         ]
-        return candidates.first { folder in
-            guard fm.fileExists(atPath: folder.path) else { return false }
-            guard let contents = try? fm.contentsOfDirectory(at: folder, includingPropertiesForKeys: nil) else {
-                return false
+
+        for folder in candidates {
+            let validation = ModelInstallationValidator.validateQwen3ASRModelFolder(at: folder)
+            guard validation.folderExists else { continue }
+            if validation.isComplete {
+                return folder
             }
-            return contents.contains { $0.pathExtension == "safetensors" }
+            logger.warning("Ignoring incomplete model folder at \(folder.path): \(validation.failureDescription)")
         }
+
+        return nil
     }
 
     private func qwen3ASRCacheFolder(for huggingFaceModelId: String) -> URL {
@@ -474,6 +490,7 @@ final class ModelManager {
 enum ModelError: Error, LocalizedError {
     case cannotDeleteActiveModel
     case downloadTimeout(modelId: String)
+    case incompleteModelInstallation(modelId: String, details: String)
     case modelNotFound(modelId: String)
 
     var errorDescription: String? {
@@ -482,6 +499,8 @@ enum ModelError: Error, LocalizedError {
             return "Cannot delete the currently active model. Please select a different model first."
         case .downloadTimeout(let modelId):
             return "Download timed out for model '\(modelId)'."
+        case .incompleteModelInstallation(let modelId, let details):
+            return "Model '\(modelId)' is incomplete: \(details)."
         case .modelNotFound(let modelId):
             return "Model '\(modelId)' not found or already deleted."
         }

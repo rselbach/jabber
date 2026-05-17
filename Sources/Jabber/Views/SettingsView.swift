@@ -1,3 +1,4 @@
+import AppKit
 import SwiftUI
 
 struct SettingsView: View {
@@ -10,6 +11,7 @@ struct SettingsView: View {
     @AppStorage(AppSettingKey.selectedLanguage) private var selectedLanguage = Constants.defaultLanguage
 
     @State private var modelManager = ModelManager.shared
+    @State private var permissionRefreshTick = false
     @State private var errorMessage: String?
     @State private var showError = false
     @State private var pendingDeleteModelId: String?
@@ -39,8 +41,12 @@ struct SettingsView: View {
         }
         .frame(width: 520, height: 560)
         .onAppear {
+            permissionRefreshTick.toggle()
             _ = modelManager.migrateSelectedModelIfNeeded()
             modelManager.refreshModels()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
+            permissionRefreshTick.toggle()
         }
         .alert("Error", isPresented: $showError, presenting: errorMessage) { _ in
             Button("OK") { }
@@ -92,8 +98,25 @@ struct SettingsView: View {
         showError = true
     }
 
+    private var setupReadiness: SetupReadiness {
+        _ = permissionRefreshTick
+        return SetupReadinessResolver.resolve(
+            hasMicrophonePermission: PermissionService.shared.hasMicrophonePermission(),
+            hasAccessibilityPermission: PermissionService.shared.hasAccessibilityPermission(),
+            requiresAccessibilityPermission: selectedOutputMode.requiresAccessibilityPermission,
+            hasDownloadedModel: modelManager.hasAnyDownloadedModel,
+            isDownloadingModel: modelManager.models.contains { $0.isDownloading }
+        )
+    }
+
+    private var selectedOutputMode: OutputManager.OutputMode {
+        OutputManager.OutputMode(rawValue: outputMode) ?? .pasteInPlace
+    }
+
     private var generalTab: some View {
         Form {
+            setupSection
+
             Section {
                 Picker("After transcription", selection: $outputMode) {
                     Text("Copy to clipboard").tag(OutputManager.OutputMode.clipboard.rawValue)
@@ -165,6 +188,42 @@ struct SettingsView: View {
             }
         }
         .formStyle(.grouped)
+    }
+
+    private var setupSection: some View {
+        Section {
+            SetupChecklistView(
+                readiness: setupReadiness,
+                onRequestMicrophone: requestMicrophoneAccess,
+                onOpenAccessibilitySettings: openAccessibilitySettings,
+                onDownloadBaseModel: downloadBaseModel
+            )
+        } header: {
+            Text("Setup")
+        } footer: {
+            Text("Jabber needs these before dictation feels boringly reliable.")
+        }
+    }
+
+    private func requestMicrophoneAccess() {
+        Task { @MainActor in
+            let granted = await PermissionService.shared.requestMicrophonePermission()
+            if !granted {
+                PermissionService.shared.openPrivacySettings(for: .microphone)
+            }
+            permissionRefreshTick.toggle()
+        }
+    }
+
+    private func openAccessibilitySettings() {
+        PermissionService.shared.openPrivacySettings(for: .accessibility)
+        permissionRefreshTick.toggle()
+    }
+
+    private func downloadBaseModel() {
+        if !modelManager.startDownload(AppMode.baseModelId) {
+            modelManager.refreshModels()
+        }
     }
 
     private var modelsTab: some View {

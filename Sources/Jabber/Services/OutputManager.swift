@@ -9,6 +9,10 @@ final class OutputManager {
     enum OutputMode: String {
         case clipboard
         case pasteInPlace = "paste"
+
+        var requiresAccessibilityPermission: Bool {
+            self == .pasteInPlace
+        }
     }
 
     private let logger = Logger(subsystem: "com.rselbach.jabber", category: "OutputManager")
@@ -20,7 +24,7 @@ final class OutputManager {
     }
 
     var requiresAccessibilityPermission: Bool {
-        Self.requiresAccessibilityPermission(mode: mode)
+        mode.requiresAccessibilityPermission
     }
 
     func output(_ text: String) {
@@ -70,7 +74,7 @@ final class OutputManager {
     }
 
     static func requiresAccessibilityPermission(mode: OutputMode) -> Bool {
-        mode == .pasteInPlace
+        mode.requiresAccessibilityPermission
     }
 
     private func copyToClipboard(_ text: String, pasteboard: NSPasteboard) -> Bool {

@@ -1,9 +1,12 @@
+import AppKit
 import SwiftUI
 
 struct MenuBarView: View {
     @AppStorage(AppSettingKey.selectedModel) private var selectedModel = AppMode.baseModelId
     @AppStorage(AppSettingKey.selectedLanguage) private var selectedLanguage = Constants.defaultLanguage
+    @AppStorage(AppSettingKey.outputMode) private var outputMode = OutputManager.OutputMode.pasteInPlace.rawValue
     @State private var modelManager = ModelManager.shared
+    @State private var permissionRefreshTick = false
     @ObservedObject var updaterController: UpdaterController
 
     var body: some View {
@@ -12,6 +15,24 @@ struct MenuBarView: View {
                 .font(.headline)
 
             Divider()
+
+            if !setupReadiness.isComplete {
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("Finish Setup")
+                        .font(.subheadline)
+                        .fontWeight(.semibold)
+
+                    SetupChecklistView(
+                        readiness: setupReadiness,
+                        showsCompleteMessage: false,
+                        onRequestMicrophone: requestMicrophoneAccess,
+                        onOpenAccessibilitySettings: openAccessibilitySettings,
+                        onDownloadBaseModel: downloadBaseModel
+                    )
+                }
+
+                Divider()
+            }
 
             VStack(alignment: .leading, spacing: 8) {
                 Text("Press ⌥ Space to dictate")
@@ -67,19 +88,63 @@ struct MenuBarView: View {
             }
         }
         .padding()
-        .frame(width: 280)
+        .frame(width: 320)
         .onAppear {
-            _ = modelManager.migrateSelectedModelIfNeeded()
-            modelManager.refreshModels()
-
-            if !modelManager.downloadedModels.contains(where: { $0.id == selectedModel }),
-               let fallbackModel = modelManager.downloadedModels.first?.id {
-                selectedModel = fallbackModel
-                _ = modelManager.selectModel(fallbackModel, previousModelId: nil)
-            }
+            refreshMenuState()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
+            permissionRefreshTick.toggle()
         }
         .onChange(of: selectedModel) { oldValue, newValue in
             _ = modelManager.selectModel(newValue, previousModelId: oldValue)
+        }
+    }
+
+    private var setupReadiness: SetupReadiness {
+        _ = permissionRefreshTick
+        return SetupReadinessResolver.resolve(
+            hasMicrophonePermission: PermissionService.shared.hasMicrophonePermission(),
+            hasAccessibilityPermission: PermissionService.shared.hasAccessibilityPermission(),
+            requiresAccessibilityPermission: selectedOutputMode.requiresAccessibilityPermission,
+            hasDownloadedModel: modelManager.hasAnyDownloadedModel,
+            isDownloadingModel: modelManager.models.contains { $0.isDownloading }
+        )
+    }
+
+    private var selectedOutputMode: OutputManager.OutputMode {
+        OutputManager.OutputMode(rawValue: outputMode) ?? .pasteInPlace
+    }
+
+    private func refreshMenuState() {
+        permissionRefreshTick.toggle()
+        _ = modelManager.migrateSelectedModelIfNeeded()
+        modelManager.refreshModels()
+
+        if !modelManager.downloadedModels.contains(where: { $0.id == selectedModel }),
+           let fallbackModel = modelManager.downloadedModels.first?.id {
+            selectedModel = fallbackModel
+            _ = modelManager.selectModel(fallbackModel, previousModelId: nil)
+        }
+    }
+
+    private func requestMicrophoneAccess() {
+        Task { @MainActor in
+            let granted = await PermissionService.shared.requestMicrophonePermission()
+            if !granted {
+                PermissionService.shared.openPrivacySettings(for: .microphone)
+            }
+            permissionRefreshTick.toggle()
+        }
+    }
+
+    private func openAccessibilitySettings() {
+        PermissionService.shared.openPrivacySettings(for: .accessibility)
+        permissionRefreshTick.toggle()
+    }
+
+    private func downloadBaseModel() {
+        if !modelManager.startDownload(AppMode.baseModelId) {
+            modelManager.refreshModels()
         }
     }
 }

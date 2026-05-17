@@ -27,6 +27,24 @@ enum TypedSetting<T>: Sendable {
     }
 }
 
+enum BoolSetting: Sendable {
+    case didShowFirstRunSetup
+
+    var key: String {
+        switch self {
+        case .didShowFirstRunSetup:
+            return AppSettingKey.didShowFirstRunSetup
+        }
+    }
+
+    var `default`: Bool {
+        switch self {
+        case .didShowFirstRunSetup:
+            return false
+        }
+    }
+}
+
 // MARK: - Default Values
 
 extension TypedSetting where T == String {
@@ -67,11 +85,28 @@ struct SettingsStore {
         }
     }
 
+    subscript(setting: BoolSetting) -> Bool {
+        get {
+            userDefaults.object(forKey: setting.key) as? Bool ?? setting.default
+        }
+        nonmutating set {
+            userDefaults.set(newValue, forKey: setting.key)
+        }
+    }
+
     func remove(_ setting: TypedSetting<String>) {
         userDefaults.removeObject(forKey: setting.key)
     }
 
+    func remove(_ setting: BoolSetting) {
+        userDefaults.removeObject(forKey: setting.key)
+    }
+
     func isSet(_ setting: TypedSetting<String>) -> Bool {
+        userDefaults.object(forKey: setting.key) != nil
+    }
+
+    func isSet(_ setting: BoolSetting) -> Bool {
         userDefaults.object(forKey: setting.key) != nil
     }
 }
@@ -90,13 +125,33 @@ enum TypedSettings {
         }
     }
     
+    /// Get a boolean setting value
+    static subscript(setting: BoolSetting) -> Bool {
+        get {
+            store[setting]
+        }
+        set {
+            store[setting] = newValue
+        }
+    }
+
     /// Remove a string setting value (reset to default)
     static func remove(_ setting: TypedSetting<String>) {
+        store.remove(setting)
+    }
+
+    /// Remove a boolean setting value (reset to default)
+    static func remove(_ setting: BoolSetting) {
         store.remove(setting)
     }
     
     /// Check if a string setting has been explicitly set
     static func isSet(_ setting: TypedSetting<String>) -> Bool {
+        store.isSet(setting)
+    }
+
+    /// Check if a boolean setting has been explicitly set
+    static func isSet(_ setting: BoolSetting) -> Bool {
         store.isSet(setting)
     }
 }

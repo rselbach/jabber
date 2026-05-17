@@ -6,4 +6,5 @@ enum AppSettingKey {
     static let outputMode = "outputMode"
     static let hotkeyDisplay = "hotkeyDisplay"
     static let vocabularyPrompt = "vocabularyPrompt"
+    static let didShowFirstRunSetup = "didShowFirstRunSetup"
 }

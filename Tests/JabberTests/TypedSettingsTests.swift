@@ -69,6 +69,26 @@ final class TypedSettingsTests: XCTestCase {
         XCTAssertEqual(settings[.selectedModel], AppMode.baseModelId)
         XCTAssertFalse(settings.isSet(.selectedModel))
     }
+
+    func testBoolSettingDefaultsAndPersistence() {
+        XCTAssertFalse(settings[.didShowFirstRunSetup])
+        XCTAssertFalse(settings.isSet(.didShowFirstRunSetup))
+
+        settings[.didShowFirstRunSetup] = true
+
+        XCTAssertTrue(settings[.didShowFirstRunSetup])
+        XCTAssertTrue(settings.isSet(.didShowFirstRunSetup))
+    }
+
+    func testBoolSettingRemoveResetsToDefault() {
+        settings[.didShowFirstRunSetup] = true
+        XCTAssertTrue(settings[.didShowFirstRunSetup])
+
+        settings.remove(.didShowFirstRunSetup)
+
+        XCTAssertFalse(settings[.didShowFirstRunSetup])
+        XCTAssertFalse(settings.isSet(.didShowFirstRunSetup))
+    }
     
     func testPersistenceAcrossAccesses() {
         settings[.vocabularyPrompt] = "persistent test value"

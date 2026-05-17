@@ -25,17 +25,22 @@ final class PermissionService {
         let currentStatus = AVCaptureDevice.authorizationStatus(for: .audio)
         switch currentStatus {
         case .authorized:
+            cacheMicrophonePermission(true)
             return true
         case .notDetermined:
-            return await withCheckedContinuation { continuation in
+            let granted = await withCheckedContinuation { continuation in
                 AVCaptureDevice.requestAccess(for: .audio) { granted in
                     continuation.resume(returning: granted)
                 }
             }
+            cacheMicrophonePermission(granted)
+            return granted
         case .denied, .restricted:
+            cacheMicrophonePermission(false)
             return false
         @unknown default:
             logger.warning("Unknown microphone authorization status")
+            cacheMicrophonePermission(false)
             return false
         }
     }
@@ -48,9 +53,16 @@ final class PermissionService {
 
         let status = AVCaptureDevice.authorizationStatus(for: .audio)
         let isAuthorized = status == .authorized
-        lastMicrophoneStatusCheck = now
-        lastMicrophonePermissionResult = isAuthorized
+        cacheMicrophonePermission(isAuthorized, checkedAt: now)
         return isAuthorized
+    }
+
+    private func cacheMicrophonePermission(
+        _ isAuthorized: Bool,
+        checkedAt date: Date = Date()
+    ) {
+        lastMicrophoneStatusCheck = date
+        lastMicrophonePermissionResult = isAuthorized
     }
 
     func requestAccessibilityPermission() -> Bool {

@@ -20,6 +20,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private let logger = Logger(subsystem: "com.rselbach.jabber", category: "AppDelegate")
 
     private var modelLoadTask: Task<Void, Never>?
+    private var firstRunSetupTask: Task<Void, Never>?
     private var isModelLoadInProgress = false
     private var modelLoadID = UUID()
 
@@ -60,10 +61,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             guard let self else { return }
             await loadModel()
         }
+        scheduleFirstRunSetupPrompt()
     }
 
     func applicationWillTerminate(_ notification: Notification) {
         modelLoadTask?.cancel()
+        firstRunSetupTask?.cancel()
         cancelDictation()
         NotificationCenter.default.removeObserver(self)
     }
@@ -195,7 +198,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
 
         popover = NSPopover()
-        popover?.contentSize = NSSize(width: 280, height: 200)
+        popover?.contentSize = NSSize(width: 320, height: 420)
         popover?.behavior = .transient
         popover?.contentViewController = NSHostingController(rootView: MenuBarView(updaterController: updaterController))
     }
@@ -237,6 +240,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                     title: "Model Not Ready",
                     message: "Jabber is still preparing the speech model. Try again in a moment."
                 )
+                showSetupPopover()
             }
             return
         }
@@ -253,6 +257,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 message: "Jabber needs microphone access to record speech.",
                 section: .microphone
             )
+            showSetupPopover()
             return
         }
 
@@ -282,6 +287,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 message: "Grant accessibility permission before dictating in paste mode, or switch output to Copy to clipboard in Settings.",
                 section: .accessibility
             )
+            showSetupPopover()
             return false
         }
         return true
@@ -293,10 +299,64 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if popover.isShown {
             popover.performClose(nil)
         } else {
-            NSApp.activate(ignoringOtherApps: true)
-            popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
-            popover.contentViewController?.view.window?.makeKey()
+            showPopover(relativeTo: button, activateApp: true)
         }
+    }
+
+    private func scheduleFirstRunSetupPrompt() {
+        firstRunSetupTask = Task { [weak self] in
+            do {
+                try await Task.sleep(for: .milliseconds(750))
+            } catch is CancellationError {
+                return
+            } catch {
+                self?.logger.error("Failed while waiting to show first-run setup: \(error.localizedDescription)")
+                return
+            }
+
+            self?.showFirstRunSetupIfNeeded()
+        }
+    }
+
+    private func showFirstRunSetupIfNeeded() {
+        guard !TypedSettings[BoolSetting.didShowFirstRunSetup] else { return }
+        TypedSettings[BoolSetting.didShowFirstRunSetup] = true
+
+        guard !currentSetupReadiness().isComplete else { return }
+        showSetupPopover()
+    }
+
+    private func currentSetupReadiness() -> SetupReadiness {
+        SetupReadinessResolver.resolve(
+            hasMicrophonePermission: permissionService.hasMicrophonePermission(),
+            hasAccessibilityPermission: permissionService.hasAccessibilityPermission(),
+            requiresAccessibilityPermission: outputManager.requiresAccessibilityPermission,
+            hasDownloadedModel: ModelManager.shared.hasAnyDownloadedModel,
+            isDownloadingModel: ModelManager.shared.models.contains { $0.isDownloading }
+        )
+    }
+
+    private func showSetupPopover() {
+        guard let button = statusItem?.button else {
+            logger.error("Status item button unavailable when trying to show setup popover")
+            return
+        }
+
+        showPopover(relativeTo: button, activateApp: false)
+    }
+
+    private func showPopover(relativeTo button: NSStatusBarButton, activateApp: Bool) {
+        guard let popover else {
+            logger.error("Popover unavailable when trying to show setup guidance")
+            return
+        }
+        guard !popover.isShown else { return }
+
+        if activateApp {
+            NSApp.activate(ignoringOtherApps: true)
+        }
+        popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
+        popover.contentViewController?.view.window?.makeKey()
     }
 
     private func startDictation() {

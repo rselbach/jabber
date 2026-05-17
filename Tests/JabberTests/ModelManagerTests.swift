@@ -4,16 +4,46 @@ import XCTest
 @MainActor
 final class ModelManagerTests: XCTestCase {
     private var modelManager: ModelManager!
+    private var settings: SettingsStore!
+    private var userDefaultsSuiteName: String!
+    private var userDefaults: UserDefaults!
+    private var cacheBaseURL: URL!
     
-    override func setUp() {
-        super.setUp()
-        modelManager = ModelManager.shared
-        TypedSettings[.selectedModel] = AppMode.baseModelId
+    override func setUpWithError() throws {
+        try super.setUpWithError()
+        userDefaultsSuiteName = "JabberTests.ModelManager.\(UUID().uuidString)"
+        userDefaults = try XCTUnwrap(UserDefaults(suiteName: userDefaultsSuiteName))
+        userDefaults.removePersistentDomain(forName: userDefaultsSuiteName)
+        settings = SettingsStore(userDefaults: userDefaults)
+
+        cacheBaseURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("JabberModelManagerTests", isDirectory: true)
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(
+            at: cacheBaseURL,
+            withIntermediateDirectories: true
+        )
+
+        settings[.selectedModel] = AppMode.baseModelId
+        modelManager = ModelManager(
+            settings: settings,
+            qwen3ASRCacheBaseURL: cacheBaseURL
+        )
     }
 
-    override func tearDown() {
-        TypedSettings[.selectedModel] = AppMode.baseModelId
-        super.tearDown()
+    override func tearDownWithError() throws {
+        if let cacheBaseURL, FileManager.default.fileExists(atPath: cacheBaseURL.path) {
+            try FileManager.default.removeItem(at: cacheBaseURL)
+        }
+        if let userDefaultsSuiteName, let userDefaults {
+            userDefaults.removePersistentDomain(forName: userDefaultsSuiteName)
+        }
+        modelManager = nil
+        settings = nil
+        userDefaults = nil
+        userDefaultsSuiteName = nil
+        cacheBaseURL = nil
+        try super.tearDownWithError()
     }
     
     func testModelDefinitionsExist() {
@@ -43,38 +73,53 @@ final class ModelManagerTests: XCTestCase {
         XCTAssertNil(ModelManager.qwen3ASRHuggingFaceModelId(for: "tiny"))
     }
 
-    func testMigrateLegacyUnavailableModelIds() {
-        TypedSettings[.selectedModel] = "small"
-        XCTAssertTrue(modelManager.migrateSelectedModelIfNeeded())
-        XCTAssertEqual(TypedSettings[.selectedModel], AppMode.baseModelId)
+    func testRefreshModelsUsesInjectedCacheDirectory() throws {
+        let modelFolder = cacheBaseURL
+            .appendingPathComponent("models", isDirectory: true)
+            .appendingPathComponent("aufklarer", isDirectory: true)
+            .appendingPathComponent("Qwen3-ASR-0.6B-MLX-4bit", isDirectory: true)
+        try createCompleteQwenModelFolder(at: modelFolder)
 
-        TypedSettings[.selectedModel] = "large-v3"
+        modelManager.refreshModels()
+
+        let baseModel = try XCTUnwrap(
+            modelManager.models.first { $0.id == AppMode.baseModelId }
+        )
+        XCTAssertTrue(baseModel.isDownloaded)
+    }
+
+    func testMigrateLegacyUnavailableModelIds() {
+        settings[.selectedModel] = "small"
         XCTAssertTrue(modelManager.migrateSelectedModelIfNeeded())
-        XCTAssertEqual(TypedSettings[.selectedModel], AppMode.largeModelId)
+        XCTAssertEqual(settings[.selectedModel], AppMode.baseModelId)
+
+        settings[.selectedModel] = "large-v3"
+        XCTAssertTrue(modelManager.migrateSelectedModelIfNeeded())
+        XCTAssertEqual(settings[.selectedModel], AppMode.largeModelId)
     }
 
     func testMigrateExperimentalQwenModelIds() {
-        TypedSettings[.selectedModel] = "qwen3-asr-0.6b-mlx-4bit"
+        settings[.selectedModel] = "qwen3-asr-0.6b-mlx-4bit"
         XCTAssertTrue(modelManager.migrateSelectedModelIfNeeded())
-        XCTAssertEqual(TypedSettings[.selectedModel], AppMode.baseModelId)
+        XCTAssertEqual(settings[.selectedModel], AppMode.baseModelId)
 
-        TypedSettings[.selectedModel] = "qwen3-asr-1.7b-mlx-4bit"
+        settings[.selectedModel] = "qwen3-asr-1.7b-mlx-4bit"
         XCTAssertTrue(modelManager.migrateSelectedModelIfNeeded())
-        XCTAssertEqual(TypedSettings[.selectedModel], AppMode.mediumModelId)
+        XCTAssertEqual(settings[.selectedModel], AppMode.mediumModelId)
 
-        TypedSettings[.selectedModel] = "qwen3-asr-1.7b-mlx-8bit"
+        settings[.selectedModel] = "qwen3-asr-1.7b-mlx-8bit"
         XCTAssertTrue(modelManager.migrateSelectedModelIfNeeded())
-        XCTAssertEqual(TypedSettings[.selectedModel], AppMode.largeModelId)
+        XCTAssertEqual(settings[.selectedModel], AppMode.largeModelId)
     }
 
     func testValidAndUnknownSelectedModelMigration() {
-        TypedSettings[.selectedModel] = AppMode.mediumModelId
+        settings[.selectedModel] = AppMode.mediumModelId
         XCTAssertFalse(modelManager.migrateSelectedModelIfNeeded())
-        XCTAssertEqual(TypedSettings[.selectedModel], AppMode.mediumModelId)
+        XCTAssertEqual(settings[.selectedModel], AppMode.mediumModelId)
 
-        TypedSettings[.selectedModel] = "totally-unknown-model"
+        settings[.selectedModel] = "totally-unknown-model"
         XCTAssertTrue(modelManager.migrateSelectedModelIfNeeded())
-        XCTAssertEqual(TypedSettings[.selectedModel], AppMode.baseModelId)
+        XCTAssertEqual(settings[.selectedModel], AppMode.baseModelId)
     }
     
     func testModelPropertiesAreSet() {
@@ -116,7 +161,7 @@ final class ModelManagerTests: XCTestCase {
     
     func testSelectModelReturnsFalseForSameModel() {
         // Get currently selected model
-        let currentModel = TypedSettings[.selectedModel]
+        let currentModel = settings[.selectedModel]
         let result = modelManager.selectModel(currentModel, previousModelId: currentModel)
         XCTAssertFalse(result, "Should return false when selecting same model")
     }
@@ -199,5 +244,22 @@ final class ModelManagerTests: XCTestCase {
         let models = modelManager.models
         let uniqueIds = Set(models.map { $0.id })
         XCTAssertEqual(uniqueIds.count, models.count, "All model IDs should be unique")
+    }
+
+    private func createCompleteQwenModelFolder(at url: URL) throws {
+        try FileManager.default.createDirectory(
+            at: url,
+            withIntermediateDirectories: true
+        )
+        let requiredFiles = [
+            "config.json",
+            "vocab.json",
+            "merges.txt",
+            "tokenizer_config.json",
+            "weights.safetensors"
+        ]
+        for fileName in requiredFiles {
+            try Data("test".utf8).write(to: url.appendingPathComponent(fileName))
+        }
     }
 }

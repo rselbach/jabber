@@ -3,74 +3,80 @@ import XCTest
 import Foundation
 
 final class TypedSettingsTests: XCTestCase {
-    override func setUp() {
-        super.setUp()
-        // Clean up test settings before each test
-        TypedSettings.remove(.selectedModel)
-        TypedSettings.remove(.selectedLanguage)
-        TypedSettings.remove(.vocabularyPrompt)
+    private var settings: SettingsStore!
+    private var userDefaultsSuiteName: String!
+    private var userDefaults: UserDefaults!
+
+    override func setUpWithError() throws {
+        try super.setUpWithError()
+        userDefaultsSuiteName = "JabberTests.TypedSettings.\(UUID().uuidString)"
+        userDefaults = try XCTUnwrap(UserDefaults(suiteName: userDefaultsSuiteName))
+        userDefaults.removePersistentDomain(forName: userDefaultsSuiteName)
+        settings = SettingsStore(userDefaults: userDefaults)
     }
     
-    override func tearDown() {
-        // Clean up after each test
-        TypedSettings.remove(.selectedModel)
-        TypedSettings.remove(.selectedLanguage)
-        TypedSettings.remove(.vocabularyPrompt)
-        super.tearDown()
+    override func tearDownWithError() throws {
+        if let userDefaultsSuiteName, let userDefaults {
+            userDefaults.removePersistentDomain(forName: userDefaultsSuiteName)
+        }
+        settings = nil
+        userDefaults = nil
+        userDefaultsSuiteName = nil
+        try super.tearDownWithError()
     }
     
     func testDefaultValues() {
-        XCTAssertEqual(TypedSettings[.selectedModel], AppMode.baseModelId, "Default model should be base")
-        XCTAssertEqual(TypedSettings[.selectedLanguage], Constants.defaultLanguage, "Default language should match system")
-        XCTAssertEqual(TypedSettings[.vocabularyPrompt], "", "Default vocabulary should be empty")
+        XCTAssertEqual(settings[.selectedModel], AppMode.baseModelId, "Default model should be base")
+        XCTAssertEqual(settings[.selectedLanguage], Constants.defaultLanguage, "Default language should match system")
+        XCTAssertEqual(settings[.vocabularyPrompt], "", "Default vocabulary should be empty")
     }
     
     func testSettingAndGettingValues() {
         // Set custom values
-        TypedSettings[.selectedModel] = "medium"
-        TypedSettings[.selectedLanguage] = "en"
-        TypedSettings[.vocabularyPrompt] = "medical terminology"
+        settings[.selectedModel] = "medium"
+        settings[.selectedLanguage] = "en"
+        settings[.vocabularyPrompt] = "medical terminology"
         
         // Verify they're stored
-        XCTAssertEqual(TypedSettings[.selectedModel], "medium")
-        XCTAssertEqual(TypedSettings[.selectedLanguage], "en")
-        XCTAssertEqual(TypedSettings[.vocabularyPrompt], "medical terminology")
+        XCTAssertEqual(settings[.selectedModel], "medium")
+        XCTAssertEqual(settings[.selectedLanguage], "en")
+        XCTAssertEqual(settings[.vocabularyPrompt], "medical terminology")
     }
     
     func testIsSetReturnsFalseForUnsetValues() {
         // Ensure settings are not set
-        TypedSettings.remove(.selectedModel)
+        settings.remove(.selectedModel)
         
         // isSet should return false for unset values
-        XCTAssertFalse(TypedSettings.isSet(.selectedModel), "isSet should return false for removed setting")
+        XCTAssertFalse(settings.isSet(.selectedModel), "isSet should return false for removed setting")
     }
     
     func testIsSetReturnsTrueForSetValues() {
-        TypedSettings[.selectedModel] = "large"
+        settings[.selectedModel] = "large"
         
-        XCTAssertTrue(TypedSettings.isSet(.selectedModel), "isSet should return true for explicitly set value")
+        XCTAssertTrue(settings.isSet(.selectedModel), "isSet should return true for explicitly set value")
     }
     
     func testRemoveResetsToDefault() {
         // Set a non-default value
-        TypedSettings[.selectedModel] = AppMode.largeModelId
-        XCTAssertEqual(TypedSettings[.selectedModel], AppMode.largeModelId)
+        settings[.selectedModel] = AppMode.largeModelId
+        XCTAssertEqual(settings[.selectedModel], AppMode.largeModelId)
         
         // Remove it
-        TypedSettings.remove(.selectedModel)
+        settings.remove(.selectedModel)
         
         // Should return to default
-        XCTAssertEqual(TypedSettings[.selectedModel], AppMode.baseModelId)
-        XCTAssertFalse(TypedSettings.isSet(.selectedModel))
+        XCTAssertEqual(settings[.selectedModel], AppMode.baseModelId)
+        XCTAssertFalse(settings.isSet(.selectedModel))
     }
     
     func testPersistenceAcrossAccesses() {
-        TypedSettings[.vocabularyPrompt] = "persistent test value"
+        settings[.vocabularyPrompt] = "persistent test value"
         
         // Access multiple times
-        let value1 = TypedSettings[.vocabularyPrompt]
-        let value2 = TypedSettings[.vocabularyPrompt]
-        let value3 = TypedSettings[.vocabularyPrompt]
+        let value1 = settings[.vocabularyPrompt]
+        let value2 = settings[.vocabularyPrompt]
+        let value3 = settings[.vocabularyPrompt]
         
         XCTAssertEqual(value1, value2)
         XCTAssertEqual(value2, value3)
@@ -78,11 +84,11 @@ final class TypedSettingsTests: XCTestCase {
     }
     
     func testEmptyStringIsValidValue() {
-        TypedSettings[.vocabularyPrompt] = ""
+        settings[.vocabularyPrompt] = ""
         
         // Empty string should be stored (not confused with default)
-        XCTAssertEqual(TypedSettings[.vocabularyPrompt], "")
-        XCTAssertTrue(TypedSettings.isSet(.vocabularyPrompt))
+        XCTAssertEqual(settings[.vocabularyPrompt], "")
+        XCTAssertTrue(settings.isSet(.vocabularyPrompt))
     }
     
     func testSettingKeysAreCorrect() {
@@ -92,15 +98,15 @@ final class TypedSettingsTests: XCTestCase {
         let languageKey = "selectedLanguage"
         
         // Set using UserDefaults directly
-        UserDefaults.standard.set("direct-model", forKey: modelKey)
-        UserDefaults.standard.set("direct-language", forKey: languageKey)
+        userDefaults.set("direct-model", forKey: modelKey)
+        userDefaults.set("direct-language", forKey: languageKey)
         
-        // Read using TypedSettings
-        XCTAssertEqual(TypedSettings[.selectedModel], "direct-model")
-        XCTAssertEqual(TypedSettings[.selectedLanguage], "direct-language")
+        // Read using SettingsStore
+        XCTAssertEqual(settings[.selectedModel], "direct-model")
+        XCTAssertEqual(settings[.selectedLanguage], "direct-language")
         
         // Cleanup
-        UserDefaults.standard.removeObject(forKey: modelKey)
-        UserDefaults.standard.removeObject(forKey: languageKey)
+        userDefaults.removeObject(forKey: modelKey)
+        userDefaults.removeObject(forKey: languageKey)
     }
 }

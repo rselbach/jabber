@@ -47,6 +47,8 @@ final class ModelManager {
     private var lastDownloadProgressReport: [String: CFAbsoluteTime] = [:]
     private var activeDownloads: [String: ActiveDownload] = [:]
     private let downloadProgressReportInterval: TimeInterval = 0.1
+    private let settings: SettingsStore
+    private let qwen3ASRCacheBaseURL: URL?
 
     private struct ActiveDownload {
         let id: UUID
@@ -74,7 +76,12 @@ final class ModelManager {
         )
     }
 
-    private init() {
+    init(
+        settings: SettingsStore = .standard,
+        qwen3ASRCacheBaseURL: URL? = nil
+    ) {
+        self.settings = settings
+        self.qwen3ASRCacheBaseURL = qwen3ASRCacheBaseURL
         migrateSelectedModelIfNeeded()
         refreshModels()
     }
@@ -89,12 +96,12 @@ final class ModelManager {
 
     func selectedModelId() -> String {
         migrateSelectedModelIfNeeded()
-        return TypedSettings[.selectedModel]
+        return settings[.selectedModel]
     }
 
     @discardableResult
     func migrateSelectedModelIfNeeded(notify: Bool = false) -> Bool {
-        let current = TypedSettings[.selectedModel]
+        let current = settings[.selectedModel]
         let migrated: String
 
         if let legacyReplacement = Self.legacyModelIdMigration[current] {
@@ -108,7 +115,7 @@ final class ModelManager {
         guard migrated != current else { return false }
 
         logger.info("Migrating selected model from '\(current)' to '\(migrated)'")
-        TypedSettings[.selectedModel] = migrated
+        settings[.selectedModel] = migrated
         if notify {
             NotificationCenter.default.post(name: Constants.Notifications.modelDidChange, object: nil)
         }
@@ -137,9 +144,9 @@ final class ModelManager {
 
     func selectModel(_ modelId: String, previousModelId: String?) -> Bool {
         guard downloadedModels.contains(where: { $0.id == modelId }) else { return false }
-        let current = previousModelId ?? TypedSettings[.selectedModel]
+        let current = previousModelId ?? settings[.selectedModel]
         guard current != modelId else { return false }
-        TypedSettings[.selectedModel] = modelId
+        settings[.selectedModel] = modelId
         NotificationCenter.default.post(name: Constants.Notifications.modelDidChange, object: nil)
         return true
     }
@@ -279,7 +286,7 @@ final class ModelManager {
     }
 
     func deleteModel(_ modelId: String) throws {
-        let currentModel = TypedSettings[.selectedModel]
+        let currentModel = settings[.selectedModel]
 
         // Prevent deleting currently selected model if it's the only one
         if currentModel == modelId && downloadedModels.count == 1 {
@@ -303,10 +310,10 @@ final class ModelManager {
             guard let firstDownloaded = downloadedModels.first?.id else {
                 // This should never happen due to the guard at the top, but be safe
                 logger.error("No models available after deletion, falling back to base")
-                TypedSettings[.selectedModel] = AppMode.baseModelId
+                settings[.selectedModel] = AppMode.baseModelId
                 return
             }
-            TypedSettings[.selectedModel] = firstDownloaded
+            settings[.selectedModel] = firstDownloaded
             NotificationCenter.default.post(name: Constants.Notifications.modelDidChange, object: nil)
         }
     }
@@ -316,7 +323,7 @@ final class ModelManager {
 
         do {
             try await downloadModel(AppMode.baseModelId)
-            TypedSettings[.selectedModel] = AppMode.baseModelId
+            settings[.selectedModel] = AppMode.baseModelId
         } catch {
             logger.error("Failed to download base model: \(error.localizedDescription)")
         }
@@ -349,7 +356,10 @@ final class ModelManager {
             throw ModelError.modelNotFound(modelId: modelId)
         }
 
-        let downloadFolder = try HuggingFaceDownloader.getCacheDirectory(for: huggingFaceModelId)
+        let downloadFolder = try HuggingFaceDownloader.getCacheDirectory(
+            for: huggingFaceModelId,
+            basePath: qwen3ASRCacheBase()
+        )
 
         try await HuggingFaceDownloader.downloadWeights(
             modelId: huggingFaceModelId,
@@ -422,6 +432,10 @@ final class ModelManager {
     }
 
     private func qwen3ASRCacheBase() -> URL {
+        if let qwen3ASRCacheBaseURL {
+            return qwen3ASRCacheBaseURL
+        }
+
         let environment = ProcessInfo.processInfo.environment
         if let override = environment["QWEN3_CACHE_DIR"] ?? environment["QWEN3_ASR_CACHE_DIR"],
            !override.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {

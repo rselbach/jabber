@@ -49,25 +49,54 @@ extension TypedSetting where T == String {
 
 // MARK: - Settings Accessor
 
+struct SettingsStore {
+    static let standard = SettingsStore(userDefaults: .standard)
+
+    let userDefaults: UserDefaults
+
+    init(userDefaults: UserDefaults) {
+        self.userDefaults = userDefaults
+    }
+
+    subscript(setting: TypedSetting<String>) -> String {
+        get {
+            userDefaults.string(forKey: setting.key) ?? setting.default
+        }
+        nonmutating set {
+            userDefaults.set(newValue, forKey: setting.key)
+        }
+    }
+
+    func remove(_ setting: TypedSetting<String>) {
+        userDefaults.removeObject(forKey: setting.key)
+    }
+
+    func isSet(_ setting: TypedSetting<String>) -> Bool {
+        userDefaults.object(forKey: setting.key) != nil
+    }
+}
+
 /// Global settings accessor with type-safe getters and setters
 enum TypedSettings {
+    private static let store = SettingsStore.standard
+
     /// Get a string setting value
     static subscript(setting: TypedSetting<String>) -> String {
         get {
-            UserDefaults.standard.string(forKey: setting.key) ?? setting.default
+            store[setting]
         }
         set {
-            UserDefaults.standard.set(newValue, forKey: setting.key)
+            store[setting] = newValue
         }
     }
     
     /// Remove a string setting value (reset to default)
     static func remove(_ setting: TypedSetting<String>) {
-        UserDefaults.standard.removeObject(forKey: setting.key)
+        store.remove(setting)
     }
     
     /// Check if a string setting has been explicitly set
     static func isSet(_ setting: TypedSetting<String>) -> Bool {
-        UserDefaults.standard.object(forKey: setting.key) != nil
+        store.isSet(setting)
     }
 }

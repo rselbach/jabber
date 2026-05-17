@@ -37,7 +37,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var dictationID = UUID()
 
     private var transcriptionTask: Task<Void, Never>?
+    private var transcriptionActivity = TranscriptionActivityTracker()
     private var lastModelUnavailableNotice = CFAbsoluteTime(0)
+    private var lastTranscriptionBusyNotice = CFAbsoluteTime(0)
 
     private var modelState: TranscriptionService.State = .notReady
 
@@ -239,6 +241,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             return
         }
 
+        guard !transcriptionActivity.isActive else {
+            showTranscriptionBusyNotice()
+            return
+        }
+
         let hasMicrophonePermission = await permissionService.requestMicrophonePermission()
         guard hasMicrophonePermission else {
             NotificationService.shared.showPermissionWarning(
@@ -255,8 +262,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         case .recording:
             break
         case .transcribing:
-            cancelDictation()
-            startDictation()
+            showTranscriptionBusyNotice()
         }
     }
 
@@ -279,7 +285,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func startDictation() {
         guard transcriptionService.isReady else {
-            // Model not ready yet, ignore
+            return
+        }
+
+        guard !transcriptionActivity.isActive else {
+            showTranscriptionBusyNotice()
             return
         }
 
@@ -340,6 +350,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         overlayWindow.showProcessing()
 
         let currentID = dictationID
+        guard transcriptionActivity.start(currentID) else {
+            showTranscriptionBusyNotice()
+            finishDictation(dictationID: currentID)
+            return
+        }
+
         transcriptionTask = Task { [weak self] in
             guard let self else { return }
             await self.transcribeAndOutput(samples: samples, dictationID: currentID)
@@ -347,6 +363,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func transcribeAndOutput(samples: [Float], dictationID: UUID) async {
+        defer {
+            completeTranscriptionTask(dictationID: dictationID)
+        }
+
         do {
             try Task.checkCancellation()
 
@@ -389,6 +409,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         )
     }
 
+    private func showTranscriptionBusyNotice() {
+        let now = CFAbsoluteTimeGetCurrent()
+        guard now - lastTranscriptionBusyNotice > 1.5 else { return }
+        lastTranscriptionBusyNotice = now
+        NotificationService.shared.showWarning(
+            title: "Still Transcribing",
+            message: "Jabber is finishing the previous dictation. Try again in a moment."
+        )
+    }
+
+    private func completeTranscriptionTask(dictationID: UUID) {
+        guard transcriptionActivity.complete(dictationID) else { return }
+        transcriptionTask = nil
+    }
+
     private func finishDictation(dictationID: UUID) {
         guard self.dictationID == dictationID else { return }
         transcriptionTask = nil
@@ -400,7 +435,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func cancelDictation() {
         dictationID = UUID()
         transcriptionTask?.cancel()
-        transcriptionTask = nil
+        if !transcriptionActivity.isActive {
+            transcriptionTask = nil
+        }
         dictationState = .idle
         audioCapture.stopCapture()
         overlayWindow.hide()

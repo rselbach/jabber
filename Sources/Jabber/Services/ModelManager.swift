@@ -303,6 +303,12 @@ final class ModelManager {
 
         try FileManager.default.removeItem(at: modelPath)
 
+        // If we deleted the currently selected model, clear the selection before
+        // refreshing so the transcription service doesn't hold a stale reference.
+        if currentModel == modelId {
+            NotificationCenter.default.post(name: Constants.Notifications.modelDidChange, object: nil)
+        }
+
         refreshModels()
 
         // Switch to another model if we deleted the selected one

@@ -2,6 +2,7 @@ import AVFoundation
 import Foundation
 import os
 
+@MainActor
 final class AudioCaptureService {
     private let engine = AVAudioEngine()
     private let targetSampleRate: Double = 16_000

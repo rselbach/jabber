@@ -3,6 +3,7 @@ import XCTest
 @testable import Jabber
 import Foundation
 
+@MainActor
 final class TypedSettingsTests: XCTestCase {
     private var settings: SettingsStore!
     private var userDefaultsSuiteName: String!

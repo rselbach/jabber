@@ -1,5 +1,4 @@
 import Foundation
-import os
 
 enum AppMode {
     static let baseModelId = "base"

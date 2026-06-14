@@ -23,21 +23,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var isModelLoadInProgress = false
     private var modelLoadID = UUID()
 
-    private enum DictationState {
-        case idle
-        case recording
-        case transcribing
-    }
+    private lazy var dictationCoordinator = DictationCoordinator(
+        audioCapture: audioCapture,
+        transcriptionService: transcriptionService,
+        outputManager: outputManager
+    )
 
-    private var dictationState: DictationState = .idle
-
-    /// Unique ID for the current dictation session.
-    /// Changed on each startDictation/cancelDictation so that stale transcription
-    /// tasks (from a previous session) detect the mismatch and skip UI updates.
-    private var dictationID = UUID()
-
-    private var transcriptionTask: Task<Void, Never>?
-    private var transcriptionActivity = TranscriptionActivityTracker()
     private var lastModelUnavailableNotice = CFAbsoluteTime(0)
     private var lastTranscriptionBusyNotice = CFAbsoluteTime(0)
 
@@ -49,7 +40,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
         setupMenuBar()
         setupHotkey()
+        setupDictationCoordinator()
         setupNotifications()
+        setupModelStateCallback()
 
         // Hide dock icon (menu bar app only)
         NSApp.setActivationPolicy(.accessory)
@@ -66,7 +59,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationWillTerminate(_ notification: Notification) {
         modelLoadTask?.cancel()
         firstRunSetupTask?.cancel()
-        cancelDictation()
+        dictationCoordinator.cancel()
         NotificationCenter.default.removeObserver(self)
     }
 
@@ -109,7 +102,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     @objc private func handleModelChange() {
         modelLoadTask?.cancel()
-        cancelDictation()
+        dictationCoordinator.cancel()
         modelLoadTask = Task { [weak self] in
             guard let self else { return }
             await transcriptionService.unloadModel()
@@ -126,12 +119,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         defer {
             if modelLoadID == currentLoadID {
                 isModelLoadInProgress = false
-            }
-        }
-
-        transcriptionService.setStateCallback { [weak self] state in
-            Task { @MainActor in
-                self?.handleModelState(state)
             }
         }
 
@@ -237,18 +224,58 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
 
         hotkeyManager.onRegistrationFailure = { [weak self] status in
-            Task { @MainActor in
-                self?.logger.error("Hotkey registration failed with status: \(status)")
-                let display = TypedSettings.hotkeyShortcut.displayString
-                NotificationService.shared.showError(
-                    title: "Hotkey Registration Failed",
-                    message: "Could not register the global hotkey (\(display)). It may be in use by another application. OSStatus: \(status)",
-                    critical: false
-                )
-            }
+            self?.logger.error("Hotkey registration failed with status: \(status)")
+            let display = TypedSettings.hotkeyShortcut.displayString
+            NotificationService.shared.showError(
+                title: "Hotkey Registration Failed",
+                message: "Could not register the global hotkey (\(display)). It may be in use by another application. OSStatus: \(status)",
+                critical: false
+            )
         }
 
         registerConfiguredHotkey()
+    }
+
+    private func setupDictationCoordinator() {
+        dictationCoordinator.onStateChange = { [weak self] state in
+            self?.handleDictationStateChange(state)
+        }
+
+        dictationCoordinator.onAudioLevel = { [weak self] level in
+            self?.overlayWindow.updateLevel(level)
+        }
+
+        dictationCoordinator.onAudioConversionError = { [weak self] error in
+            guard let self else { return }
+            self.logger.error("Audio conversion error: \(error.localizedDescription)")
+            NotificationService.shared.showError(
+                title: "Audio Processing Error",
+                message: "Failed to process audio: \(error.localizedDescription)",
+                critical: false
+            )
+        }
+
+        dictationCoordinator.onNoSpeechDetected = { [weak self] in
+            self?.showNoSpeechDetectedWarning()
+        }
+
+        dictationCoordinator.onTranscriptionError = { [weak self] error in
+            guard let self else { return }
+            self.logger.error("Transcription failed: \(error.localizedDescription)")
+            NotificationService.shared.showError(
+                title: "Transcription Failed",
+                message: "Could not transcribe audio: \(error.localizedDescription)",
+                critical: false
+            )
+        }
+    }
+
+    private func setupModelStateCallback() {
+        transcriptionService.setStateCallback { [weak self] state in
+            Task { @MainActor in
+                self?.handleModelState(state)
+            }
+        }
     }
 
     @objc private func handleHotkeyChange() {
@@ -281,7 +308,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             return
         }
 
-        guard !transcriptionActivity.isActive else {
+        guard !dictationCoordinator.isTranscribing else {
             showTranscriptionBusyNotice()
             return
         }
@@ -299,19 +326,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         guard ensureOutputPermissionReady() else { return }
 
-        switch dictationState {
-        case .idle:
-            startDictation()
-        case .recording:
-            break
-        case .transcribing:
+        if dictationCoordinator.isRecording { return }
+
+        guard dictationCoordinator.canStart else {
             showTranscriptionBusyNotice()
+            return
         }
+
+        _ = dictationCoordinator.start()
     }
 
     private func handleHotkeyUp() {
-        guard dictationState == .recording else { return }
-        stopDictationAndTranscribe()
+        dictationCoordinator.stop()
     }
 
     private func ensureOutputPermissionReady() -> Bool {
@@ -400,123 +426,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         popover.contentViewController?.view.window?.makeKey()
     }
 
-    private func startDictation() {
-        guard transcriptionService.isReady else {
-            return
-        }
-
-        guard !transcriptionActivity.isActive else {
-            showTranscriptionBusyNotice()
-            return
-        }
-
-        dictationID = UUID()
-        transcriptionTask?.cancel()
-        transcriptionTask = nil
-
-        overlayWindow.show()
-        downloadOverlay.hide()
-
-        audioCapture.onAudioLevel = { [weak self] level in
-            self?.overlayWindow.updateLevel(level)
-        }
-
-        audioCapture.onConversionError = { [weak self] error in
-            Task { @MainActor in
-                self?.logger.error("Audio conversion error: \(error.localizedDescription)")
-                NotificationService.shared.showError(
-                    title: "Audio Processing Error",
-                    message: "Failed to process audio: \(error.localizedDescription)",
-                    critical: false
-                )
-            }
-        }
-
-        do {
-            try audioCapture.startCapture()
-            dictationState = .recording
-            updateStatusIcon(state: .recording)
-        } catch {
-            logger.error("Failed to start audio capture: \(error.localizedDescription)")
-            dictationState = .idle
+    private func handleDictationStateChange(_ state: DictationCoordinator.State) {
+        switch state {
+        case .idle:
             overlayWindow.hide()
-            updateStatusIcon(state: .error)
-            NotificationService.shared.showError(
-                title: "Audio Capture Failed",
-                message: "Could not access the microphone. Please check your system permissions.",
-                critical: false
-            )
+            syncNonDictationUI()
+        case .recording:
+            downloadOverlay.hide()
+            overlayWindow.show()
+            updateStatusIcon(state: .recording)
+        case .transcribing:
+            overlayWindow.showProcessing()
+            updateStatusIcon(state: .transcribing)
         }
-    }
-
-    private func stopDictationAndTranscribe() {
-        audioCapture.stopCapture()
-        dictationState = .transcribing
-        updateStatusIcon(state: .transcribing)
-
-        let samples = audioCapture.currentSamples()
-        let speechAssessment = AudioSpeechDetector.assess(samples: samples)
-        guard speechAssessment.shouldTranscribe else {
-            if speechAssessment.shouldShowNoSpeechWarning {
-                showNoSpeechDetectedWarning()
-            }
-            finishDictation(dictationID: dictationID)
-            return
-        }
-
-        overlayWindow.showProcessing()
-
-        let currentID = dictationID
-        guard transcriptionActivity.start(currentID) else {
-            showTranscriptionBusyNotice()
-            finishDictation(dictationID: currentID)
-            return
-        }
-
-        transcriptionTask = Task { [weak self] in
-            guard let self else { return }
-            await self.transcribeAndOutput(samples: samples, dictationID: currentID)
-        }
-    }
-
-    private func transcribeAndOutput(samples: [Float], dictationID: UUID) async {
-        defer {
-            completeTranscriptionTask(dictationID: dictationID)
-        }
-
-        do {
-            try Task.checkCancellation()
-
-            // Sync vocabulary prompt and language from settings
-            let vocab = TypedSettings[.vocabularyPrompt]
-            await transcriptionService.setVocabularyPrompt(vocab)
-
-            let language = TypedSettings[.selectedLanguage]
-            await transcriptionService.setLanguage(language)
-
-            try Task.checkCancellation()
-
-            let text = try await transcriptionService.transcribe(samples: samples)
-
-            try Task.checkCancellation()
-
-            if !text.isEmpty {
-                outputManager.output(text)
-            } else {
-                showNoSpeechDetectedWarning()
-            }
-        } catch is CancellationError {
-            // cancellation is ok
-        } catch {
-            logger.error("Transcription failed: \(error.localizedDescription)")
-            NotificationService.shared.showError(
-                title: "Transcription Failed",
-                message: "Could not transcribe audio: \(error.localizedDescription)",
-                critical: false
-            )
-        }
-
-        finishDictation(dictationID: dictationID)
     }
 
     private func showNoSpeechDetectedWarning() {
@@ -534,31 +456,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             title: "Still Transcribing",
             message: "Jabber is finishing the previous dictation. Try again in a moment."
         )
-    }
-
-    private func completeTranscriptionTask(dictationID: UUID) {
-        guard transcriptionActivity.complete(dictationID) else { return }
-        transcriptionTask = nil
-    }
-
-    private func finishDictation(dictationID: UUID) {
-        guard self.dictationID == dictationID else { return }
-        transcriptionTask = nil
-        dictationState = .idle
-        overlayWindow.hide()
-        syncNonDictationUI()
-    }
-
-    private func cancelDictation() {
-        dictationID = UUID()
-        transcriptionTask?.cancel()
-        if !transcriptionActivity.isActive {
-            transcriptionTask = nil
-        }
-        dictationState = .idle
-        audioCapture.stopCapture()
-        overlayWindow.hide()
-        syncNonDictationUI()
     }
 
     @objc private func handleModelDownloadState(_ notification: Notification) {
@@ -604,7 +501,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func syncNonDictationUI(forceLoading: Bool = false) {
-        guard dictationState == .idle else {
+        guard dictationCoordinator.isIdle else {
             downloadOverlay.hide()
             return
         }

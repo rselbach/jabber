@@ -1,5 +1,5 @@
 import AVFoundation
-import ApplicationServices
+@preconcurrency import ApplicationServices
 import AppKit
 import Foundation
 import os

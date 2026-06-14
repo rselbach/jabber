@@ -1,5 +1,4 @@
 import AppKit
-import Carbon
 import ApplicationServices
 import os
 
@@ -53,13 +52,14 @@ final class OutputManager {
 
         guard permissionService.requestAccessibilityPermission() else {
             logger.warning("Accessibility permission not granted, text copied to clipboard only")
-            Task { @MainActor in
-                NotificationService.shared.showPermissionWarning(
-                    title: "Accessibility Permission Required",
-                    message: "Text was copied to clipboard. Grant accessibility permission to enable auto-paste.",
-                    section: .accessibility
-                )
+            if let previousClipboard {
+                restoreClipboard(previousClipboard, expectedChangeCount: pasteboard.changeCount)
             }
+            NotificationService.shared.showPermissionWarning(
+                title: "Accessibility Permission Required",
+                message: "Text was copied to clipboard. Grant accessibility permission to enable auto-paste.",
+                section: .accessibility
+            )
             return
         }
 
@@ -98,13 +98,14 @@ final class OutputManager {
             guard let keyDown = CGEvent(keyboardEventSource: src, virtualKey: KeyCode.v, keyDown: true),
                   let keyUp = CGEvent(keyboardEventSource: src, virtualKey: KeyCode.v, keyDown: false) else {
                 self.logger.error("Failed to create CGEvent for paste operation")
-                Task { @MainActor in
-                    NotificationService.shared.showError(
-                        title: "Paste Failed",
-                        message: "Could not simulate paste command. Text is in clipboard.",
-                        critical: false
-                    )
+                if let previousClipboard {
+                    self.restoreClipboard(previousClipboard, expectedChangeCount: expectedPasteboardChangeCount)
                 }
+                NotificationService.shared.showError(
+                    title: "Paste Failed",
+                    message: "Could not simulate paste command. Text is in clipboard.",
+                    critical: false
+                )
                 return
             }
 

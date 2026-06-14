@@ -90,7 +90,8 @@ extension TypedSetting where T == String {
 
 // MARK: - Settings Accessor
 
-struct SettingsStore {
+@MainActor
+struct SettingsStore: Sendable {
     static let standard = SettingsStore(userDefaults: .standard)
 
     let userDefaults: UserDefaults
@@ -152,6 +153,7 @@ struct SettingsStore {
 }
 
 /// Global settings accessor with type-safe getters and setters
+@MainActor
 enum TypedSettings {
     private static let store = SettingsStore.standard
 

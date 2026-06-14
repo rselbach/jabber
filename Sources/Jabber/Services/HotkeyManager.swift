@@ -2,22 +2,33 @@ import Carbon
 import Foundation
 import os
 
-final class HotkeyManager {
+final class HotkeyManager: @unchecked Sendable {
     private var hotKeyRef: EventHotKeyRef?
     private var eventHandlerRef: EventHandlerRef?
+    private let lock = NSLock()
     private let logger = Logger(subsystem: "com.rselbach.jabber", category: "HotkeyManager")
 
-    var onKeyDown: (() -> Void)?
-    var onKeyUp: (() -> Void)?
-    var onRegistrationFailure: ((OSStatus) -> Void)?
+    var onKeyDown: (@MainActor () -> Void)?
+    var onKeyUp: (@MainActor () -> Void)?
+    var onRegistrationFailure: (@MainActor (OSStatus) -> Void)?
 
     init() {
         installEventHandler()
     }
 
     deinit {
-        unregister()
-        if let handler = eventHandlerRef {
+        lock.lock()
+        let ref = hotKeyRef
+        let handler = eventHandlerRef
+        lock.unlock()
+
+        if let ref {
+            let status = UnregisterEventHotKey(ref)
+            if status != noErr {
+                logger.error("Failed to unregister hotkey with status: \(status)")
+            }
+        }
+        if let handler {
             let status = RemoveEventHandler(handler)
             if status != noErr {
                 logger.error("Failed to remove hotkey event handler with status: \(status)")
@@ -37,7 +48,7 @@ final class HotkeyManager {
         guard let signature = OSType(fourCharCode: "JBBR") else {
             let status = OSStatus(paramErr)
             logger.error("Failed to create hotkey signature with status: \(status)")
-            onRegistrationFailure?(status)
+            dispatchRegistrationFailure(status)
             return status
         }
 
@@ -45,6 +56,9 @@ final class HotkeyManager {
             signature: signature,
             id: 1
         )
+
+        lock.lock()
+        defer { lock.unlock() }
 
         let status = RegisterEventHotKey(
             keyCode,
@@ -57,18 +71,30 @@ final class HotkeyManager {
 
         if status != noErr {
             logger.error("Failed to register hotkey with status: \(status)")
-            onRegistrationFailure?(status)
+            dispatchRegistrationFailure(status)
         }
         return status
     }
 
     func unregister() {
-        if let ref = hotKeyRef {
+        lock.lock()
+        let ref = hotKeyRef
+        hotKeyRef = nil
+        lock.unlock()
+
+        if let ref {
             let status = UnregisterEventHotKey(ref)
             if status != noErr {
                 logger.error("Failed to unregister hotkey with status: \(status)")
             }
-            hotKeyRef = nil
+        }
+    }
+
+    private func dispatchRegistrationFailure(_ status: OSStatus) {
+        if let onRegistrationFailure {
+            Task { @MainActor in
+                onRegistrationFailure(status)
+            }
         }
     }
 
@@ -89,9 +115,13 @@ final class HotkeyManager {
                 let kind = GetEventKind(event)
 
                 if kind == UInt32(kEventHotKeyPressed) {
-                    manager.onKeyDown?()
+                    Task { @MainActor in
+                        manager.onKeyDown?()
+                    }
                 } else if kind == UInt32(kEventHotKeyReleased) {
-                    manager.onKeyUp?()
+                    Task { @MainActor in
+                        manager.onKeyUp?()
+                    }
                 }
 
                 return noErr
@@ -104,7 +134,7 @@ final class HotkeyManager {
 
         if status != noErr {
             logger.error("Failed to install hotkey event handler with status: \(status)")
-            onRegistrationFailure?(status)
+            dispatchRegistrationFailure(status)
         }
     }
 }

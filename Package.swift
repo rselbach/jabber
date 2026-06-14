@@ -1,4 +1,4 @@
-// swift-tools-version: 5.10
+// swift-tools-version: 6.1
 
 import PackageDescription
 
@@ -25,6 +25,10 @@ let package = Package(
             path: "Sources/Jabber",
             resources: [
                 .process("Assets.xcassets")
+            ],
+            swiftSettings: [
+                .swiftLanguageMode(.v5),
+                .enableExperimentalFeature("StrictConcurrency")
             ]
         ),
         .testTarget(

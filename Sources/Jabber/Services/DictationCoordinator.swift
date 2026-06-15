@@ -16,7 +16,7 @@ extension AudioCaptureService: AudioCaptureProtocol {}
 
 /// Abstraction over the transcription engine so the coordinator can be tested
 /// without loading a real MLX model.
-protocol TranscriptionProtocol: AnyObject {
+protocol TranscriptionProtocol: AnyObject, Sendable {
     var isReady: Bool { get }
     func setVocabularyPrompt(_ prompt: String) async
     func setLanguage(_ language: String) async
@@ -189,7 +189,7 @@ final class DictationCoordinator {
 
             let trimmedText = text.trimmingCharacters(in: .whitespacesAndNewlines)
             if !trimmedText.isEmpty {
-                outputManager.output(text)
+                outputManager.output(trimmedText)
             } else {
                 onNoSpeechDetected?()
             }

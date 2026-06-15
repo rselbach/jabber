@@ -82,6 +82,7 @@ final class OverlayWindow {
 }
 
 enum OverlayPanelFactory {
+    @MainActor
     static func makePanel(frame: NSRect) -> NSPanel {
         let panel = NSPanel(
             contentRect: frame,

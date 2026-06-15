@@ -19,6 +19,12 @@ jobs:
       - name: Show Xcode version
         run: xcodebuild -version
 
+      - name: Ensure Metal Toolchain
+        run: |
+          if ! xcrun metal -v >/dev/null 2>&1; then
+            xcodebuild -downloadComponent MetalToolchain
+          fi
+
       - name: Test
         run: swift test
 

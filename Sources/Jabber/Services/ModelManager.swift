@@ -23,7 +23,6 @@ struct ModelDownloadState: Equatable {
 final class ModelManager {
     static let shared = ModelManager()
     private let logger = Logger(subsystem: "com.rselbach.jabber", category: "ModelManager")
-    private static let downloadWaitTimeout: Duration = .seconds(600)
     private static let legacyModelIdMigration: [String: String] = [
         "tiny": AppMode.baseModelId,
         "small": AppMode.baseModelId,
@@ -153,6 +152,11 @@ final class ModelManager {
 
     func ensureModelDownloaded(_ modelId: String) async throws -> URL {
         if let existing = qwen3ASRModelFolder(for: modelId) {
+            updateModel(modelId) { model in
+                model.isDownloaded = true
+                model.isDownloading = false
+                model.downloadProgress = 1.0
+            }
             return existing
         }
         return try await downloadModel(modelId)
@@ -160,30 +164,14 @@ final class ModelManager {
 
     @discardableResult
     func startDownload(_ modelId: String) -> Bool {
-        guard activeDownloads[modelId] == nil else { return false }
         guard models.contains(where: { $0.id == modelId }) else {
             logger.warning("Attempted to start download for non-existent model: \(modelId)")
             return false
         }
 
-        let downloadID = UUID()
-        let task = Task { [weak self] in
-            guard let self else { throw CancellationError() }
-            return try await self.downloadModel(modelId)
-        }
-        activeDownloads[modelId] = ActiveDownload(id: downloadID, task: task)
+        guard activeDownloads[modelId] == nil else { return false }
 
-        Task { [weak self] in
-            do {
-                _ = try await task.value
-            } catch is CancellationError {
-                // Cancellation state is published by downloadModel.
-            } catch {
-                self?.logger.error("Model download failed for \(modelId): \(error.localizedDescription)")
-            }
-            self?.clearActiveDownload(modelId: modelId, downloadID: downloadID)
-        }
-
+        _ = ensureActiveDownloadTask(for: modelId)
         return true
     }
 
@@ -199,7 +187,6 @@ final class ModelManager {
 
     @discardableResult
     func downloadModel(_ modelId: String) async throws -> URL {
-        // Verify model exists before starting
         guard models.contains(where: { $0.id == modelId }) else {
             logger.warning("Attempted to download non-existent model: \(modelId)")
             throw ModelError.modelNotFound(modelId: modelId)
@@ -214,22 +201,56 @@ final class ModelManager {
             return existing
         }
 
-        // Set initial download state
+        let task = ensureActiveDownloadTask(for: modelId)
+        return try await task.value
+    }
+
+    private func ensureActiveDownloadTask(for modelId: String) -> Task<URL, Error> {
+        if let active = activeDownloads[modelId] {
+            return active.task
+        }
+
+        let downloadID = UUID()
+        let task = Task { [weak self] in
+            guard let self else { throw CancellationError() }
+            return try await self.performDownload(modelId: modelId)
+        }
+        activeDownloads[modelId] = ActiveDownload(id: downloadID, task: task)
+
+        Task { [weak self] in
+            do {
+                _ = try await task.value
+            } catch is CancellationError {
+                // Cancellation state is published by performDownload.
+            } catch {
+                self?.logger.error("Model download failed for \(modelId): \(error.localizedDescription)")
+            }
+            self?.clearActiveDownload(modelId: modelId, downloadID: downloadID)
+        }
+
+        return task
+    }
+
+    private func performDownload(modelId: String) async throws -> URL {
+        if let existing = localModelFolder(for: modelId) {
+            updateModel(modelId) { model in
+                model.isDownloaded = true
+                model.isDownloading = false
+                model.downloadProgress = 1.0
+            }
+            return existing
+        }
+
         guard let idx = models.firstIndex(where: { $0.id == modelId }) else {
             throw ModelError.modelNotFound(modelId: modelId)
         }
 
-        if models[idx].isDownloading {
-            try await waitForDownloadToFinish(modelId: modelId)
-            if let existing = localModelFolder(for: modelId) {
-                return existing
-            }
-            throw ModelError.modelNotFound(modelId: modelId)
-        }
-
         let modelName = models[idx].name
-        models[idx].isDownloading = true
-        models[idx].downloadProgress = 0
+
+        updateModel(modelId) { model in
+            model.isDownloading = true
+            model.downloadProgress = 0
+        }
 
         postDownloadState(
             modelId: modelId,
@@ -240,7 +261,6 @@ final class ModelManager {
 
         defer {
             lastDownloadProgressReport[modelId] = nil
-            // Always clear downloading state, even on error
             updateModel(modelId) { model in
                 model.isDownloading = false
             }
@@ -253,7 +273,7 @@ final class ModelManager {
             postDownloadState(
                 modelId: modelId,
                 modelName: modelName,
-                progress: models[idx].downloadProgress,
+                progress: currentDownloadProgress(for: modelId),
                 phase: .failed,
                 isCancelled: true
             )
@@ -262,14 +282,13 @@ final class ModelManager {
             postDownloadState(
                 modelId: modelId,
                 modelName: modelName,
-                progress: models[idx].downloadProgress,
+                progress: currentDownloadProgress(for: modelId),
                 phase: .failed,
                 errorDescription: error.localizedDescription
             )
             throw error
         }
 
-        // Look up index after download completes
         updateModel(modelId) { model in
             model.isDownloaded = true
             model.downloadProgress = 1.0
@@ -283,6 +302,11 @@ final class ModelManager {
         )
 
         return modelFolder
+    }
+
+    private func currentDownloadProgress(for modelId: String) -> Double {
+        guard let model = models.first(where: { $0.id == modelId }) else { return 0 }
+        return min(max(model.downloadProgress, 0), 1)
     }
 
     func deleteModel(_ modelId: String) throws {
@@ -324,17 +348,6 @@ final class ModelManager {
         }
     }
 
-    func ensureDefaultModelDownloaded() async {
-        if hasAnyDownloadedModel { return }
-
-        do {
-            try await downloadModel(AppMode.baseModelId)
-            settings[.selectedModel] = AppMode.baseModelId
-        } catch {
-            logger.error("Failed to download base model: \(error.localizedDescription)")
-        }
-    }
-
     private func installedModelIds() -> [String] {
         return modelDefinitions.compactMap { def in
             localModelFolder(for: def.id) != nil ? def.id : nil
@@ -371,7 +384,7 @@ final class ModelManager {
             modelId: huggingFaceModelId,
             to: downloadFolder,
             additionalFiles: ["vocab.json", "merges.txt", "tokenizer_config.json"],
-            progressHandler: { [weak self] progress in
+            progressHandler: { @Sendable [weak self] progress in
                 Task { @MainActor in
                     self?.publishDownloadProgress(
                         modelId: modelId,
@@ -472,19 +485,6 @@ final class ModelManager {
             phase: .progress,
             statusOverride: status
         )
-    }
-
-    private func waitForDownloadToFinish(modelId: String) async throws {
-        let startTime = ContinuousClock.now
-        while let idx = models.firstIndex(where: { $0.id == modelId }) {
-            try Task.checkCancellation()
-            guard models[idx].isDownloading else { return }
-            if ContinuousClock.now - startTime > Self.downloadWaitTimeout {
-                throw ModelError.downloadTimeout(modelId: modelId)
-            }
-            try await Task.sleep(for: .milliseconds(200))
-        }
-        throw ModelError.modelNotFound(modelId: modelId)
     }
 
     private func postDownloadState(

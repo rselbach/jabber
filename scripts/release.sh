@@ -177,20 +177,7 @@ create_bundle() {
   # Copy Info.plist
   cp "${PROJECT_ROOT}/Info.plist" "${contents}/Info.plist"
   
-  # Copy Sparkle.framework into the bundle
-  local sparkle_path="${PROJECT_ROOT}/.build/artifacts/sparkle/Sparkle/Sparkle.framework"
-  if [[ -d "${sparkle_path}" ]]; then
-    cp -R "${sparkle_path}" "${frameworks}/"
-    echo "    Copied Sparkle.framework"
-  else
-    sparkle_path=$(find "${PROJECT_ROOT}/.build" -name "Sparkle.framework" -type d | head -1)
-    if [[ -z "${sparkle_path}" ]]; then
-      echo "Error: Sparkle.framework not found in .build artifacts" >&2
-      exit 1
-    fi
-    cp -R "${sparkle_path}" "${frameworks}/"
-    echo "    Copied Sparkle.framework"
-  fi
+  copy_sparkle_framework "${frameworks}"
   
   # Add rpath for Frameworks directory
   install_name_tool -add_rpath @executable_path/../Frameworks "${macos}/${APP_NAME}"
@@ -205,6 +192,24 @@ create_bundle() {
   compile_assets "${resources}"
   
   echo "    Bundle created at: ${app_bundle}"
+}
+
+copy_sparkle_framework() {
+  local frameworks_dir="$1"
+  local sparkle_path="${PROJECT_ROOT}/.build/release/Sparkle.framework"
+
+  if [[ ! -d "${sparkle_path}" ]]; then
+    sparkle_path="${PROJECT_ROOT}/.build/artifacts/sparkle/Sparkle/Sparkle.xcframework/macos-arm64_x86_64/Sparkle.framework"
+  fi
+
+  if [[ ! -d "${sparkle_path}" ]]; then
+    echo "Error: Sparkle.framework not found for release build." >&2
+    echo "Run 'swift build -c release' and try again." >&2
+    exit 1
+  fi
+
+  cp -R "${sparkle_path}" "${frameworks_dir}/"
+  echo "    Copied Sparkle.framework from ${sparkle_path}"
 }
 
 compile_assets() {

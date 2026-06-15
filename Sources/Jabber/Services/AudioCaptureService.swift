@@ -1,4 +1,4 @@
-import AVFoundation
+@preconcurrency import AVFoundation
 import Foundation
 import os
 
@@ -101,8 +101,15 @@ final class AudioCaptureService {
 
         let rms = calculateRms(from: buffer)
         let now = CFAbsoluteTimeGetCurrent()
-        if now - lastLevelUpdate >= 1.0 / 30.0 {
-            lastLevelUpdate = now
+        let shouldReportLevel: Bool = queue.sync {
+            guard _isCapturing else { return false }
+            if now - lastLevelUpdate >= 1.0 / 30.0 {
+                lastLevelUpdate = now
+                return true
+            }
+            return false
+        }
+        if shouldReportLevel {
             DispatchQueue.main.async { [weak self] in
                 self?.onAudioLevel?(rms)
             }
@@ -166,20 +173,32 @@ final class AudioCaptureService {
         }
 
         var error: NSError?
-        var hasProvidedBuffer = false
+        let inputState = AudioConverterInputState()
 
         // Capture buffer in the conversion callback to avoid race conditions
         converter.convert(to: convertedBuffer, error: &error) { _, outStatus in
-            guard !hasProvidedBuffer else {
+            guard inputState.claimBuffer() else {
                 outStatus.pointee = .noDataNow
                 return nil
             }
             outStatus.pointee = .haveData
-            hasProvidedBuffer = true
             return buffer
         }
 
         return (convertedBuffer, error)
+    }
+}
+
+private final class AudioConverterInputState: @unchecked Sendable {
+    private let lock = NSLock()
+    private var hasProvidedBuffer = false
+
+    func claimBuffer() -> Bool {
+        lock.withLock {
+            guard !hasProvidedBuffer else { return false }
+            hasProvidedBuffer = true
+            return true
+        }
     }
 }
 

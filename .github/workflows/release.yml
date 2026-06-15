@@ -28,6 +28,12 @@ jobs:
       - name: Show Xcode version
         run: xcodebuild -version
 
+      - name: Ensure Metal Toolchain
+        run: |
+          if ! xcrun metal -v >/dev/null 2>&1; then
+            xcodebuild -downloadComponent MetalToolchain
+          fi
+
       - name: Validate required secrets
         run: |
           if [[ -z "${{ secrets.DEVELOPER_ID_CERTIFICATE_P12 }}" ]]; then

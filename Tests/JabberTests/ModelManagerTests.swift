@@ -9,8 +9,8 @@ final class ModelManagerTests: XCTestCase {
     private var userDefaults: UserDefaults!
     private var cacheBaseURL: URL!
     
-    override func setUpWithError() throws {
-        try super.setUpWithError()
+    override func setUp() async throws {
+        try await super.setUp()
         userDefaultsSuiteName = "JabberTests.ModelManager.\(UUID().uuidString)"
         userDefaults = try XCTUnwrap(UserDefaults(suiteName: userDefaultsSuiteName))
         userDefaults.removePersistentDomain(forName: userDefaultsSuiteName)
@@ -31,7 +31,7 @@ final class ModelManagerTests: XCTestCase {
         )
     }
 
-    override func tearDownWithError() throws {
+    override func tearDown() async throws {
         if let cacheBaseURL, FileManager.default.fileExists(atPath: cacheBaseURL.path) {
             try FileManager.default.removeItem(at: cacheBaseURL)
         }
@@ -43,7 +43,7 @@ final class ModelManagerTests: XCTestCase {
         userDefaults = nil
         userDefaultsSuiteName = nil
         cacheBaseURL = nil
-        try super.tearDownWithError()
+        try await super.tearDown()
     }
     
     func testModelDefinitionsExist() {
@@ -146,7 +146,40 @@ final class ModelManagerTests: XCTestCase {
     func testCancelDownloadForNonExistentModelDoesNotCrash() {
         modelManager.cancelDownload("nonexistent")
     }
-    
+
+    func testEnsureModelDownloadedReturnsExistingFolder() async throws {
+        let modelFolder = cacheBaseURL
+            .appendingPathComponent("models", isDirectory: true)
+            .appendingPathComponent("aufklarer", isDirectory: true)
+            .appendingPathComponent("Qwen3-ASR-0.6B-MLX-4bit", isDirectory: true)
+        try createCompleteQwenModelFolder(at: modelFolder)
+
+        let result = try await modelManager.ensureModelDownloaded(AppMode.baseModelId)
+
+        XCTAssertEqual(result.path, modelFolder.path)
+
+        let baseModel = try XCTUnwrap(
+            modelManager.models.first { $0.id == AppMode.baseModelId }
+        )
+        XCTAssertTrue(baseModel.isDownloaded)
+        XCTAssertEqual(baseModel.downloadProgress, 1.0)
+    }
+
+    func testDownloadModelForNonExistentModelThrows() async {
+        do {
+            _ = try await modelManager.downloadModel("nonexistent")
+            XCTFail("Expected modelNotFound error")
+        } catch let error as ModelError {
+            guard case .modelNotFound(let modelId) = error else {
+                XCTFail("Expected modelNotFound error, got \(error)")
+                return
+            }
+            XCTAssertEqual(modelId, "nonexistent")
+        } catch {
+            XCTFail("Unexpected error: \(error)")
+        }
+    }
+
     func testSelectModelReturnsFalseWhenModelNotDownloaded() {
         // Find a model that isn't downloaded
         let undownloadedModel = modelManager.models.first { !$0.isDownloaded }

@@ -8,8 +8,8 @@ final class DictationCoordinatorTests: XCTestCase {
     private var outputManager: FakeOutputManager!
     private var coordinator: DictationCoordinator!
 
-    override func setUp() {
-        super.setUp()
+    override func setUp() async throws {
+        try await super.setUp()
         audioCapture = FakeAudioCapture()
         transcriptionService = FakeTranscriptionService()
         outputManager = FakeOutputManager()
@@ -20,12 +20,12 @@ final class DictationCoordinatorTests: XCTestCase {
         )
     }
 
-    override func tearDown() {
+    override func tearDown() async throws {
         coordinator = nil
         audioCapture = nil
         transcriptionService = nil
         outputManager = nil
-        super.tearDown()
+        try await super.tearDown()
     }
 
     func testInitialStateIsIdle() {

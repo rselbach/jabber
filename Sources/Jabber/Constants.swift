@@ -137,8 +137,8 @@ enum Constants {
             .sorted { $0.name < $1.name }
     }()
 
-    /// Valid language codes for validation (includes all unique codes from languages dict)
-    static let validLanguageCodes: Set<String> = Set(languageDisplayNameByCode.keys)
+    /// Valid language codes for validation (every code present in the languages dict)
+    static let validLanguageCodes: Set<String> = Set(languages.values)
 
     /// Default language based on system locale, falls back to "auto" if unsupported
     static let defaultLanguage: String = {

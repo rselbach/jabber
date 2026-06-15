@@ -9,22 +9,22 @@ final class TypedSettingsTests: XCTestCase {
     private var userDefaultsSuiteName: String!
     private var userDefaults: UserDefaults!
 
-    override func setUpWithError() throws {
-        try super.setUpWithError()
+    override func setUp() async throws {
+        try await super.setUp()
         userDefaultsSuiteName = "JabberTests.TypedSettings.\(UUID().uuidString)"
         userDefaults = try XCTUnwrap(UserDefaults(suiteName: userDefaultsSuiteName))
         userDefaults.removePersistentDomain(forName: userDefaultsSuiteName)
         settings = SettingsStore(userDefaults: userDefaults)
     }
 
-    override func tearDownWithError() throws {
+    override func tearDown() async throws {
         if let userDefaultsSuiteName, let userDefaults {
             userDefaults.removePersistentDomain(forName: userDefaultsSuiteName)
         }
         settings = nil
         userDefaults = nil
         userDefaultsSuiteName = nil
-        try super.tearDownWithError()
+        try await super.tearDown()
     }
 
     func testDefaultValues() {

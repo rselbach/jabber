@@ -27,6 +27,12 @@ swift build
 ./scripts/build_mlx_metallib.sh debug
 ```
 
+If the Metal library build reports a missing Xcode Metal Toolchain, install it:
+
+```bash
+xcodebuild -downloadComponent MetalToolchain
+```
+
 For a release build with signing:
 
 ```bash

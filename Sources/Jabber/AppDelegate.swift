@@ -359,7 +359,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         guard !didPromptAccessibility else { return }
         didPromptAccessibility = true
-        permissionService.requestAccessibilityPermission()
+        _ = permissionService.requestAccessibilityPermission()
     }
 
     @objc private func togglePopover() {

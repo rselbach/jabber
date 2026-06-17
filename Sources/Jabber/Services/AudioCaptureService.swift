@@ -7,13 +7,13 @@ final class AudioCaptureService {
     private let engine = AVAudioEngine()
     private let targetSampleRate: Double = 16_000
     private let converterQueue = DispatchQueue(label: "com.jabber.audioconverter")
-    private var converter: AVAudioConverter?
+    nonisolated(unsafe) private var converter: AVAudioConverter?
     private static let initialCapturedSampleCapacity = 16_000 * 60
 
     private let queue = DispatchQueue(label: "com.jabber.audiocapture")
-    private var lastLevelUpdate: CFAbsoluteTime = 0
-    private var capturedSamples: [Float]
-    private var _isCapturing = false
+    nonisolated(unsafe) private var lastLevelUpdate: CFAbsoluteTime = 0
+    nonisolated(unsafe) private var capturedSamples: [Float]
+    nonisolated(unsafe) private var _isCapturing = false
     private let logger = Logger(subsystem: "com.rselbach.jabber", category: "AudioCaptureService")
 
     var onAudioLevel: ((Float) -> Void)?
@@ -29,11 +29,11 @@ final class AudioCaptureService {
         set { queue.sync { _isCapturing = newValue } }
     }
 
-    private func getConverter() -> AVAudioConverter? {
+    nonisolated private func getConverter() -> AVAudioConverter? {
         converterQueue.sync { converter }
     }
 
-    private func setConverter(_ newConverter: AVAudioConverter?) {
+    nonisolated private func setConverter(_ newConverter: AVAudioConverter?) {
         converterQueue.sync { converter = newConverter }
     }
 
@@ -41,7 +41,7 @@ final class AudioCaptureService {
         guard !isCapturing else { return }
 
         queue.sync {
-            resetCapturedSamples()
+            capturedSamples.removeAll(keepingCapacity: true)
         }
 
         let inputNode = engine.inputNode
@@ -94,10 +94,8 @@ final class AudioCaptureService {
         }
     }
 
-    private func processBuffer(_ buffer: AVAudioPCMBuffer) {
-        // Safely capture converter reference before checking state
+    nonisolated private func processBuffer(_ buffer: AVAudioPCMBuffer) {
         guard let converter = getConverter() else { return }
-        guard isCapturing else { return }
 
         let rms = calculateRms(from: buffer)
         let now = CFAbsoluteTimeGetCurrent()
@@ -133,19 +131,11 @@ final class AudioCaptureService {
         let samples = UnsafeBufferPointer(start: channelData, count: frames)
         queue.sync {
             guard _isCapturing else { return }
-            self.appendSamples(samples)
+            capturedSamples.append(contentsOf: samples)
         }
     }
 
-    private func resetCapturedSamples() {
-        capturedSamples.removeAll(keepingCapacity: true)
-    }
-
-    private func appendSamples(_ samples: UnsafeBufferPointer<Float>) {
-        capturedSamples.append(contentsOf: samples)
-    }
-
-    private func calculateRms(from buffer: AVAudioPCMBuffer) -> Float {
+    nonisolated private func calculateRms(from buffer: AVAudioPCMBuffer) -> Float {
         guard let channelData = buffer.floatChannelData?[0] else { return 0 }
 
         let frames = Int(buffer.frameLength)
@@ -158,7 +148,7 @@ final class AudioCaptureService {
         return min(1, sqrt(max(0, sum / Float(frames))))
     }
 
-    private func convertBuffer(
+    nonisolated private func convertBuffer(
         _ buffer: AVAudioPCMBuffer,
         using converter: AVAudioConverter
     ) -> (buffer: AVAudioPCMBuffer?, error: Error?) {

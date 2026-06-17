@@ -98,18 +98,18 @@ enum Constants {
     /// Valid language codes for validation (every code present in the languages dict)
     static let validLanguageCodes: Set<String> = Set(languages.values)
 
-    /// Default language based on system locale, falls back to "auto" if unsupported
-    static let defaultLanguage: String = {
+    /// Default language based on system locale, falls back to "auto" if unsupported.
+    /// Computed on each access so it follows live system locale changes.
+    static var defaultLanguage: String {
         guard let languageCode = Locale.current.language.languageCode?.identifier else {
             return "auto"
         }
 
-        // Check if the system language is supported by the transcription model
         if validLanguageCodes.contains(languageCode) {
             return languageCode
         }
 
         return "auto"
-    }()
+    }
 
 }

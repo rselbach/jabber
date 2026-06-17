@@ -12,7 +12,6 @@ enum TypedSetting<T>: Sendable {
     case selectedModel
     case selectedLanguage
     case outputMode
-    case hotkeyDisplay
     case vocabularyPrompt
     
     /// The UserDefaults key for this setting
@@ -21,7 +20,6 @@ enum TypedSetting<T>: Sendable {
         case .selectedModel: return AppSettingKey.selectedModel
         case .selectedLanguage: return AppSettingKey.selectedLanguage
         case .outputMode: return AppSettingKey.outputMode
-        case .hotkeyDisplay: return AppSettingKey.hotkeyDisplay
         case .vocabularyPrompt: return AppSettingKey.vocabularyPrompt
         }
     }
@@ -80,8 +78,6 @@ extension TypedSetting where T == String {
             return Constants.defaultLanguage
         case .outputMode:
             return "paste"
-        case .hotkeyDisplay:
-            return HotkeyShortcut.defaultShortcut.displayString
         case .vocabularyPrompt:
             return ""
         }

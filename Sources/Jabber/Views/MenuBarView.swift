@@ -5,7 +5,8 @@ struct MenuBarView: View {
     @AppStorage(AppSettingKey.selectedModel) private var selectedModel = AppMode.baseModelId
     @AppStorage(AppSettingKey.selectedLanguage) private var selectedLanguage = Constants.defaultLanguage
     @AppStorage(AppSettingKey.outputMode) private var outputMode = OutputManager.OutputMode.pasteInPlace.rawValue
-    @AppStorage(AppSettingKey.hotkeyDisplay) private var hotkeyDisplay = HotkeyShortcut.defaultShortcut.displayString
+    @AppStorage(AppSettingKey.hotkeyKeyCode) private var hotkeyKeyCode = Int(HotkeyShortcut.defaultShortcut.keyCode)
+    @AppStorage(AppSettingKey.hotkeyModifiers) private var hotkeyModifiers = Int(HotkeyShortcut.defaultShortcut.modifiers)
     @State private var modelManager = ModelManager.shared
     @State private var permissionRefreshTick = false
     @ObservedObject var updaterController: UpdaterController
@@ -114,6 +115,13 @@ struct MenuBarView: View {
 
     private var selectedOutputMode: OutputManager.OutputMode {
         OutputManager.OutputMode(rawValue: outputMode) ?? .pasteInPlace
+    }
+
+    private var hotkeyDisplay: String {
+        HotkeyShortcut(
+            keyCode: UInt32(max(0, hotkeyKeyCode)),
+            modifiers: UInt32(max(0, hotkeyModifiers))
+        ).displayString
     }
 
     private func refreshMenuState() {

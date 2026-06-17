@@ -207,7 +207,6 @@ extension SettingsStore {
         nonmutating set {
             self[.hotkeyKeyCode] = Int(newValue.keyCode)
             self[.hotkeyModifiers] = Int(newValue.modifiers)
-            self[.hotkeyDisplay] = newValue.displayString
         }
     }
 }

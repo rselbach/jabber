@@ -126,7 +126,7 @@ final class TypedSettingsTests: XCTestCase {
         XCTAssertEqual(settings.hotkeyShortcut, shortcut)
         XCTAssertEqual(settings[.hotkeyKeyCode], 0)
         XCTAssertEqual(settings[.hotkeyModifiers], Int(optionKey | controlKey))
-        XCTAssertEqual(settings[.hotkeyDisplay], "⌃⌥ A")
+        XCTAssertEqual(settings.hotkeyShortcut.displayString, "⌃⌥ A")
     }
 
     func testInvalidStoredHotkeyShortcutFallsBackToDefault() {

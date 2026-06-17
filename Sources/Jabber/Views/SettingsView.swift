@@ -8,7 +8,6 @@ struct SettingsView: View {
     @AppStorage(AppSettingKey.outputMode) private var outputMode = OutputManager.OutputMode.pasteInPlace.rawValue
     @AppStorage(AppSettingKey.hotkeyKeyCode) private var hotkeyKeyCode = Int(HotkeyShortcut.defaultShortcut.keyCode)
     @AppStorage(AppSettingKey.hotkeyModifiers) private var hotkeyModifiers = Int(HotkeyShortcut.defaultShortcut.modifiers)
-    @AppStorage(AppSettingKey.hotkeyDisplay) private var hotkeyDisplay = HotkeyShortcut.defaultShortcut.displayString
     @AppStorage(AppSettingKey.vocabularyPrompt) private var vocabularyPrompt = ""
     @AppStorage(AppSettingKey.selectedLanguage) private var selectedLanguage = Constants.defaultLanguage
 
@@ -120,6 +119,10 @@ struct SettingsView: View {
             keyCode: UInt32(max(0, hotkeyKeyCode)),
             modifiers: UInt32(max(0, hotkeyModifiers))
         )
+    }
+
+    private var hotkeyDisplay: String {
+        hotkeyShortcut.displayString
     }
 
     private var generalTab: some View {
@@ -247,7 +250,6 @@ struct SettingsView: View {
     private func applyHotkeyShortcut(_ shortcut: HotkeyShortcut) {
         hotkeyKeyCode = Int(shortcut.keyCode)
         hotkeyModifiers = Int(shortcut.modifiers)
-        hotkeyDisplay = shortcut.displayString
         NotificationCenter.default.post(
             name: Constants.Notifications.hotkeyDidChange,
             object: shortcut

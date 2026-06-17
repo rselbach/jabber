@@ -50,9 +50,38 @@ enum AudioSpeechDetector {
         }
 
         let duration = Double(samples.count) / sampleRate
-        let rms = calculateRMS(samples)
-        let peak = calculatePeak(samples)
-        let activeDuration = calculateActiveDuration(samples)
+
+        var sumOfSquares: Float = 0
+        var peak: Float = 0
+        var activeSampleCount = 0
+        var frameSumOfSquares: Float = 0
+        var frameCount = 0
+
+        for sample in samples {
+            let absSample = abs(sample)
+            if absSample > peak { peak = absSample }
+            let squared = sample * sample
+            sumOfSquares += squared
+            frameSumOfSquares += squared
+            frameCount += 1
+
+            if frameCount == frameSize {
+                if sqrt(max(0, frameSumOfSquares / Float(frameSize))) >= activeFrameRMSThreshold {
+                    activeSampleCount += frameCount
+                }
+                frameSumOfSquares = 0
+                frameCount = 0
+            }
+        }
+
+        if frameCount > 0 {
+            if sqrt(max(0, frameSumOfSquares / Float(frameCount))) >= activeFrameRMSThreshold {
+                activeSampleCount += frameCount
+            }
+        }
+
+        let rms = sqrt(max(0, sumOfSquares / Float(samples.count)))
+        let activeDuration = Double(activeSampleCount) / sampleRate
 
         guard duration >= minDuration else {
             return AudioSpeechAssessment(
@@ -83,47 +112,5 @@ enum AudioSpeechDetector {
             activeDuration: activeDuration,
             rejectionReason: nil
         )
-    }
-
-    private static func calculateRMS(_ samples: [Float]) -> Float {
-        var sum: Float = 0
-        for sample in samples {
-            sum += sample * sample
-        }
-        return sqrt(max(0, sum / Float(samples.count)))
-    }
-
-    private static func calculatePeak(_ samples: [Float]) -> Float {
-        var peak: Float = 0
-        for sample in samples {
-            peak = max(peak, abs(sample))
-        }
-        return peak
-    }
-
-    private static func calculateActiveDuration(_ samples: [Float]) -> Double {
-        var activeSampleCount = 0
-        var start = 0
-
-        while start < samples.count {
-            let end = min(start + frameSize, samples.count)
-            let frame = samples[start..<end]
-            if calculateFrameRMS(frame) >= activeFrameRMSThreshold {
-                activeSampleCount += end - start
-            }
-            start = end
-        }
-
-        return Double(activeSampleCount) / sampleRate
-    }
-
-    private static func calculateFrameRMS(_ samples: ArraySlice<Float>) -> Float {
-        guard !samples.isEmpty else { return 0 }
-
-        var sum: Float = 0
-        for sample in samples {
-            sum += sample * sample
-        }
-        return sqrt(max(0, sum / Float(samples.count)))
     }
 }

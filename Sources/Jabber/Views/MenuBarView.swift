@@ -123,8 +123,9 @@ struct MenuBarView: View {
 
         if !modelManager.downloadedModels.contains(where: { $0.id == selectedModel }),
            let fallbackModel = modelManager.downloadedModels.first?.id {
-            selectedModel = fallbackModel
-            _ = modelManager.selectModel(fallbackModel, previousModelId: nil)
+            if modelManager.selectModel(fallbackModel, previousModelId: selectedModel) {
+                selectedModel = fallbackModel
+            }
         }
     }
 

@@ -91,17 +91,17 @@ final class PermissionService {
     }
 
     func openPrivacySettings(for section: PermissionSection) {
-        let urlString = "x-apple.systempreferences:com.apple.preference.security?Privacy_\(section.rawValue)"
-        guard let url = URL(string: urlString) else {
-            logger.error("Failed to construct privacy URL for section \(section.rawValue)")
-            return
+        let targeted = "x-apple.systempreferences:com.apple.preference.security?Privacy_\(section.rawValue)"
+        let fallback = "x-apple.systempreferences:com.apple.preference.security?Privacy"
+
+        for urlString in [targeted, fallback] {
+            guard let url = URL(string: urlString) else { continue }
+            if NSWorkspace.shared.open(url) {
+                logger.info("Opened privacy settings for \(section.rawValue)")
+                return
+            }
         }
 
-        guard NSWorkspace.shared.open(url) else {
-            logger.error("Failed to open privacy settings for \(section.rawValue)")
-            return
-        }
-
-        logger.info("Opened privacy settings for \(section.rawValue)")
+        logger.error("Failed to open privacy settings for \(section.rawValue)")
     }
 }

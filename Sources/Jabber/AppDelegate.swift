@@ -31,6 +31,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private var lastModelUnavailableNotice = CFAbsoluteTime(0)
     private var lastTranscriptionBusyNotice = CFAbsoluteTime(0)
+    private var didPromptAccessibility = false
 
     private var modelState: TranscriptionService.State = .notReady
 
@@ -343,16 +344,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func ensureOutputPermissionReady() -> Bool {
         guard outputManager.requiresAccessibilityPermission else { return true }
         guard !permissionService.hasAccessibilityPermission() else { return true }
-        guard permissionService.requestAccessibilityPermission() else {
-            NotificationService.shared.showPermissionWarning(
-                title: "Accessibility Permission Required",
-                message: "Grant accessibility permission before dictating in paste mode, or switch output to Copy to clipboard in Settings.",
-                section: .accessibility
-            )
-            showSetupPopoverIfNeeded()
-            return false
-        }
-        return true
+
+        showAccessibilityPermissionWarning()
+        return false
+    }
+
+    private func showAccessibilityPermissionWarning() {
+        NotificationService.shared.showPermissionWarning(
+            title: "Accessibility Permission Required",
+            message: "Grant accessibility permission before dictating in paste mode, or switch output to Copy to clipboard in Settings.",
+            section: .accessibility
+        )
+        showSetupPopoverIfNeeded()
+
+        guard !didPromptAccessibility else { return }
+        didPromptAccessibility = true
+        permissionService.requestAccessibilityPermission()
     }
 
     @objc private func togglePopover() {

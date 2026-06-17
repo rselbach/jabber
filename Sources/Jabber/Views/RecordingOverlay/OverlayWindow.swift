@@ -3,23 +3,25 @@ import SwiftUI
 import os
 
 @MainActor
-final class OverlayWindow {
-    private var window: NSPanel?
-    private var waveformView: WaveformView?
-    private var hostingView: NSHostingView<WaveformContainer>?
-    private let logger = Logger(subsystem: "com.rselbach.jabber", category: "OverlayWindow")
-    private var visibilityToken: UInt64 = 0
+class OverlayWindowController {
+    var window: NSPanel?
+    var visibilityToken: UInt64 = 0
+    let animationDuration: TimeInterval
+
+    init(animationDuration: TimeInterval) {
+        self.animationDuration = animationDuration
+    }
 
     func show() {
         if window == nil {
             guard createWindow() else {
-                logger.error("Failed to create overlay window - no screen available")
+                onWindowCreationFailed()
                 return
             }
         }
         visibilityToken &+= 1
         window?.alphaValue = 1
-        waveformView?.reset()
+        onShow()
         window?.orderFront(nil)
     }
 
@@ -28,7 +30,7 @@ final class OverlayWindow {
         let token = visibilityToken
 
         NSAnimationContext.runAnimationGroup { context in
-            context.duration = 0.2
+            context.duration = animationDuration
             window?.animator().alphaValue = 0
         } completionHandler: {
             Task { @MainActor [weak self] in
@@ -43,6 +45,33 @@ final class OverlayWindow {
         }
     }
 
+    @discardableResult
+    func createWindow() -> Bool {
+        false
+    }
+
+    func onShow() {}
+    func onWindowCreationFailed() {}
+}
+
+@MainActor
+final class OverlayWindow: OverlayWindowController {
+    private var waveformView: WaveformView?
+    private var hostingView: NSHostingView<WaveformContainer>?
+    private let logger = Logger(subsystem: "com.rselbach.jabber", category: "OverlayWindow")
+
+    init() {
+        super.init(animationDuration: 0.2)
+    }
+
+    override func onShow() {
+        waveformView?.reset()
+    }
+
+    override func onWindowCreationFailed() {
+        logger.error("Failed to create overlay window - no screen available")
+    }
+
     func updateLevel(_ level: Float) {
         waveformView?.addLevel(level)
     }
@@ -52,7 +81,7 @@ final class OverlayWindow {
     }
 
     @discardableResult
-    private func createWindow() -> Bool {
+    override func createWindow() -> Bool {
         guard let screen = NSScreen.main ?? NSScreen.screens.first else { return false }
         let screenFrame = screen.visibleFrame
 

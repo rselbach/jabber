@@ -3,42 +3,16 @@ import SwiftUI
 import os
 
 @MainActor
-final class DownloadOverlayWindow {
-    private var window: NSPanel?
+final class DownloadOverlayWindow: OverlayWindowController {
     private let viewModel = DownloadOverlayViewModel()
     private let logger = Logger(subsystem: "com.rselbach.jabber", category: "DownloadOverlayWindow")
-    private var visibilityToken: UInt64 = 0
 
-    func show() {
-        if window == nil {
-            guard createWindow() else {
-                logger.error("Failed to create download overlay window - no screen available")
-                return
-            }
-        }
-        visibilityToken &+= 1
-        window?.alphaValue = 1
-        window?.orderFront(nil)
+    init() {
+        super.init(animationDuration: 0.3)
     }
 
-    func hide() {
-        visibilityToken &+= 1
-        let token = visibilityToken
-
-        NSAnimationContext.runAnimationGroup { context in
-            context.duration = 0.3
-            window?.animator().alphaValue = 0
-        } completionHandler: {
-            Task { @MainActor [weak self] in
-                guard let self, let window = self.window else { return }
-                guard token == self.visibilityToken else {
-                    window.alphaValue = 1
-                    return
-                }
-                window.orderOut(nil)
-                window.alphaValue = 1
-            }
-        }
+    override func onWindowCreationFailed() {
+        logger.error("Failed to create download overlay window - no screen available")
     }
 
     func updateProgress(_ progress: Double, status: String, indeterminate: Bool = false) {
@@ -48,7 +22,7 @@ final class DownloadOverlayWindow {
     }
 
     @discardableResult
-    private func createWindow() -> Bool {
+    override func createWindow() -> Bool {
         guard let screen = NSScreen.main ?? NSScreen.screens.first else { return false }
         let screenFrame = screen.visibleFrame
 

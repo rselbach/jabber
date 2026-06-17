@@ -327,23 +327,22 @@ final class ModelManager {
 
         try FileManager.default.removeItem(at: modelPath)
 
-        // If we deleted the currently selected model, clear the selection before
-        // refreshing so the transcription service doesn't hold a stale reference.
+        // If we deleted the currently selected model, switch to another before
+        // posting a single modelDidChange so the transcription service loads the
+        // new selection instead of re-downloading the one we just deleted.
+        let didSwitchSelection: Bool
         if currentModel == modelId {
-            NotificationCenter.default.post(name: Constants.Notifications.modelDidChange, object: nil)
+            let fallback = downloadedModels.first(where: { $0.id != modelId })?.id
+                ?? AppMode.baseModelId
+            settings[.selectedModel] = fallback
+            didSwitchSelection = true
+        } else {
+            didSwitchSelection = false
         }
 
         refreshModels()
 
-        // Switch to another model if we deleted the selected one
-        if currentModel == modelId {
-            guard let firstDownloaded = downloadedModels.first?.id else {
-                // This should never happen due to the guard at the top, but be safe
-                logger.error("No models available after deletion, falling back to base")
-                settings[.selectedModel] = AppMode.baseModelId
-                return
-            }
-            settings[.selectedModel] = firstDownloaded
+        if didSwitchSelection {
             NotificationCenter.default.post(name: Constants.Notifications.modelDidChange, object: nil)
         }
     }

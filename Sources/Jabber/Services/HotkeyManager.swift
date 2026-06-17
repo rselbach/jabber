@@ -5,6 +5,7 @@ import os
 final class HotkeyManager: @unchecked Sendable {
     private var hotKeyRef: EventHotKeyRef?
     private var eventHandlerRef: EventHandlerRef?
+    private var isDeinitialized = false
     private let lock = NSLock()
     private let logger = Logger(subsystem: "com.rselbach.jabber", category: "HotkeyManager")
 
@@ -18,6 +19,7 @@ final class HotkeyManager: @unchecked Sendable {
 
     deinit {
         lock.lock()
+        isDeinitialized = true
         let ref = hotKeyRef
         let handler = eventHandlerRef
         lock.unlock()
@@ -98,6 +100,12 @@ final class HotkeyManager: @unchecked Sendable {
         }
     }
 
+    private func isDeinit() -> Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        return isDeinitialized
+    }
+
     private func installEventHandler() {
         var eventTypes = [
             EventTypeSpec(eventClass: OSType(kEventClassKeyboard), eventKind: UInt32(kEventHotKeyPressed)),
@@ -112,6 +120,8 @@ final class HotkeyManager: @unchecked Sendable {
                 guard let refcon, let event else { return OSStatus(eventNotHandledErr) }
 
                 let manager = Unmanaged<HotkeyManager>.fromOpaque(refcon).takeUnretainedValue()
+                guard !manager.isDeinit() else { return OSStatus(eventNotHandledErr) }
+
                 let kind = GetEventKind(event)
 
                 if kind == UInt32(kEventHotKeyPressed) {

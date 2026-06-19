@@ -157,10 +157,18 @@ final class DictationCoordinator {
         audioCapture.stopCapture()
 
         // Invalidate the session so stale transcription tasks cannot touch state.
+        let sessionID = currentSessionID
         currentSessionID = nil
         transcriptionTask?.cancel()
-        if !activity.isActive {
-            transcriptionTask = nil
+        transcriptionTask = nil
+
+        // Release the activity slot immediately so a cancelled-in-flight
+        // transcription does not block new sessions while the (uncancellable)
+        // background inference keeps running. The task's `defer` will call
+        // `activity.complete(sessionID)` again, but that is a no-op once the
+        // active id has been cleared here.
+        if activity.isActive, let sessionID {
+            _ = activity.complete(sessionID)
         }
 
         if state != .idle {

@@ -4,8 +4,9 @@
 
 .claude/
 .opencode/
+.serena/
 CLAUDE.md
-AGENTS.md 
+AGENTS.md
 
 # Xcode
 *.xcodeproj/

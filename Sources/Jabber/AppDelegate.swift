@@ -33,6 +33,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var lastTranscriptionBusyNotice = CFAbsoluteTime(0)
     private var didPromptAccessibility = false
 
+    // Hotkey press tracking: a press that awaits microphone permission can
+    // have its key released before `start()` runs, leaving a "stuck" recording.
+    // `currentHotkeyPressID` identifies the in-flight press; if a release
+    // arrives while it is still awaiting start, `abortedHotkeyPressID` records
+    // it so the press aborts instead of starting a recording after release.
+    private var currentHotkeyPressID = 0
+    private var abortedHotkeyPressID: Int?
+
     private var modelState: TranscriptionService.State = .notReady
 
     private var downloadStatesByModelId: [String: ModelDownloadState] = [:]
@@ -296,6 +304,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func handleHotkeyDown() async {
+        currentHotkeyPressID += 1
+        let pressID = currentHotkeyPressID
+
         guard transcriptionService.isReady else {
             let now = CFAbsoluteTimeGetCurrent()
             if now - lastModelUnavailableNotice > 1.5 {
@@ -325,6 +336,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             return
         }
 
+        // If the key was released while we were awaiting permission, treat this
+        // press as aborted rather than starting a recording after release.
+        if abortedHotkeyPressID == pressID {
+            abortedHotkeyPressID = nil
+            return
+        }
+
         guard ensureOutputPermissionReady() else { return }
 
         if dictationCoordinator.isRecording { return }
@@ -338,7 +356,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func handleHotkeyUp() {
-        dictationCoordinator.stop()
+        if dictationCoordinator.isRecording {
+            dictationCoordinator.stop()
+        } else {
+            // Release arrived before recording began (e.g. during the permission
+            // await). Mark the in-flight press aborted so it does not start.
+            abortedHotkeyPressID = currentHotkeyPressID
+        }
     }
 
     private func ensureOutputPermissionReady() -> Bool {

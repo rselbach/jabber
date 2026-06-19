@@ -161,6 +161,27 @@ final class DictationCoordinatorTests: XCTestCase {
         XCTAssertTrue(outputManager.outputs.isEmpty)
     }
 
+    func testCancelDuringTranscriptionReleasesActivitySlot() async {
+        audioCapture.storedSamples = makeLoudSamples()
+        transcriptionService.transcribeDelay = .milliseconds(500)
+        transcriptionService.transcribeResult = .success("ignored")
+
+        XCTAssertTrue(coordinator.start())
+        coordinator.stop()
+        XCTAssertTrue(coordinator.isTranscribing)
+
+        coordinator.cancel()
+        XCTAssertTrue(coordinator.isIdle)
+        // The activity slot must be released immediately by cancel() so a new
+        // session can start without waiting for the (uncancellable) background
+        // inference to finish. This is the cancel-activity-leak regression.
+        XCTAssertTrue(coordinator.canStart)
+
+        // Let the abandoned task finish so it does not outlive tearDown.
+        try? await Task.sleep(for: .milliseconds(600))
+        XCTAssertTrue(outputManager.outputs.isEmpty)
+    }
+
     func testAudioConversionErrorIsForwarded() {
         let conversionError = AudioCaptureError.conversionFailed(NSError(domain: "test", code: 1))
 

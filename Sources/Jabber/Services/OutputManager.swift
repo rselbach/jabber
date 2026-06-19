@@ -141,6 +141,10 @@ final class OutputManager {
 
         guard snapshot.restore(to: pasteboard) else {
             logger.warning("Failed to restore previous clipboard contents")
+            NotificationService.shared.showWarning(
+                title: "Clipboard Restore Failed",
+                message: "Could not restore your previous clipboard contents. They may have been lost."
+            )
             return
         }
     }
@@ -165,9 +169,15 @@ struct PasteboardSnapshot: Equatable {
     }
 
     func restore(to pasteboard: NSPasteboard) -> Bool {
-        pasteboard.clearContents()
-        guard !items.isEmpty else { return true }
+        guard !items.isEmpty else {
+            pasteboard.clearContents()
+            return true
+        }
 
+        // Build the pasteboard items first, *before* clearing the live
+        // pasteboard. `setData` can fail for type-mismatch reasons; if we
+        // cleared first (as the previous version did) a failure here would
+        // leave the pasteboard empty and destroy the user's original contents.
         var pasteboardItems: [NSPasteboardItem] = []
         pasteboardItems.reserveCapacity(items.count)
 
@@ -179,6 +189,7 @@ struct PasteboardSnapshot: Equatable {
             pasteboardItems.append(pasteboardItem)
         }
 
+        pasteboard.clearContents()
         return pasteboard.writeObjects(pasteboardItems)
     }
 }

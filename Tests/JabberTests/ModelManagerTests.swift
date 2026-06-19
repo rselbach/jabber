@@ -134,7 +134,7 @@ final class ModelManagerTests: XCTestCase {
     }
     
     func testSelectModelReturnsFalseForNonExistentModel() {
-        let result = modelManager.selectModel("nonexistent", previousModelId: nil)
+        let result = modelManager.selectModel("nonexistent")
         XCTAssertFalse(result, "Should not select non-existent model")
     }
 
@@ -188,14 +188,14 @@ final class ModelManagerTests: XCTestCase {
             return
         }
         
-        let result = modelManager.selectModel(modelId, previousModelId: nil)
+        let result = modelManager.selectModel(modelId)
         XCTAssertFalse(result, "Should not select model that isn't downloaded")
     }
     
     func testSelectModelReturnsFalseForSameModel() {
         // Get currently selected model
         let currentModel = settings[.selectedModel]
-        let result = modelManager.selectModel(currentModel, previousModelId: currentModel)
+        let result = modelManager.selectModel(currentModel)
         XCTAssertFalse(result, "Should return false when selecting same model")
     }
     

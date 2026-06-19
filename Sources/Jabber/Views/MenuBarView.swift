@@ -48,7 +48,14 @@ struct MenuBarView: View {
                 } else {
                     HStack {
                         Text("Model:")
-                        Picker("", selection: $selectedModel) {
+                        Picker("", selection: Binding(
+                            get: { selectedModel },
+                            set: { newValue in
+                                if modelManager.selectModel(newValue) {
+                                    selectedModel = newValue
+                                }
+                            }
+                        )) {
                             ForEach(modelManager.downloadedModels) { model in
                                 Text(model.name).tag(model.id)
                             }
@@ -97,9 +104,6 @@ struct MenuBarView: View {
         .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
             permissionRefreshTick.toggle()
         }
-        .onChange(of: selectedModel) { oldValue, newValue in
-            _ = modelManager.selectModel(newValue, previousModelId: oldValue)
-        }
     }
 
     private var setupReadiness: SetupReadiness {
@@ -131,7 +135,7 @@ struct MenuBarView: View {
 
         if !modelManager.downloadedModels.contains(where: { $0.id == selectedModel }),
            let fallbackModel = modelManager.downloadedModels.first?.id {
-            if modelManager.selectModel(fallbackModel, previousModelId: selectedModel) {
+            if modelManager.selectModel(fallbackModel) {
                 selectedModel = fallbackModel
             }
         }

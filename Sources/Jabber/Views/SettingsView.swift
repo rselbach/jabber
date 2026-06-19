@@ -265,9 +265,9 @@ struct SettingsView: View {
                         isSelected: selectedModel == model.id,
                         onSelect: {
                             guard model.isDownloaded else { return }
-                            let previousModelId = selectedModel
-                            guard modelManager.selectModel(model.id, previousModelId: previousModelId) else { return }
-                            selectedModel = model.id
+                            if modelManager.selectModel(model.id) {
+                                selectedModel = model.id
+                            }
                         },
                         onDownload: {
                             _ = modelManager.startDownload(model.id)

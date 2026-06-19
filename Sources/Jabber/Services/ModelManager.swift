@@ -141,10 +141,9 @@ final class ModelManager {
         }
     }
 
-    func selectModel(_ modelId: String, previousModelId: String?) -> Bool {
+    func selectModel(_ modelId: String) -> Bool {
         guard downloadedModels.contains(where: { $0.id == modelId }) else { return false }
-        let current = previousModelId ?? settings[.selectedModel]
-        guard current != modelId else { return false }
+        guard settings[.selectedModel] != modelId else { return false }
         settings[.selectedModel] = modelId
         NotificationCenter.default.post(name: Constants.Notifications.modelDidChange, object: nil)
         return true

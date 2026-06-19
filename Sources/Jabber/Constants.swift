@@ -18,50 +18,54 @@ enum Constants {
         static let hotkeyCaptureDidEnd = Notification.Name("com.rselbach.jabber.hotkeyCaptureDidEnd")
     }
 
-    /// Supported transcription languages
+    /// Languages supported by Qwen3-ASR (per the model card).
+    /// Codes are passed verbatim as a decoder prompt prefix; unsupported codes
+    /// produce nonsense text and unpredictable results.
     static let languages: [String: String] = [
-        "afrikaans": "af", "albanian": "sq", "amharic": "am", "arabic": "ar",
-        "armenian": "hy", "assamese": "as", "azerbaijani": "az", "bashkir": "ba",
-        "basque": "eu", "belarusian": "be", "bengali": "bn", "bosnian": "bs",
-        "breton": "br", "bulgarian": "bg", "burmese": "my", "cantonese": "yue",
-        "castilian": "es", "catalan": "ca", "chinese": "zh", "croatian": "hr",
-        "czech": "cs", "danish": "da", "dutch": "nl", "english": "en",
-        "estonian": "et", "faroese": "fo", "finnish": "fi", "flemish": "nl",
-        "french": "fr", "galician": "gl", "georgian": "ka", "german": "de",
-        "greek": "el", "gujarati": "gu", "haitian": "ht", "haitian creole": "ht",
-        "hausa": "ha", "hawaiian": "haw", "hebrew": "he", "hindi": "hi",
-        "hungarian": "hu", "icelandic": "is", "indonesian": "id", "italian": "it",
-        "japanese": "ja", "javanese": "jw", "kannada": "kn", "kazakh": "kk",
-        "khmer": "km", "korean": "ko", "lao": "lo", "latin": "la",
-        "latvian": "lv", "letzeburgesch": "lb", "lingala": "ln", "lithuanian": "lt",
-        "luxembourgish": "lb", "macedonian": "mk", "malagasy": "mg", "malay": "ms",
-        "malayalam": "ml", "maltese": "mt", "mandarin": "zh", "maori": "mi",
-        "marathi": "mr", "moldavian": "ro", "moldovan": "ro", "mongolian": "mn",
-        "myanmar": "my", "nepali": "ne", "norwegian": "no", "nynorsk": "nn",
-        "occitan": "oc", "panjabi": "pa", "pashto": "ps", "persian": "fa",
-        "polish": "pl", "portuguese": "pt", "punjabi": "pa", "pushto": "ps",
-        "romanian": "ro", "russian": "ru", "sanskrit": "sa", "serbian": "sr",
-        "shona": "sn", "sindhi": "sd", "sinhala": "si", "sinhalese": "si",
-        "slovak": "sk", "slovenian": "sl", "somali": "so", "spanish": "es",
-        "sundanese": "su", "swahili": "sw", "swedish": "sv", "tagalog": "tl",
-        "tajik": "tg", "tamil": "ta", "tatar": "tt", "telugu": "te",
-        "thai": "th", "tibetan": "bo", "turkish": "tr", "turkmen": "tk",
-        "ukrainian": "uk", "urdu": "ur", "uzbek": "uz", "valencian": "ca",
-        "vietnamese": "vi", "welsh": "cy", "yiddish": "yi", "yoruba": "yo"
+        "arabic": "ar",
+        "cantonese": "yue",
+        "castilian": "es",
+        "chinese": "zh",
+        "czech": "cs",
+        "danish": "da",
+        "dutch": "nl",
+        "english": "en",
+        "farsi": "fa",
+        "filipino": "fil",
+        "finnish": "fi",
+        "flemish": "nl",
+        "french": "fr",
+        "german": "de",
+        "greek": "el",
+        "hindi": "hi",
+        "hungarian": "hu",
+        "indonesian": "id",
+        "italian": "it",
+        "japanese": "ja",
+        "korean": "ko",
+        "macedonian": "mk",
+        "malay": "ms",
+        "mandarin": "zh",
+        "persian": "fa",
+        "polish": "pl",
+        "portuguese": "pt",
+        "romanian": "ro",
+        "russian": "ru",
+        "spanish": "es",
+        "swedish": "sv",
+        "tagalog": "fil",
+        "thai": "th",
+        "turkish": "tr",
+        "vietnamese": "vi"
     ]
 
     // some language codes have multiple names; pick one for UI
     private static let preferredLanguageNameByCode: [String: String] = [
-        "ca": "catalan",
         "es": "spanish",
-        "ht": "haitian creole",
-        "lb": "luxembourgish",
-        "my": "burmese",
+        "fa": "persian",
+        "fil": "filipino",
         "nl": "dutch",
-        "pa": "punjabi",
-        "ps": "pashto",
         "ro": "romanian",
-        "si": "sinhala",
         "zh": "chinese"
     ]
 

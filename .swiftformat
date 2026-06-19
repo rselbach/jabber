@@ -1,0 +1,12 @@
+--swift-version 5.0
+
+--disable sortImports
+--disable trailingCommas
+--disable wrapMultilineStatementBraces
+--disable hoistPatternLet
+--disable unusedArguments
+--disable redundantSendable
+--disable redundantMemberwiseInit
+--disable elseOnSameLine
+--disable modifierOrder
+--disable numberFormatting

@@ -59,7 +59,7 @@ enum Constants {
         "vietnamese": "vi"
     ]
 
-    // some language codes have multiple names; pick one for UI
+    /// some language codes have multiple names; pick one for UI
     private static let preferredLanguageNameByCode: [String: String] = [
         "es": "spanish",
         "fa": "persian",
@@ -93,11 +93,9 @@ enum Constants {
     }()
 
     /// Pre-sorted languages for UI display (cached to avoid repeated sorting)
-    static let sortedLanguages: [(name: String, code: String)] = {
-        languageDisplayNameByCode
-            .map { (name: $0.value.capitalized, code: $0.key) }
-            .sorted { $0.name < $1.name }
-    }()
+    static let sortedLanguages: [(name: String, code: String)] = languageDisplayNameByCode
+        .map { (name: $0.value.capitalized, code: $0.key) }
+        .sorted { $0.name < $1.name }
 
     /// Valid language codes for validation (every code present in the languages dict)
     static let validLanguageCodes: Set<String> = Set(languages.values)
@@ -115,5 +113,4 @@ enum Constants {
 
         return "auto"
     }
-
 }

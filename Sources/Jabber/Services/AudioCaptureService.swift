@@ -142,7 +142,7 @@ final class AudioCaptureService {
         guard frames > 0 else { return 0 }
 
         var sum: Float = 0
-        for i in 0..<frames {
+        for i in 0 ..< frames {
             sum += channelData[i] * channelData[i]
         }
         return min(1, sqrt(max(0, sum / Float(frames))))

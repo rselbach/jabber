@@ -41,7 +41,7 @@ final class DownloadOverlayWindow: OverlayWindowController {
         hostingView.frame = NSRect(x: 0, y: 0, width: windowWidth, height: windowHeight)
 
         panel.contentView = hostingView
-        self.window = panel
+        window = panel
         return true
     }
 }

@@ -50,7 +50,7 @@ struct SettingsView: View {
             permissionRefreshTick.toggle()
         }
         .alert("Error", isPresented: $showError, presenting: errorMessage) { _ in
-            Button("OK") { }
+            Button("OK") {}
         } message: { message in
             Text(message)
         }

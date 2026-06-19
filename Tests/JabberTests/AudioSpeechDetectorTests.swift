@@ -53,7 +53,7 @@ final class AudioSpeechDetectorTests: XCTestCase {
         let frequency = 220.0
         let sampleRate = 16_000.0
 
-        return (0..<sampleCount).map { index in
+        return (0 ..< sampleCount).map { index in
             let phase = 2 * Double.pi * frequency * Double(index) / sampleRate
             return amplitude * Float(sin(phase))
         }

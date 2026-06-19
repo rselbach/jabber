@@ -6,12 +6,12 @@ final class ModelErrorTests: XCTestCase {
         let error = ModelError.cannotDeleteActiveModel
         XCTAssertEqual(error.errorDescription, "Cannot delete the currently active model. Please select a different model first.")
     }
-    
+
     func testDownloadTimeoutErrorDescription() {
         let error = ModelError.downloadTimeout(modelId: "base")
         XCTAssertEqual(error.errorDescription, "Download timed out for model 'base'.")
     }
-    
+
     func testIncompleteModelInstallationErrorDescription() {
         let error = ModelError.incompleteModelInstallation(
             modelId: "base",

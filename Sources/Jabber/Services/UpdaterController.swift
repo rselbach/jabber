@@ -28,7 +28,7 @@ final class UpdaterController: ObservableObject {
             updaterDelegate: nil,
             userDriverDelegate: nil
         )
-        self.updaterController = controller
+        updaterController = controller
 
         controller.updater.publisher(for: \.canCheckForUpdates)
             .assign(to: &$canCheckForUpdates)

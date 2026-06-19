@@ -312,7 +312,7 @@ final class ModelManager {
         let currentModel = settings[.selectedModel]
 
         // Prevent deleting currently selected model if it's the only one
-        if currentModel == modelId && downloadedModels.count == 1 {
+        if currentModel == modelId, downloadedModels.count == 1 {
             throw ModelError.cannotDeleteActiveModel
         }
 

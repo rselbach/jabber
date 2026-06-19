@@ -116,7 +116,7 @@ final class HotkeyManager: @unchecked Sendable {
 
         let status = InstallEventHandler(
             GetApplicationEventTarget(),
-            { (_, event, refcon) -> OSStatus in
+            { _, event, refcon -> OSStatus in
                 guard let refcon, let event else { return OSStatus(eventNotHandledErr) }
 
                 let manager = Unmanaged<HotkeyManager>.fromOpaque(refcon).takeUnretainedValue()

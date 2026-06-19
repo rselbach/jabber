@@ -47,12 +47,19 @@ final class DictationCoordinator {
 
     private(set) var state: State = .idle
 
-    var isIdle: Bool { state == .idle }
-    var canStart: Bool { state == .idle && !activity.isActive }
+    var isIdle: Bool {
+        state == .idle
+    }
+
+    var canStart: Bool {
+        state == .idle && !activity.isActive
+    }
+
     var isRecording: Bool {
         if case .recording = state { return true }
         return false
     }
+
     var isTranscribing: Bool {
         if case .transcribing = state { return true }
         return false

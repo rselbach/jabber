@@ -25,6 +25,12 @@ jobs:
             xcodebuild -downloadComponent MetalToolchain
           fi
 
+      - name: Install SwiftFormat
+        run: brew install swiftformat
+
+      - name: Lint
+        run: swiftformat --lint .
+
       - name: Test
         run: swift test
 

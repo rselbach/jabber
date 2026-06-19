@@ -8,7 +8,7 @@ final class ModelManagerTests: XCTestCase {
     private var userDefaultsSuiteName: String!
     private var userDefaults: UserDefaults!
     private var cacheBaseURL: URL!
-    
+
     override func setUp() async throws {
         try await super.setUp()
         userDefaultsSuiteName = "JabberTests.ModelManager.\(UUID().uuidString)"
@@ -45,10 +45,10 @@ final class ModelManagerTests: XCTestCase {
         cacheBaseURL = nil
         try await super.tearDown()
     }
-    
+
     func testModelDefinitionsExist() {
         XCTAssertFalse(modelManager.models.isEmpty, "Should have model definitions")
-        
+
         // Verify known models exist
         let modelIds = modelManager.models.map { $0.id }
         XCTAssertTrue(modelIds.contains("base"), "Should have base model")
@@ -121,18 +121,18 @@ final class ModelManagerTests: XCTestCase {
         XCTAssertTrue(modelManager.migrateSelectedModelIfNeeded())
         XCTAssertEqual(settings[.selectedModel], AppMode.baseModelId)
     }
-    
+
     func testModelPropertiesAreSet() {
         guard let baseModel = modelManager.models.first(where: { $0.id == "base" }) else {
             XCTFail("Base model not found")
             return
         }
-        
+
         XCTAssertEqual(baseModel.name, "Base")
         XCTAssertEqual(baseModel.description, "Fast, accurate Qwen3-ASR 0.6B 4-bit")
         XCTAssertEqual(baseModel.sizeHint, "~700MB")
     }
-    
+
     func testSelectModelReturnsFalseForNonExistentModel() {
         let result = modelManager.selectModel("nonexistent")
         XCTAssertFalse(result, "Should not select non-existent model")
@@ -187,32 +187,32 @@ final class ModelManagerTests: XCTestCase {
             // All models are downloaded, skip this test
             return
         }
-        
+
         let result = modelManager.selectModel(modelId)
         XCTAssertFalse(result, "Should not select model that isn't downloaded")
     }
-    
+
     func testSelectModelReturnsFalseForSameModel() {
         // Get currently selected model
         let currentModel = settings[.selectedModel]
         let result = modelManager.selectModel(currentModel)
         XCTAssertFalse(result, "Should return false when selecting same model")
     }
-    
+
     func testDownloadedModelsPropertyFiltersCorrectly() {
         let downloaded = modelManager.downloadedModels
-        
+
         for model in downloaded {
             XCTAssertTrue(model.isDownloaded, "All models in downloadedModels should be downloaded")
         }
     }
-    
+
     func testHasAnyDownloadedModelReflectsState() {
         let hasDownloaded = modelManager.hasAnyDownloadedModel
         let expected = !modelManager.downloadedModels.isEmpty
         XCTAssertEqual(hasDownloaded, expected, "hasAnyDownloadedModel should reflect downloadedModels state")
     }
-    
+
     func testModelDownloadStateEquality() {
         let state1 = ModelDownloadState(
             modelId: "base",
@@ -222,7 +222,7 @@ final class ModelManagerTests: XCTestCase {
             errorDescription: nil,
             isCancelled: false
         )
-        
+
         let state2 = ModelDownloadState(
             modelId: "base",
             progress: 0.5,
@@ -231,10 +231,10 @@ final class ModelManagerTests: XCTestCase {
             errorDescription: nil,
             isCancelled: false
         )
-        
+
         XCTAssertEqual(state1, state2, "Equal states should be equal")
     }
-    
+
     func testModelDownloadStateInequality() {
         let state1 = ModelDownloadState(
             modelId: "base",
@@ -244,7 +244,7 @@ final class ModelManagerTests: XCTestCase {
             errorDescription: nil,
             isCancelled: false
         )
-        
+
         let state2 = ModelDownloadState(
             modelId: "large",
             progress: 0.5,
@@ -253,13 +253,13 @@ final class ModelManagerTests: XCTestCase {
             errorDescription: nil,
             isCancelled: false
         )
-        
+
         XCTAssertNotEqual(state1, state2, "Different model IDs should not be equal")
     }
-    
+
     func testModelDownloadStatePhases() {
         let phases: [ModelDownloadState.Phase] = [.started, .progress, .finished, .failed]
-        
+
         for phase in phases {
             let state = ModelDownloadState(
                 modelId: "base",
@@ -272,7 +272,7 @@ final class ModelManagerTests: XCTestCase {
             XCTAssertEqual(state.phase, phase, "Phase should be stored correctly")
         }
     }
-    
+
     func testModelStructIdentifiable() {
         let models = modelManager.models
         let uniqueIds = Set(models.map { $0.id })

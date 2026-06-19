@@ -103,8 +103,8 @@ final class OverlayWindow: OverlayWindowController {
 
         panel.contentView = hostingView
 
-        self.window = panel
-        self.waveformView = waveform
+        window = panel
+        waveformView = waveform
         self.hostingView = hostingView
         return true
     }

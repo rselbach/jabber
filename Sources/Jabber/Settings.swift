@@ -13,7 +13,7 @@ enum TypedSetting<T>: Sendable {
     case selectedLanguage
     case outputMode
     case vocabularyPrompt
-    
+
     /// The UserDefaults key for this setting
     var key: String {
         switch self {
@@ -162,7 +162,7 @@ enum TypedSettings {
             store[setting] = newValue
         }
     }
-    
+
     /// Get a boolean setting value
     static subscript(setting: BoolSetting) -> Bool {
         get {
@@ -197,7 +197,7 @@ enum TypedSettings {
     static func remove(_ setting: IntSetting) {
         store.remove(setting)
     }
-    
+
     /// Check if a string setting has been explicitly set
     static func isSet(_ setting: TypedSetting<String>) -> Bool {
         store.isSet(setting)

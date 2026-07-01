@@ -10,6 +10,7 @@ struct SettingsView: View {
     @AppStorage(AppSettingKey.hotkeyModifiers) private var hotkeyModifiers = Int(HotkeyShortcut.defaultShortcut.modifiers)
     @AppStorage(AppSettingKey.vocabularyPrompt) private var vocabularyPrompt = ""
     @AppStorage(AppSettingKey.selectedLanguage) private var selectedLanguage = Constants.defaultLanguage
+    @AppStorage(AppSettingKey.onboardingCompleted) private var onboardingCompleted = false
 
     @State private var modelManager = ModelManager.shared
     @State private var permissionRefreshTick = false
@@ -219,6 +220,10 @@ struct SettingsView: View {
                 onOpenAccessibilitySettings: openAccessibilitySettings,
                 onDownloadBaseModel: downloadBaseModel
             )
+
+            Button("Run setup again") {
+                runOnboardingAgain()
+            }
         } header: {
             Text("Setup")
         } footer: {
@@ -245,6 +250,14 @@ struct SettingsView: View {
         if !modelManager.startDownload(AppMode.baseModelId) {
             modelManager.refreshModels()
         }
+    }
+
+    private func runOnboardingAgain() {
+        onboardingCompleted = false
+        NotificationCenter.default.post(
+            name: Constants.Notifications.onboardingDidRequest,
+            object: nil
+        )
     }
 
     private func applyHotkeyShortcut(_ shortcut: HotkeyShortcut) {

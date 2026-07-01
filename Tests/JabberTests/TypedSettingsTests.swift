@@ -74,22 +74,32 @@ final class TypedSettingsTests: XCTestCase {
 
     func testBoolSettingDefaultsAndPersistence() {
         XCTAssertFalse(settings[.didShowFirstRunSetup])
+        XCTAssertFalse(settings[.onboardingCompleted])
         XCTAssertFalse(settings.isSet(.didShowFirstRunSetup))
+        XCTAssertFalse(settings.isSet(.onboardingCompleted))
 
         settings[.didShowFirstRunSetup] = true
+        settings[.onboardingCompleted] = true
 
         XCTAssertTrue(settings[.didShowFirstRunSetup])
+        XCTAssertTrue(settings[.onboardingCompleted])
         XCTAssertTrue(settings.isSet(.didShowFirstRunSetup))
+        XCTAssertTrue(settings.isSet(.onboardingCompleted))
     }
 
     func testBoolSettingRemoveResetsToDefault() {
         settings[.didShowFirstRunSetup] = true
+        settings[.onboardingCompleted] = true
         XCTAssertTrue(settings[.didShowFirstRunSetup])
+        XCTAssertTrue(settings[.onboardingCompleted])
 
         settings.remove(.didShowFirstRunSetup)
+        settings.remove(.onboardingCompleted)
 
         XCTAssertFalse(settings[.didShowFirstRunSetup])
+        XCTAssertFalse(settings[.onboardingCompleted])
         XCTAssertFalse(settings.isSet(.didShowFirstRunSetup))
+        XCTAssertFalse(settings.isSet(.onboardingCompleted))
     }
 
     func testIntSettingDefaultsAndPersistence() {

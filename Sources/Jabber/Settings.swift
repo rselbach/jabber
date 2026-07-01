@@ -27,17 +27,20 @@ enum TypedSetting<T>: Sendable {
 
 enum BoolSetting: Sendable {
     case didShowFirstRunSetup
+    case onboardingCompleted
 
     var key: String {
         switch self {
         case .didShowFirstRunSetup:
             return AppSettingKey.didShowFirstRunSetup
+        case .onboardingCompleted:
+            return AppSettingKey.onboardingCompleted
         }
     }
 
     var `default`: Bool {
         switch self {
-        case .didShowFirstRunSetup:
+        case .didShowFirstRunSetup, .onboardingCompleted:
             return false
         }
     }

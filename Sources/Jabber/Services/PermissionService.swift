@@ -51,10 +51,13 @@ final class PermissionService {
             return lastMicrophonePermissionResult
         }
 
+        return microphoneAuthorizationStatus(checkedAt: now) == .authorized
+    }
+
+    func microphoneAuthorizationStatus(checkedAt date: Date = Date()) -> AVAuthorizationStatus {
         let status = AVCaptureDevice.authorizationStatus(for: .audio)
-        let isAuthorized = status == .authorized
-        cacheMicrophonePermission(isAuthorized, checkedAt: now)
-        return isAuthorized
+        cacheMicrophonePermission(status == .authorized, checkedAt: date)
+        return status
     }
 
     private func cacheMicrophonePermission(
@@ -66,16 +69,12 @@ final class PermissionService {
     }
 
     func requestAccessibilityPermission() -> Bool {
-        let trusted = AXIsProcessTrusted()
+        let trusted = refreshAccessibilityPermissionStatus()
         guard !trusted else { return true }
 
         let options = [kAXTrustedCheckOptionPrompt.takeUnretainedValue(): true] as CFDictionary
         _ = AXIsProcessTrustedWithOptions(options)
-        let updated = AXIsProcessTrusted()
-
-        lastAccessibilityStatusCheck = Date()
-        lastAccessibilityPermissionResult = updated
-        return updated
+        return refreshAccessibilityPermissionStatus()
     }
 
     func hasAccessibilityPermission() -> Bool {
@@ -84,8 +83,12 @@ final class PermissionService {
             return lastAccessibilityPermissionResult
         }
 
+        return refreshAccessibilityPermissionStatus(checkedAt: now)
+    }
+
+    func refreshAccessibilityPermissionStatus(checkedAt date: Date = Date()) -> Bool {
         let isTrusted = AXIsProcessTrusted()
-        lastAccessibilityStatusCheck = now
+        lastAccessibilityStatusCheck = date
         lastAccessibilityPermissionResult = isTrusted
         return isTrusted
     }

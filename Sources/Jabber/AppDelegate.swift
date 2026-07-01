@@ -6,6 +6,8 @@ import os
 final class AppDelegate: NSObject, NSApplicationDelegate {
     private var statusItem: NSStatusItem?
     private var popover: NSPopover?
+    private var onboardingWindow: NSWindow?
+    private var onboardingCoordinator: OnboardingCoordinator?
 
     private let hotkeyManager = HotkeyManager()
     private let audioCapture = AudioCaptureService()
@@ -68,6 +70,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationWillTerminate(_ notification: Notification) {
         modelLoadTask?.cancel()
         firstRunSetupTask?.cancel()
+        onboardingCoordinator?.stop()
         dictationCoordinator.cancel()
         NotificationCenter.default.removeObserver(self)
     }
@@ -105,6 +108,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             self,
             selector: #selector(handleHotkeyCaptureEnd),
             name: Constants.Notifications.hotkeyCaptureDidEnd,
+            object: nil
+        )
+
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(handleOnboardingRequest),
+            name: Constants.Notifications.onboardingDidRequest,
             object: nil
         )
     }
@@ -315,7 +325,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                     title: "Model Not Ready",
                     message: "Jabber is still preparing the speech model. Try again in a moment."
                 )
-                showSetupPopoverIfNeeded()
+                showSetupGuidanceIfNeeded()
             }
             return
         }
@@ -332,7 +342,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 message: "Jabber needs microphone access to record speech.",
                 section: .microphone
             )
-            showSetupPopoverIfNeeded()
+            showSetupGuidanceIfNeeded()
             return
         }
 
@@ -379,7 +389,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             message: "Grant accessibility permission before dictating in paste mode, or switch output to Copy to clipboard in Settings.",
             section: .accessibility
         )
-        showSetupPopoverIfNeeded()
+        showSetupGuidanceIfNeeded()
 
         guard !didPromptAccessibility else { return }
         didPromptAccessibility = true
@@ -412,11 +422,65 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func showFirstRunSetupIfNeeded() {
-        guard !TypedSettings[BoolSetting.didShowFirstRunSetup] else { return }
-        TypedSettings[BoolSetting.didShowFirstRunSetup] = true
+        showOnboardingWindow(userInitiated: false)
+    }
 
-        guard !currentSetupReadiness().isComplete else { return }
-        showSetupPopover()
+    @objc private func handleOnboardingRequest() {
+        TypedSettings[.onboardingCompleted] = false
+        showOnboardingWindow(userInitiated: true)
+    }
+
+    private func shouldShowAutomaticOnboarding() -> Bool {
+        guard !TypedSettings[.onboardingCompleted] else { return false }
+        guard !TypedSettings[.didShowFirstRunSetup] else { return false }
+        return true
+    }
+
+    private func showOnboardingWindow(userInitiated: Bool) {
+        if !userInitiated {
+            guard shouldShowAutomaticOnboarding() else { return }
+        }
+
+        if let onboardingWindow {
+            NSApp.setActivationPolicy(.regular)
+            NSApp.activate(ignoringOtherApps: true)
+            onboardingWindow.makeKeyAndOrderFront(nil)
+            return
+        }
+
+        popover?.performClose(nil)
+        NSApp.setActivationPolicy(.regular)
+
+        let coordinator = OnboardingCoordinator()
+        let rootView = OnboardingView(coordinator: coordinator) { [weak self] in
+            self?.completeOnboarding()
+        }
+
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 520, height: 420),
+            styleMask: [.titled, .closable],
+            backing: .buffered,
+            defer: false
+        )
+        window.title = "Set Up Jabber"
+        window.identifier = NSUserInterfaceItemIdentifier("com.rselbach.jabber.onboarding")
+        window.contentViewController = NSHostingController(rootView: rootView)
+        window.isReleasedWhenClosed = false
+        window.delegate = self
+        window.center()
+
+        onboardingCoordinator = coordinator
+        onboardingWindow = window
+
+        NSApp.activate(ignoringOtherApps: true)
+        window.makeKeyAndOrderFront(nil)
+    }
+
+    private func completeOnboarding() {
+        TypedSettings[.onboardingCompleted] = true
+        TypedSettings[.didShowFirstRunSetup] = true
+        onboardingWindow?.close()
+        NSApp.setActivationPolicy(.accessory)
     }
 
     private func currentSetupReadiness() -> SetupReadiness {
@@ -427,6 +491,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             hasDownloadedModel: ModelManager.shared.hasAnyDownloadedModel,
             isDownloadingModel: ModelManager.shared.models.contains { $0.isDownloading }
         )
+    }
+
+    private func showSetupGuidanceIfNeeded() {
+        if shouldShowAutomaticOnboarding() {
+            showOnboardingWindow(userInitiated: false)
+            return
+        }
+
+        showSetupPopoverIfNeeded()
     }
 
     private func showSetupPopoverIfNeeded() {
@@ -569,5 +642,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             downloadOverlay.hide()
             updateStatusIcon(state: .error)
         }
+    }
+}
+
+extension AppDelegate: NSWindowDelegate {
+    func windowWillClose(_ notification: Notification) {
+        guard let window = notification.object as? NSWindow,
+              window === onboardingWindow else { return }
+
+        onboardingCoordinator?.stop()
+        onboardingCoordinator = nil
+        onboardingWindow = nil
+        NSApp.setActivationPolicy(.accessory)
     }
 }

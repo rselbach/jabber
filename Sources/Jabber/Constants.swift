@@ -16,6 +16,9 @@ enum Constants {
         /// Posted while the Settings UI is recording a new hotkey
         static let hotkeyCaptureDidBegin = Notification.Name("com.rselbach.jabber.hotkeyCaptureDidBegin")
         static let hotkeyCaptureDidEnd = Notification.Name("com.rselbach.jabber.hotkeyCaptureDidEnd")
+
+        /// Posted when the user asks to run onboarding from Settings
+        static let onboardingDidRequest = Notification.Name("com.rselbach.jabber.onboardingDidRequest")
     }
 
     /// Languages supported by Qwen3-ASR (per the model card).

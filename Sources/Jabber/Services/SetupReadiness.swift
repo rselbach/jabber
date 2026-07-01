@@ -101,7 +101,7 @@ enum SetupReadinessResolver {
             return SetupStep(
                 id: .accessibility,
                 title: "Accessibility",
-                message: "Jabber can paste transcriptions into the active app.",
+                message: "Jabber can type transcriptions into the active app.",
                 status: .complete,
                 actionTitle: nil,
                 action: nil
@@ -111,7 +111,7 @@ enum SetupReadinessResolver {
         return SetupStep(
             id: .accessibility,
             title: "Accessibility",
-            message: "Allow Accessibility so paste mode can type into other apps.",
+            message: "Allow Accessibility so Jabber can type into other apps.",
             status: .needsAction,
             actionTitle: "Open Settings",
             action: .openAccessibilitySettings

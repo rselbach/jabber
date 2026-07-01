@@ -80,7 +80,7 @@ extension TypedSetting where T == String {
         case .selectedLanguage:
             return Constants.defaultLanguage
         case .outputMode:
-            return "paste"
+            return TypingService.OutputMode.directTyping.rawValue
         case .vocabularyPrompt:
             return ""
         }
@@ -101,7 +101,14 @@ struct SettingsStore: Sendable {
 
     subscript(setting: TypedSetting<String>) -> String {
         get {
-            userDefaults.string(forKey: setting.key) ?? setting.default
+            let value = userDefaults.string(forKey: setting.key) ?? setting.default
+            guard case .outputMode = setting else { return value }
+
+            let migratedValue = TypingService.migratedOutputModeRawValue(value)
+            if migratedValue != value {
+                userDefaults.set(migratedValue, forKey: setting.key)
+            }
+            return migratedValue
         }
         nonmutating set {
             userDefaults.set(newValue, forKey: setting.key)

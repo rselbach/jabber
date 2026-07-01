@@ -57,9 +57,9 @@ Model options are available in Settings:
 Jabber requires two macOS permissions to provide the full experience:
 
 - **Microphone**: required to capture speech.
-- **Accessibility**: required for paste-into-current-app mode.
+- **Accessibility**: required for type-into-active-app mode.
 
-On first launch or first use, macOS may ask for microphone permission and may open a system permission prompt for accessibility when you use paste mode.
+On first launch or first use, macOS may ask for microphone permission and may open a system permission prompt for accessibility when you type into the active app.
 
 If permission prompts do not appear:
 

@@ -30,7 +30,15 @@ final class TypedSettingsTests: XCTestCase {
     func testDefaultValues() {
         XCTAssertEqual(settings[.selectedModel], AppMode.baseModelId, "Default model should be base")
         XCTAssertEqual(settings[.selectedLanguage], Constants.defaultLanguage, "Default language should match system")
+        XCTAssertEqual(settings[.outputMode], TypingService.OutputMode.directTyping.rawValue)
         XCTAssertEqual(settings[.vocabularyPrompt], "", "Default vocabulary should be empty")
+    }
+
+    func testLegacyPasteOutputModeMigratesToDirectTyping() {
+        userDefaults.set("paste", forKey: AppSettingKey.outputMode)
+
+        XCTAssertEqual(settings[.outputMode], TypingService.OutputMode.directTyping.rawValue)
+        XCTAssertEqual(userDefaults.string(forKey: AppSettingKey.outputMode), TypingService.OutputMode.directTyping.rawValue)
     }
 
     func testSettingAndGettingValues() {

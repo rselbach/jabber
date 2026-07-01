@@ -65,7 +65,7 @@ struct OnboardingView: View {
             Text("Jabber turns speech into text locally on your Mac.")
                 .font(.title3)
 
-            Text("We’ll check microphone access, install the base speech model, and optionally enable Accessibility so Jabber can paste into the active app.")
+            Text("We’ll check microphone access, install the base speech model, and optionally enable Accessibility so Jabber can type into the active app.")
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
         }
@@ -138,7 +138,7 @@ struct OnboardingView: View {
 
     private var accessibilityStep: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text("Accessibility lets Jabber paste transcriptions into the app you were using.")
+            Text("Accessibility lets Jabber type transcriptions into the app you were using.")
                 .font(.title3)
 
             statusLabel(

@@ -12,7 +12,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private let hotkeyManager = HotkeyManager()
     private let audioCapture = AudioCaptureService()
     private let transcriptionService = TranscriptionService()
-    private let outputManager = OutputManager()
+    private let typingService = TypingService()
     private let permissionService = PermissionService.shared
     private let overlayWindow = OverlayWindow()
     private let downloadOverlay = DownloadOverlayWindow()
@@ -28,7 +28,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private lazy var dictationCoordinator = DictationCoordinator(
         audioCapture: audioCapture,
         transcriptionService: transcriptionService,
-        outputManager: outputManager
+        typingService: typingService
     )
 
     private var lastModelUnavailableNotice = CFAbsoluteTime(0)
@@ -362,7 +362,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             return
         }
 
-        _ = dictationCoordinator.start()
+        let targetProcessID = TypingService.captureFocusedProcessID()
+        _ = dictationCoordinator.start(targetProcessID: targetProcessID)
     }
 
     private func handleHotkeyUp() {
@@ -376,7 +377,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func ensureOutputPermissionReady() -> Bool {
-        guard outputManager.requiresAccessibilityPermission else { return true }
+        guard typingService.requiresAccessibilityPermission else { return true }
         guard !permissionService.hasAccessibilityPermission() else { return true }
 
         showAccessibilityPermissionWarning()
@@ -386,7 +387,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func showAccessibilityPermissionWarning() {
         NotificationService.shared.showPermissionWarning(
             title: "Accessibility Permission Required",
-            message: "Grant accessibility permission before dictating in paste mode, or switch output to Copy to clipboard in Settings.",
+            message: "Grant accessibility permission before dictating into the active app, or switch output to Copy to clipboard in Settings.",
             section: .accessibility
         )
         showSetupGuidanceIfNeeded()
@@ -487,7 +488,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         SetupReadinessResolver.resolve(
             hasMicrophonePermission: permissionService.hasMicrophonePermission(),
             hasAccessibilityPermission: permissionService.hasAccessibilityPermission(),
-            requiresAccessibilityPermission: outputManager.requiresAccessibilityPermission,
+            requiresAccessibilityPermission: typingService.requiresAccessibilityPermission,
             hasDownloadedModel: ModelManager.shared.hasAnyDownloadedModel,
             isDownloadingModel: ModelManager.shared.models.contains { $0.isDownloading }
         )

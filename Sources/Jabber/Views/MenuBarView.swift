@@ -4,7 +4,7 @@ import SwiftUI
 struct MenuBarView: View {
     @AppStorage(AppSettingKey.selectedModel) private var selectedModel = AppMode.baseModelId
     @AppStorage(AppSettingKey.selectedLanguage) private var selectedLanguage = Constants.defaultLanguage
-    @AppStorage(AppSettingKey.outputMode) private var outputMode = OutputManager.OutputMode.pasteInPlace.rawValue
+    @AppStorage(AppSettingKey.outputMode) private var outputMode = TypingService.OutputMode.directTyping.rawValue
     @AppStorage(AppSettingKey.hotkeyKeyCode) private var hotkeyKeyCode = Int(HotkeyShortcut.defaultShortcut.keyCode)
     @AppStorage(AppSettingKey.hotkeyModifiers) private var hotkeyModifiers = Int(HotkeyShortcut.defaultShortcut.modifiers)
     @State private var modelManager = ModelManager.shared
@@ -117,8 +117,8 @@ struct MenuBarView: View {
         )
     }
 
-    private var selectedOutputMode: OutputManager.OutputMode {
-        OutputManager.OutputMode(rawValue: outputMode) ?? .pasteInPlace
+    private var selectedOutputMode: TypingService.OutputMode {
+        TypingService.OutputMode(rawValue: TypingService.migratedOutputModeRawValue(outputMode)) ?? .directTyping
     }
 
     private var hotkeyDisplay: String {
@@ -129,6 +129,7 @@ struct MenuBarView: View {
     }
 
     private func refreshMenuState() {
+        outputMode = TypingService.migratedOutputModeRawValue(outputMode)
         permissionRefreshTick.toggle()
         _ = modelManager.migrateSelectedModelIfNeeded()
         modelManager.refreshModels()

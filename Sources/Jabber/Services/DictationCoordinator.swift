@@ -29,10 +29,10 @@ extension TranscriptionService: TranscriptionProtocol {}
 /// touching the real clipboard or accessibility APIs.
 @MainActor
 protocol OutputProtocol: AnyObject {
-    func output(_ text: String)
+    func output(_ text: String, targetProcessID: pid_t?)
 }
 
-extension OutputManager: OutputProtocol {}
+extension TypingService: OutputProtocol {}
 
 /// Owns the entire dictation lifecycle: recording, speech detection,
 /// transcription, and output. All state changes are serialized on the main
@@ -73,20 +73,21 @@ final class DictationCoordinator {
 
     private let audioCapture: any AudioCaptureProtocol
     private let transcriptionService: any TranscriptionProtocol
-    private let outputManager: any OutputProtocol
+    private let typingService: any OutputProtocol
     private var activity = TranscriptionActivityTracker()
     private var transcriptionTask: Task<Void, Never>?
     private var currentSessionID: UUID?
+    private var currentTargetProcessID: pid_t?
     private let logger = Logger(subsystem: "com.rselbach.jabber", category: "DictationCoordinator")
 
     init(
         audioCapture: any AudioCaptureProtocol,
         transcriptionService: any TranscriptionProtocol,
-        outputManager: any OutputProtocol
+        typingService: any OutputProtocol
     ) {
         self.audioCapture = audioCapture
         self.transcriptionService = transcriptionService
-        self.outputManager = outputManager
+        self.typingService = typingService
 
         self.audioCapture.onAudioLevel = { [weak self] level in
             self?.onAudioLevel?(level)
@@ -99,11 +100,12 @@ final class DictationCoordinator {
     /// Starts a new dictation session if the coordinator is idle.
     /// Returns `true` if recording began, `false` otherwise.
     @discardableResult
-    func start() -> Bool {
+    func start(targetProcessID: pid_t? = nil) -> Bool {
         guard canStart else { return false }
 
         let sessionID = UUID()
         currentSessionID = sessionID
+        currentTargetProcessID = targetProcessID
 
         do {
             try audioCapture.startCapture()
@@ -113,6 +115,7 @@ final class DictationCoordinator {
         } catch {
             logger.error("Failed to start audio capture: \(error.localizedDescription)")
             currentSessionID = nil
+            currentTargetProcessID = nil
             onTranscriptionError?(error)
             return false
         }
@@ -159,6 +162,7 @@ final class DictationCoordinator {
         // Invalidate the session so stale transcription tasks cannot touch state.
         let sessionID = currentSessionID
         currentSessionID = nil
+        currentTargetProcessID = nil
         transcriptionTask?.cancel()
         transcriptionTask = nil
 
@@ -204,7 +208,7 @@ final class DictationCoordinator {
 
             let trimmedText = text.trimmingCharacters(in: .whitespacesAndNewlines)
             if !trimmedText.isEmpty {
-                outputManager.output(trimmedText)
+                typingService.output(trimmedText, targetProcessID: currentTargetProcessID)
             } else {
                 onNoSpeechDetected?()
             }
@@ -219,6 +223,7 @@ final class DictationCoordinator {
     private func finish(sessionID: UUID) {
         guard currentSessionID == sessionID else { return }
         currentSessionID = nil
+        currentTargetProcessID = nil
         transcriptionTask = nil
         state = .idle
         onStateChange?(.idle)

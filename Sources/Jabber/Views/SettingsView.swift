@@ -5,7 +5,7 @@ struct SettingsView: View {
     @ObservedObject var updaterController: UpdaterController
 
     @AppStorage(AppSettingKey.selectedModel) private var selectedModel = AppMode.baseModelId
-    @AppStorage(AppSettingKey.outputMode) private var outputMode = OutputManager.OutputMode.pasteInPlace.rawValue
+    @AppStorage(AppSettingKey.outputMode) private var outputMode = TypingService.OutputMode.directTyping.rawValue
     @AppStorage(AppSettingKey.hotkeyKeyCode) private var hotkeyKeyCode = Int(HotkeyShortcut.defaultShortcut.keyCode)
     @AppStorage(AppSettingKey.hotkeyModifiers) private var hotkeyModifiers = Int(HotkeyShortcut.defaultShortcut.modifiers)
     @AppStorage(AppSettingKey.vocabularyPrompt) private var vocabularyPrompt = ""
@@ -43,6 +43,7 @@ struct SettingsView: View {
         }
         .frame(width: 520, height: 560)
         .onAppear {
+            outputMode = TypingService.migratedOutputModeRawValue(outputMode)
             permissionRefreshTick.toggle()
             _ = modelManager.migrateSelectedModelIfNeeded()
             modelManager.refreshModels()
@@ -111,8 +112,8 @@ struct SettingsView: View {
         )
     }
 
-    private var selectedOutputMode: OutputManager.OutputMode {
-        OutputManager.OutputMode(rawValue: outputMode) ?? .pasteInPlace
+    private var selectedOutputMode: TypingService.OutputMode {
+        TypingService.OutputMode(rawValue: TypingService.migratedOutputModeRawValue(outputMode)) ?? .directTyping
     }
 
     private var hotkeyShortcut: HotkeyShortcut {
@@ -132,12 +133,12 @@ struct SettingsView: View {
 
             Section {
                 Picker("After transcription", selection: $outputMode) {
-                    Text("Copy to clipboard").tag(OutputManager.OutputMode.clipboard.rawValue)
-                    Text("Paste into active app").tag(OutputManager.OutputMode.pasteInPlace.rawValue)
+                    Text("Copy to clipboard").tag(TypingService.OutputMode.clipboard.rawValue)
+                    Text("Type into active app").tag(TypingService.OutputMode.directTyping.rawValue)
                 }
                 .pickerStyle(.radioGroup)
 
-                if outputMode == OutputManager.OutputMode.pasteInPlace.rawValue {
+                if selectedOutputMode == .directTyping {
                     Button("Open Accessibility Settings") {
                         PermissionService.shared.openPrivacySettings(for: .accessibility)
                     }

@@ -5,18 +5,18 @@ import XCTest
 final class DictationCoordinatorTests: XCTestCase {
     private var audioCapture: FakeAudioCapture!
     private var transcriptionService: FakeTranscriptionService!
-    private var outputManager: FakeOutputManager!
+    private var typingService: FakeTypingService!
     private var coordinator: DictationCoordinator!
 
     override func setUp() async throws {
         try await super.setUp()
         audioCapture = FakeAudioCapture()
         transcriptionService = FakeTranscriptionService()
-        outputManager = FakeOutputManager()
+        typingService = FakeTypingService()
         coordinator = DictationCoordinator(
             audioCapture: audioCapture,
             transcriptionService: transcriptionService,
-            outputManager: outputManager
+            typingService: typingService
         )
     }
 
@@ -24,7 +24,7 @@ final class DictationCoordinatorTests: XCTestCase {
         coordinator = nil
         audioCapture = nil
         transcriptionService = nil
-        outputManager = nil
+        typingService = nil
         try await super.tearDown()
     }
 
@@ -88,7 +88,7 @@ final class DictationCoordinatorTests: XCTestCase {
 
         XCTAssertTrue(coordinator.isIdle)
         XCTAssertTrue(audioCapture.didStop)
-        XCTAssertTrue(outputManager.outputs.isEmpty)
+        XCTAssertTrue(typingService.outputs.isEmpty)
     }
 
     func testStopWithSpeechTranscribesAndOutputs() async {
@@ -109,7 +109,28 @@ final class DictationCoordinatorTests: XCTestCase {
         await fulfillment(of: [idleExpectation], timeout: 1.0)
 
         XCTAssertTrue(coordinator.isIdle)
-        XCTAssertEqual(outputManager.outputs, ["hello world"])
+        XCTAssertEqual(typingService.outputs, ["hello world"])
+        XCTAssertEqual(typingService.targetProcessIDs, [nil])
+    }
+
+    func testStopWithSpeechOutputsToCapturedTargetProcessID() async {
+        audioCapture.storedSamples = makeLoudSamples()
+        transcriptionService.transcribeResult = .success("cool cool cool")
+
+        let idleExpectation = XCTestExpectation(description: "coordinator returns to idle")
+        coordinator.onStateChange = { state in
+            if state == .idle {
+                idleExpectation.fulfill()
+            }
+        }
+
+        XCTAssertTrue(coordinator.start(targetProcessID: 12_345))
+        coordinator.stop()
+
+        await fulfillment(of: [idleExpectation], timeout: 1.0)
+
+        XCTAssertEqual(typingService.outputs, ["cool cool cool"])
+        XCTAssertEqual(typingService.targetProcessIDs, [12_345])
     }
 
     func testStopWithEmptyTranscriptionShowsNoSpeechWarning() async {
@@ -133,7 +154,7 @@ final class DictationCoordinatorTests: XCTestCase {
 
         await fulfillment(of: [idleExpectation], timeout: 1.0)
         XCTAssertTrue(didShowNoSpeech)
-        XCTAssertTrue(outputManager.outputs.isEmpty)
+        XCTAssertTrue(typingService.outputs.isEmpty)
     }
 
     func testCancelDuringRecordingReturnsToIdle() {
@@ -158,7 +179,7 @@ final class DictationCoordinatorTests: XCTestCase {
 
         // Give the cancelled task time to finish and verify it did not output.
         try? await Task.sleep(for: .milliseconds(300))
-        XCTAssertTrue(outputManager.outputs.isEmpty)
+        XCTAssertTrue(typingService.outputs.isEmpty)
     }
 
     func testCancelDuringTranscriptionReleasesActivitySlot() async {
@@ -179,7 +200,7 @@ final class DictationCoordinatorTests: XCTestCase {
 
         // Let the abandoned task finish so it does not outlive tearDown.
         try? await Task.sleep(for: .milliseconds(600))
-        XCTAssertTrue(outputManager.outputs.isEmpty)
+        XCTAssertTrue(typingService.outputs.isEmpty)
     }
 
     func testAudioConversionErrorIsForwarded() {
@@ -307,10 +328,12 @@ final class FakeTranscriptionService: TranscriptionProtocol, @unchecked Sendable
     }
 }
 
-final class FakeOutputManager: OutputProtocol, @unchecked Sendable {
+final class FakeTypingService: OutputProtocol, @unchecked Sendable {
     private(set) var outputs: [String] = []
+    private(set) var targetProcessIDs: [pid_t?] = []
 
-    func output(_ text: String) {
+    func output(_ text: String, targetProcessID: pid_t?) {
         outputs.append(text)
+        targetProcessIDs.append(targetProcessID)
     }
 }

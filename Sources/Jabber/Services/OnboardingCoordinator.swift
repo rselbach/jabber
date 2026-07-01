@@ -126,7 +126,7 @@ final class OnboardingCoordinator {
     }
 
     func skipAccessibility() {
-        TypedSettings[.outputMode] = OutputManager.OutputMode.clipboard.rawValue
+        TypedSettings[.outputMode] = TypingService.OutputMode.clipboard.rawValue
         didSkipAccessibility = true
         refreshState()
     }

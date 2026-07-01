@@ -18,8 +18,10 @@ extension AudioCaptureService: AudioCaptureProtocol {}
 /// without loading a real MLX model.
 protocol TranscriptionProtocol: AnyObject, Sendable {
     var isReady: Bool { get }
+    var supportsStreamingTranscription: Bool { get }
     func setVocabularyPrompt(_ prompt: String) async
     func setLanguage(_ language: String) async
+    func transcribeStreaming(samples: [Float]) async throws -> String
     func transcribe(samples: [Float]) async throws -> String
 }
 
@@ -67,6 +69,7 @@ final class DictationCoordinator {
 
     var onStateChange: ((State) -> Void)?
     var onAudioLevel: ((Float) -> Void)?
+    var onPartialTranscription: ((String) -> Void)?
     var onAudioConversionError: ((Error) -> Void)?
     var onNoSpeechDetected: (() -> Void)?
     var onTranscriptionError: ((Error) -> Void)?
@@ -76,18 +79,27 @@ final class DictationCoordinator {
     private let typingService: any OutputProtocol
     private var activity = TranscriptionActivityTracker()
     private var transcriptionTask: Task<Void, Never>?
+    private var streamingTask: Task<Void, Never>?
     private var currentSessionID: UUID?
     private var currentTargetProcessID: pid_t?
+    private var lastStreamingPreviewSampleCount = 0
+    private var lastStreamingPreviewText = ""
+    private let streamingPreviewInterval: Duration
+    private let minimumStreamingPreviewSampleCount: Int
     private let logger = Logger(subsystem: "com.rselbach.jabber", category: "DictationCoordinator")
 
     init(
         audioCapture: any AudioCaptureProtocol,
         transcriptionService: any TranscriptionProtocol,
-        typingService: any OutputProtocol
+        typingService: any OutputProtocol,
+        streamingPreviewInterval: Duration = .milliseconds(500),
+        minimumStreamingPreviewSampleCount: Int = 16_000
     ) {
         self.audioCapture = audioCapture
         self.transcriptionService = transcriptionService
         self.typingService = typingService
+        self.streamingPreviewInterval = streamingPreviewInterval
+        self.minimumStreamingPreviewSampleCount = minimumStreamingPreviewSampleCount
 
         self.audioCapture.onAudioLevel = { [weak self] level in
             self?.onAudioLevel?(level)
@@ -111,6 +123,7 @@ final class DictationCoordinator {
             try audioCapture.startCapture()
             state = .recording
             onStateChange?(.recording)
+            startStreamingPreview(sessionID: sessionID)
             return true
         } catch {
             logger.error("Failed to start audio capture: \(error.localizedDescription)")
@@ -128,6 +141,7 @@ final class DictationCoordinator {
         audioCapture.stopCapture()
 
         let samples = audioCapture.currentSamples()
+        let pendingStreamingTask = stopStreamingPreview()
         let speechAssessment = AudioSpeechDetector.assess(samples: samples)
 
         guard speechAssessment.shouldTranscribe else {
@@ -148,6 +162,9 @@ final class DictationCoordinator {
         onStateChange?(.transcribing(sessionID: sessionID))
 
         transcriptionTask = Task { [weak self] in
+            if let pendingStreamingTask {
+                await pendingStreamingTask.value
+            }
             await self?.transcribeAndOutput(samples: samples, sessionID: sessionID)
         }
     }
@@ -163,6 +180,7 @@ final class DictationCoordinator {
         let sessionID = currentSessionID
         currentSessionID = nil
         currentTargetProcessID = nil
+        _ = stopStreamingPreview()
         transcriptionTask?.cancel()
         transcriptionTask = nil
 
@@ -181,6 +199,69 @@ final class DictationCoordinator {
         }
     }
 
+    private func startStreamingPreview(sessionID: UUID) {
+        guard transcriptionService.supportsStreamingTranscription else { return }
+
+        _ = stopStreamingPreview()
+        lastStreamingPreviewSampleCount = 0
+        lastStreamingPreviewText = ""
+
+        streamingTask = Task { [weak self] in
+            await self?.runStreamingPreviewLoop(sessionID: sessionID)
+        }
+    }
+
+    private func stopStreamingPreview() -> Task<Void, Never>? {
+        let task = streamingTask
+        streamingTask = nil
+        task?.cancel()
+        return task
+    }
+
+    private func runStreamingPreviewLoop(sessionID: UUID) async {
+        await applyCurrentTranscriptionSettings()
+
+        while !Task.isCancelled {
+            do {
+                try await Task.sleep(for: streamingPreviewInterval)
+            } catch is CancellationError {
+                break
+            } catch {
+                logger.error("Streaming preview sleep failed: \(error.localizedDescription)")
+                break
+            }
+
+            guard !Task.isCancelled else { break }
+            guard currentSessionID == sessionID, state == .recording else { break }
+            await publishStreamingPreviewIfAvailable(sessionID: sessionID)
+        }
+    }
+
+    private func publishStreamingPreviewIfAvailable(sessionID: UUID) async {
+        let samples = audioCapture.currentSamples()
+        guard samples.count >= minimumStreamingPreviewSampleCount else { return }
+        guard samples.count > lastStreamingPreviewSampleCount else { return }
+        guard AudioSpeechDetector.assess(samples: samples).shouldTranscribe else { return }
+
+        do {
+            let text = try await transcriptionService.transcribeStreaming(samples: samples)
+            try Task.checkCancellation()
+
+            guard currentSessionID == sessionID, state == .recording else { return }
+
+            lastStreamingPreviewSampleCount = samples.count
+            let trimmedText = text.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !trimmedText.isEmpty, trimmedText != lastStreamingPreviewText else { return }
+
+            lastStreamingPreviewText = trimmedText
+            onPartialTranscription?(trimmedText)
+        } catch is CancellationError {
+            // Expected when recording stops while a preview pass is in flight.
+        } catch {
+            logger.warning("Streaming preview failed: \(error.localizedDescription)")
+        }
+    }
+
     private func transcribeAndOutput(samples: [Float], sessionID: UUID) async {
         defer {
             _ = activity.complete(sessionID)
@@ -191,11 +272,7 @@ final class DictationCoordinator {
         do {
             try Task.checkCancellation()
 
-            let vocab = TypedSettings[.vocabularyPrompt]
-            await transcriptionService.setVocabularyPrompt(vocab)
-
-            let language = TypedSettings[.selectedLanguage]
-            await transcriptionService.setLanguage(language)
+            await applyCurrentTranscriptionSettings()
 
             try Task.checkCancellation()
 
@@ -218,6 +295,14 @@ final class DictationCoordinator {
             logger.error("Transcription failed: \(error.localizedDescription)")
             onTranscriptionError?(error)
         }
+    }
+
+    private func applyCurrentTranscriptionSettings() async {
+        let vocab = TypedSettings[.vocabularyPrompt]
+        await transcriptionService.setVocabularyPrompt(vocab)
+
+        let language = TypedSettings[.selectedLanguage]
+        await transcriptionService.setLanguage(language)
     }
 
     private func finish(sessionID: UUID) {

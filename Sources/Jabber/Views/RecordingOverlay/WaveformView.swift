@@ -5,6 +5,7 @@ import SwiftUI
 final class WaveformView: ObservableObject {
     @Published private var circularBuffer: [Float] = []
     @Published private(set) var isProcessing = false
+    @Published private(set) var partialTranscription = ""
 
     private let maxSamples = 60
     private var writeIndex = 0
@@ -34,9 +35,14 @@ final class WaveformView: ObservableObject {
         writeIndex = 0
         isFull = false
         isProcessing = false
+        partialTranscription = ""
     }
 
     func showProcessing() {
         isProcessing = true
+    }
+
+    func updatePartialTranscription(_ text: String) {
+        partialTranscription = text
     }
 }

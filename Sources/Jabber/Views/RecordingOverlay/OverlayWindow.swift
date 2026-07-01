@@ -76,6 +76,10 @@ final class OverlayWindow: OverlayWindowController {
         waveformView?.addLevel(level)
     }
 
+    func updatePartialTranscription(_ text: String) {
+        waveformView?.updatePartialTranscription(text)
+    }
+
     func showProcessing() {
         waveformView?.showProcessing()
     }
@@ -86,7 +90,7 @@ final class OverlayWindow: OverlayWindowController {
         let screenFrame = screen.visibleFrame
 
         let windowWidth: CGFloat = 400
-        let windowHeight: CGFloat = 60
+        let windowHeight: CGFloat = 104
         let bottomMargin: CGFloat = 100
 
         let x = screenFrame.origin.x + (screenFrame.width - windowWidth) / 2
@@ -138,20 +142,57 @@ struct WaveformContainer: View {
                 .fill(.ultraThinMaterial)
 
             if waveformView.isProcessing {
-                HStack(spacing: 8) {
-                    ProgressView()
-                        .controlSize(.small)
-                    Text("Transcribing...")
-                        .font(.subheadline)
-                        .foregroundStyle(.secondary)
-                }
+                processingContent
+            } else if waveformView.partialTranscription.isEmpty {
+                waveform
             } else {
-                WaveformShape(levels: waveformView.levels)
-                    .stroke(Color.accentColor, lineWidth: 2)
-                    .padding(.horizontal, 20)
-                    .padding(.vertical, 15)
+                previewContent
             }
         }
+    }
+
+    private var waveform: some View {
+        WaveformShape(levels: waveformView.levels)
+            .stroke(Color.accentColor, lineWidth: 2)
+            .padding(.horizontal, 20)
+            .padding(.vertical, 15)
+    }
+
+    private var previewContent: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text(waveformView.partialTranscription)
+                .font(.callout)
+                .lineLimit(2)
+                .frame(maxWidth: .infinity, alignment: .leading)
+
+            WaveformShape(levels: waveformView.levels)
+                .stroke(Color.accentColor, lineWidth: 2)
+                .frame(height: 24)
+        }
+        .padding(.horizontal, 18)
+        .padding(.vertical, 12)
+    }
+
+    private var processingContent: some View {
+        VStack(spacing: 6) {
+            HStack(spacing: 8) {
+                ProgressView()
+                    .controlSize(.small)
+                Text("Transcribing...")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+            }
+
+            if !waveformView.partialTranscription.isEmpty {
+                Text(waveformView.partialTranscription)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(2)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+        }
+        .padding(.horizontal, 18)
+        .padding(.vertical, 12)
     }
 }
 

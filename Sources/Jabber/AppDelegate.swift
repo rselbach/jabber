@@ -264,6 +264,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             self?.overlayWindow.updateLevel(level)
         }
 
+        dictationCoordinator.onPartialTranscription = { [weak self] text in
+            self?.overlayWindow.updatePartialTranscription(text)
+        }
+
         dictationCoordinator.onAudioConversionError = { [weak self] error in
             guard let self else { return }
             self.logger.error("Audio conversion error: \(error.localizedDescription)")

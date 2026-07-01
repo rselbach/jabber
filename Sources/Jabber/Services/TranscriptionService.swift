@@ -70,6 +70,10 @@ actor TranscriptionService {
         stateObserver.isReady
     }
 
+    nonisolated var supportsStreamingTranscription: Bool {
+        true
+    }
+
     private func setReady(_ ready: Bool) {
         stateObserver.setReady(ready)
     }
@@ -134,13 +138,23 @@ actor TranscriptionService {
     }
 
     func transcribe(samples: [Float]) async throws -> String {
+        try Task.checkCancellation()
+
         try await ensureModelLoaded()
+
+        try Task.checkCancellation()
 
         guard let qwen3ASR else {
             throw TranscriptionError.loadFailed
         }
 
         return transcribeWithQwen3ASR(qwen3ASR, samples: samples)
+    }
+
+    func transcribeStreaming(samples: [Float]) async throws -> String {
+        try Task.checkCancellation()
+
+        return try await transcribe(samples: samples)
     }
 
     private func resolveLoadedModel(desiredModelId: String) -> Bool {

@@ -5,7 +5,7 @@ struct SettingsView: View {
     @ObservedObject var updaterController: UpdaterController
     let onAppearAction: () -> Void
 
-    @AppStorage(AppSettingKey.selectedModel) private var selectedModel = AppMode.baseModelId
+    @AppStorage(AppSettingKey.selectedModel) private var selectedModel = AppMode.parakeetModelId
     @AppStorage(AppSettingKey.outputMode) private var outputMode = TypingService.OutputMode.directTyping.rawValue
     @AppStorage(AppSettingKey.hotkeyKeyCode) private var hotkeyKeyCode = Int(HotkeyShortcut.defaultShortcut.keyCode)
     @AppStorage(AppSettingKey.hotkeyModifiers) private var hotkeyModifiers = Int(HotkeyShortcut.defaultShortcut.modifiers)
@@ -50,6 +50,12 @@ struct SettingsView: View {
                 .tag("history")
                 .tabItem {
                     Label("History", systemImage: "clock.arrow.circlepath")
+                }
+
+            aboutTab
+                .tag("about")
+                .tabItem {
+                    Label("About", systemImage: "info.circle")
                 }
         }
         .frame(width: 520, height: 560)
@@ -289,7 +295,7 @@ struct SettingsView: View {
     }
 
     private func downloadBaseModel() {
-        if !modelManager.startDownload(AppMode.baseModelId) {
+        if !modelManager.startDownload(AppMode.qwen3ModelId) {
             modelManager.refreshModels()
         }
     }
@@ -440,6 +446,44 @@ struct SettingsView: View {
             let audioURL = DictationHistoryStore.shared.audioURL(for: entry)
             NSWorkspace.shared.activateFileViewerSelecting([audioURL])
         }
+    }
+
+    private var aboutTab: some View {
+        Form {
+            Section {
+                Text("Jabber")
+                    .font(.headline)
+                Text("Local speech-to-text for macOS. All processing happens on-device.")
+                    .foregroundStyle(.secondary)
+            } header: {
+                Text("About")
+            }
+
+            Section {
+                ForEach(AppMode.modelDefinitions) { def in
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text(def.name)
+                            .font(.body)
+                        Text(def.attribution)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                        Link(def.license, destination: URL(string: def.licenseUrl)!)
+                            .font(.caption)
+                    }
+                    .padding(.vertical, 4)
+                }
+            } header: {
+                Text("Models")
+            }
+
+            Section {
+                Link("speech-swift — Apache 2.0", destination: URL(string: "https://github.com/soniqo/speech-swift")!)
+                Link("Sparkle — MIT", destination: URL(string: "https://sparkle-project.org/")!)
+            } header: {
+                Text("Libraries")
+            }
+        }
+        .formStyle(.grouped)
     }
 }
 

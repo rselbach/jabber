@@ -135,7 +135,7 @@ final class DictationCoordinatorTests: XCTestCase {
 
     func testStopWithSpeechSavesDictationHistoryAfterTranscriptionCompletes() async {
         audioCapture.storedSamples = makeLoudSamples()
-        transcriptionService.currentModelID = AppMode.mediumModelId
+        transcriptionService.currentModelID = AppMode.qwen3ModelId
         transcriptionService.transcribeResult = .success(" troy and abed in the morning ")
 
         let idleExpectation = XCTestExpectation(description: "coordinator returns to idle")
@@ -153,7 +153,7 @@ final class DictationCoordinatorTests: XCTestCase {
         XCTAssertEqual(dictationHistoryStore.sessions.count, 1)
         XCTAssertEqual(dictationHistoryStore.sessions[0].samples, audioCapture.storedSamples)
         XCTAssertEqual(dictationHistoryStore.sessions[0].transcript, " troy and abed in the morning ")
-        XCTAssertEqual(dictationHistoryStore.sessions[0].modelID, AppMode.mediumModelId)
+        XCTAssertEqual(dictationHistoryStore.sessions[0].modelID, AppMode.qwen3ModelId)
         XCTAssertEqual(dictationHistoryStore.sessions[0].language, Constants.defaultLanguage)
     }
 
@@ -433,7 +433,7 @@ final class FakeTranscriptionService: TranscriptionProtocol, @unchecked Sendable
     private var _transcribeResult: Result<String, Error> = .success("")
     private var _streamingDelay: Duration?
     private var _transcribeDelay: Duration?
-    private var _currentModelID: String? = AppMode.baseModelId
+    private var _currentModelID: String? = AppMode.parakeetModelId
     private var _streamingSampleCounts: [Int] = []
     private var _callOrder: [Call] = []
     private var _holdStreamingUntilReleased = false

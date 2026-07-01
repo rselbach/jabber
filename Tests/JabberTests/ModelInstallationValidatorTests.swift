@@ -27,7 +27,7 @@ final class ModelInstallationValidatorTests: XCTestCase {
 
         XCTAssertTrue(validation.isComplete)
         XCTAssertEqual(validation.missingRequiredFiles, [])
-        XCTAssertTrue(validation.hasSafetensors)
+        XCTAssertTrue(validation.hasWeights)
         XCTAssertNil(validation.readErrorDescription)
     }
 
@@ -39,7 +39,7 @@ final class ModelInstallationValidatorTests: XCTestCase {
 
         XCTAssertFalse(validation.isComplete)
         XCTAssertEqual(validation.missingRequiredFiles, ["tokenizer_config.json"])
-        XCTAssertTrue(validation.hasSafetensors)
+        XCTAssertTrue(validation.hasWeights)
         XCTAssertTrue(validation.failureDescription.contains("tokenizer_config.json"))
     }
 
@@ -50,8 +50,8 @@ final class ModelInstallationValidatorTests: XCTestCase {
 
         XCTAssertFalse(validation.isComplete)
         XCTAssertEqual(validation.missingRequiredFiles, [])
-        XCTAssertFalse(validation.hasSafetensors)
-        XCTAssertTrue(validation.failureDescription.contains("missing safetensors weights"))
+        XCTAssertFalse(validation.hasWeights)
+        XCTAssertTrue(validation.failureDescription.contains("missing model weights"))
     }
 
     func testMissingFolderIsInvalid() {
@@ -67,6 +67,32 @@ final class ModelInstallationValidatorTests: XCTestCase {
         )
     }
 
+    func testCompleteParakeetFolderIsValid() throws {
+        try writeFile(named: "config.json")
+        try writeFile(named: "vocab.json")
+        try createDirectory(named: "encoder.mlmodelc")
+        try createDirectory(named: "decoder.mlmodelc")
+        try createDirectory(named: "joint.mlmodelc")
+
+        let validation = ModelInstallationValidator.validateParakeetModelFolder(at: tempDir)
+
+        XCTAssertTrue(validation.isComplete)
+        XCTAssertTrue(validation.hasWeights)
+    }
+
+    func testMissingMlmodelcDirectoryIsInvalid() throws {
+        try writeFile(named: "config.json")
+        try writeFile(named: "vocab.json")
+        try createDirectory(named: "encoder.mlmodelc")
+        try createDirectory(named: "decoder.mlmodelc")
+
+        let validation = ModelInstallationValidator.validateParakeetModelFolder(at: tempDir)
+
+        XCTAssertFalse(validation.isComplete)
+        XCTAssertFalse(validation.hasWeights)
+        XCTAssertTrue(validation.missingRequiredFiles.contains("joint.mlmodelc"))
+    }
+
     private func writeRequiredModelFiles(except excludedFile: String? = nil) throws {
         for file in ModelInstallationValidator.requiredQwen3ASRFiles where file != excludedFile {
             try writeFile(named: file)
@@ -76,5 +102,12 @@ final class ModelInstallationValidatorTests: XCTestCase {
     private func writeFile(named name: String) throws {
         let data = Data("Greendale Community College".utf8)
         try data.write(to: tempDir.appendingPathComponent(name))
+    }
+
+    private func createDirectory(named name: String) throws {
+        try FileManager.default.createDirectory(
+            at: tempDir.appendingPathComponent(name),
+            withIntermediateDirectories: true
+        )
     }
 }

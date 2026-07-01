@@ -9,6 +9,8 @@ struct OnboardingView: View {
     @AppStorage(AppSettingKey.hotkeyKeyCode) private var hotkeyKeyCode = Int(HotkeyShortcut.defaultShortcut.keyCode)
     @AppStorage(AppSettingKey.hotkeyModifiers) private var hotkeyModifiers = Int(HotkeyShortcut.defaultShortcut.modifiers)
     @State private var modelManager = ModelManager.shared
+    @State private var showAllLanguages = false
+    @State private var languageSearchText = ""
 
     var body: some View {
         VStack(alignment: .leading, spacing: 24) {
@@ -53,6 +55,8 @@ struct OnboardingView: View {
             welcomeStep
         case .microphone:
             microphoneStep
+        case .language:
+            languageStep
         case .modelDownload:
             modelDownloadStep
         case .accessibility:
@@ -67,7 +71,7 @@ struct OnboardingView: View {
             Text("Jabber turns speech into text locally on your Mac.")
                 .font(.title3)
 
-            Text("We’ll check microphone access, install the base speech model, and optionally enable Accessibility so Jabber can type into the active app.")
+            Text("We'll check microphone access, pick a language and speech model, and optionally enable Accessibility so Jabber can type into the active app.")
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
         }
@@ -103,39 +107,154 @@ struct OnboardingView: View {
         }
     }
 
-    private var modelDownloadStep: some View {
+    private var languageStep: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text("Jabber uses a local speech model. The base model is required before you can dictate.")
+            Text("What language will you speak most?")
                 .font(.title3)
 
-            if modelManager.hasAnyDownloadedModel {
-                statusLabel(
-                    isComplete: true,
-                    completeText: "A speech model is installed.",
-                    incompleteText: ""
-                )
-            } else {
-                Text(baseModelDownloadStatus)
-                    .foregroundStyle(.secondary)
+            Text("We'll show the best speech models for it.")
+                .foregroundStyle(.secondary)
 
-                ProgressView(value: baseModelProgress)
-                    .progressViewStyle(.linear)
+            ScrollView {
+                LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible()), GridItem(.flexible())], spacing: 8) {
+                    ForEach(popularLanguages, id: \.code) { lang in
+                        languageCard(name: lang.name, code: lang.code)
+                    }
+                }
 
-                Text("\(Int(baseModelProgress * 100))%")
-                    .font(.caption)
+                if showAllLanguages {
+                    Divider().padding(.vertical, 8)
+
+                    if !languageSearchText.isEmpty {
+                        ForEach(searchedLanguages, id: \.code) { lang in
+                            languageCard(name: lang.name, code: lang.code)
+                        }
+                    } else {
+                        LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible()), GridItem(.flexible())], spacing: 8) {
+                            ForEach(allLanguages, id: \.code) { lang in
+                                languageCard(name: lang.name, code: lang.code)
+                            }
+                        }
+                    }
+                }
+            }
+
+            HStack {
+                TextField("Search languages...", text: $languageSearchText)
+                    .textFieldStyle(.roundedBorder)
+
+                Button(showAllLanguages ? "Show Less" : "Show All") {
+                    withAnimation { showAllLanguages.toggle() }
+                }
+            }
+        }
+    }
+
+    private func languageCard(name: String, code: String) -> some View {
+        let isSelected = coordinator.onboardingSelectedLanguage == code
+        return Button {
+            coordinator.selectLanguage(code)
+        } label: {
+            VStack(spacing: 4) {
+                Text(name)
+                    .font(.body)
+                    .fontWeight(isSelected ? .semibold : .regular)
+                Text(code.uppercased())
+                    .font(.caption2)
                     .foregroundStyle(.secondary)
+            }
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 10)
+            .background(isSelected ? Color.accentColor.opacity(0.15) : Color.gray.opacity(0.12))
+            .clipShape(RoundedRectangle(cornerRadius: 8))
+            .overlay(
+                RoundedRectangle(cornerRadius: 8)
+                    .strokeBorder(isSelected ? Color.accentColor : Color.clear, lineWidth: 2)
+            )
+        }
+        .buttonStyle(.plain)
+    }
+
+    private var modelDownloadStep: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("Choose your speech model")
+                .font(.title3)
+
+            Text("Recommended for \(selectedLanguageName). You can change this later in Settings.")
+                .foregroundStyle(.secondary)
+
+            ForEach(coordinator.compatibleModelsForSelectedLanguage()) { route in
+                if let model = modelManager.models.first(where: { $0.id == route.modelId }) {
+                    onboardingModelRow(model: model, isRecommended: route.isRecommended)
+                }
             }
 
             if let downloadErrorMessage = coordinator.downloadErrorMessage {
                 Text("Download failed: \(downloadErrorMessage)")
                     .font(.caption)
                     .foregroundStyle(.red)
-
-                Button("Retry Download") {
-                    _ = modelManager.startDownload(AppMode.baseModelId)
-                }
             }
         }
+    }
+
+    private func onboardingModelRow(model: ModelManager.Model, isRecommended: Bool) -> some View {
+        HStack(spacing: 12) {
+            VStack(alignment: .leading, spacing: 3) {
+                HStack(spacing: 6) {
+                    Text(model.name)
+                        .font(.body)
+                        .fontWeight(.semibold)
+
+                    if isRecommended {
+                        Text("Recommended")
+                            .font(.caption2)
+                            .padding(.horizontal, 6)
+                            .padding(.vertical, 2)
+                            .background(Color.accentColor.opacity(0.15))
+                            .clipShape(Capsule())
+                    }
+
+                    if model.isDownloaded {
+                        Text("Downloaded")
+                            .font(.caption2)
+                            .foregroundStyle(.green)
+                    }
+                }
+
+                Text(model.description)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+
+                Text(model.sizeHint)
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            }
+
+            Spacer()
+
+            if model.isDownloading {
+                ProgressView()
+                    .scaleEffect(0.7)
+            } else if model.isDownloaded {
+                if TypedSettings[.selectedModel] == model.id {
+                    Image(systemName: "checkmark.circle.fill")
+                        .foregroundStyle(.green)
+                } else {
+                    Button("Activate") {
+                        if modelManager.selectModel(model.id) {
+                            TypedSettings[.selectedModel] = model.id
+                        }
+                    }
+                    .buttonStyle(.bordered)
+                }
+            } else {
+                Button("Download") {
+                    _ = modelManager.startDownload(model.id)
+                }
+                .buttonStyle(.bordered)
+            }
+        }
+        .padding(.vertical, 4)
     }
 
     private var accessibilityStep: some View {
@@ -179,7 +298,7 @@ struct OnboardingView: View {
                     .clipShape(RoundedRectangle(cornerRadius: 6))
             }
 
-            Text("You can change the hotkey, output mode, and model later in Settings.")
+            Text("You can change the hotkey, output mode, language, and model later in Settings.")
                 .foregroundStyle(.secondary)
         }
     }
@@ -235,21 +354,25 @@ struct OnboardingView: View {
         return "Jabber will copy transcriptions to the clipboard only."
     }
 
-    private var baseModel: ModelManager.Model? {
-        modelManager.models.first { $0.id == AppMode.baseModelId }
+    private var popularLanguages: [(name: String, code: String)] {
+        LanguageModelCatalog.popularLanguages()
     }
 
-    private var baseModelProgress: Double {
-        guard let baseModel else { return 0 }
-        return min(max(baseModel.downloadProgress, 0), 1)
+    private var allLanguages: [(name: String, code: String)] {
+        LanguageModelCatalog.allLanguages()
     }
 
-    private var baseModelDownloadStatus: String {
-        guard let baseModel else { return "Preparing model download..." }
-        if baseModel.isDownloading {
-            return "Downloading \(baseModel.name)..."
+    private var searchedLanguages: [(name: String, code: String)] {
+        let query = languageSearchText.lowercased()
+        return allLanguages.filter {
+            $0.name.lowercased().contains(query) || $0.code.lowercased().contains(query)
         }
-        return "Starting \(baseModel.name) download..."
+    }
+
+    private var selectedLanguageName: String {
+        let code = coordinator.onboardingSelectedLanguage
+        if code == "auto" { return "auto-detect" }
+        return Constants.sortedLanguages.first { $0.code == code }?.name ?? code
     }
 
     private var hotkeyDisplay: String {

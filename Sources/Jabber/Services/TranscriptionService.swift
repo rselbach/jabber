@@ -1,10 +1,6 @@
 import Foundation
-import Qwen3ASR
 import os
 
-/// Thread-safe observer for transcription service state changes.
-/// Uses @unchecked Sendable because NSLock-protected mutable state cannot be verified
-/// by the compiler, but manual synchronization with NSLock ensures thread safety.
 final class TranscriptionStateObserver: @unchecked Sendable {
     private let lock = NSLock()
     private var _isReady = false
@@ -37,14 +33,10 @@ final class TranscriptionStateObserver: @unchecked Sendable {
 }
 
 actor TranscriptionService {
-    private var qwen3ASR: Qwen3ASRModel?
+    private var provider: TranscriptionProvider?
     private var isLoading = false
     private var loadedModelId: String?
 
-    /// Generation counter for invalidating in-flight model loads.
-    /// Incremented by unloadModel() so that any pending loadModel() calls
-    /// detect the generation mismatch and throw CancellationError instead
-    /// of clobbering the new state.
     private var loadGeneration: UInt64 = 0
 
     nonisolated let stateObserver = TranscriptionStateObserver()
@@ -78,23 +70,17 @@ actor TranscriptionService {
         stateObserver.setReady(ready)
     }
 
-    /// Vocabulary prompt to bias transcription toward specific terms (names, jargon, etc.)
     private var vocabularyPrompt: String = ""
-
-    /// Language for transcription ("auto" for auto-detect, or language code like "en", "es", etc.)
     private var selectedLanguage: String = Constants.defaultLanguage
 
     func setVocabularyPrompt(_ prompt: String) {
-        let trimmed = String(prompt.prefix(500))
-        vocabularyPrompt = trimmed
+        vocabularyPrompt = String(prompt.prefix(500))
     }
 
     func setLanguage(_ language: String) {
-        // Validate language code
         if language == "auto" || Constants.validLanguageCodes.contains(language) {
             selectedLanguage = language
         } else {
-            // Invalid code - fall back to auto-detect and notify user
             logger.warning("Invalid language code '\(language)' - falling back to auto-detect")
             selectedLanguage = "auto"
 
@@ -108,21 +94,13 @@ actor TranscriptionService {
         }
     }
 
-    private func formattedVocabularyPrompt() -> String {
-        " " + vocabularyPrompt
-            .components(separatedBy: .newlines)
-            .map { $0.trimmingCharacters(in: .whitespaces) }
-            .filter { !$0.isEmpty }
-            .joined(separator: ", ")
-    }
-
     func ensureModelLoaded() async throws {
         await AppReadinessGate.shared.waitForUIReady()
         try Task.checkCancellation()
 
         let desiredModelId = await ModelManager.shared.selectedModelId()
         if loadedModelId == desiredModelId,
-           qwen3ASR != nil {
+           provider?.isReady == true {
             return
         }
         try await loadModel(desiredModelId: desiredModelId)
@@ -130,7 +108,8 @@ actor TranscriptionService {
 
     func unloadModel() async {
         loadGeneration &+= 1
-        qwen3ASR = nil
+        provider?.unload()
+        provider = nil
         loadedModelId = nil
         setReady(false)
         notifyState(.notReady)
@@ -147,11 +126,13 @@ actor TranscriptionService {
 
         try Task.checkCancellation()
 
-        guard let qwen3ASR else {
+        guard let provider else {
             throw TranscriptionError.loadFailed
         }
 
-        return transcribeWithQwen3ASR(qwen3ASR, samples: samples)
+        let lang = selectedLanguage == "auto" ? nil : selectedLanguage
+        let prompt = vocabularyPrompt.isEmpty ? nil : vocabularyPrompt
+        return try await provider.transcribe(samples: samples, language: lang, vocabularyPrompt: prompt)
     }
 
     func transcribeStreaming(samples: [Float]) async throws -> String {
@@ -161,7 +142,7 @@ actor TranscriptionService {
     }
 
     private func resolveLoadedModel(desiredModelId: String) -> Bool {
-        guard qwen3ASR != nil else { return false }
+        guard let provider, provider.isReady else { return false }
         guard loadedModelId == desiredModelId else {
             resetLoadedModel()
             return false
@@ -173,32 +154,26 @@ actor TranscriptionService {
     }
 
     private func resetLoadedModel() {
-        qwen3ASR = nil
+        provider?.unload()
+        provider = nil
         loadedModelId = nil
         setReady(false)
         notifyState(.notReady)
     }
 
-    private func transcribeWithQwen3ASR(_ model: Qwen3ASRModel, samples: [Float]) -> String {
-        let context = formattedVocabularyPrompt().trimmingCharacters(in: .whitespacesAndNewlines)
-        let options = Qwen3DecodingOptions(
-            language: selectedLanguage == "auto" ? nil : selectedLanguage,
-            context: context.isEmpty ? nil : context,
-            repetitionPenalty: 1.15
-        )
+    private func makeProvider(for modelId: String) -> TranscriptionProvider? {
+        guard let def = AppMode.modelDefinition(for: modelId) else { return nil }
 
-        return model.transcribe(audio: samples, sampleRate: 16_000, options: options)
-            .trimmingCharacters(in: .whitespacesAndNewlines)
+        switch def.family {
+        case .qwen3ASR:
+            return Qwen3ASRProvider(modelId: modelId, huggingFaceModelId: def.huggingFaceModelId)
+        case .parakeetASR:
+            return ParakeetASRProvider(modelId: modelId, huggingFaceModelId: def.huggingFaceModelId)
+        case .nemotronASR:
+            return NemotronASRProvider(modelId: modelId, huggingFaceModelId: def.huggingFaceModelId)
+        }
     }
 
-    /// Loads the specified model, coordinating with concurrent callers.
-    ///
-    /// Concurrency model:
-    /// - Only one task performs the actual load at a time (guarded by `isLoading`).
-    /// - Other callers wait via `waitForModelLoad()`, then either reuse the result
-    ///   or start a new load if the previous one failed or loaded a different model.
-    /// - `loadGeneration` invalidates in-flight loads when `unloadModel()` is called,
-    ///   ensuring stale loads don't clobber newer state.
     private func loadModel(desiredModelId: String) async throws {
         while true {
             if isLoading {
@@ -226,7 +201,7 @@ actor TranscriptionService {
                 switch error {
                 case .modelNotFound:
                     logger.warning("Unknown model id '\(modelIdToLoad)', falling back to base")
-                    let fallbackModelId = AppMode.baseModelId
+                    let fallbackModelId = AppMode.parakeetModelId
                     await MainActor.run {
                         TypedSettings[.selectedModel] = fallbackModelId
                     }
@@ -240,31 +215,26 @@ actor TranscriptionService {
             try Task.checkCancellation()
             guard loadGeneration == currentLoadGeneration else { throw CancellationError() }
 
-            notifyState(.loading(status: "Loading model...", progress: nil))
-
-            guard let huggingFaceModelId = ModelManager.qwen3ASRHuggingFaceModelId(for: modelIdToLoad) else {
+            guard let newProvider = makeProvider(for: modelIdToLoad) else {
                 throw ModelError.modelNotFound(modelId: modelIdToLoad)
             }
 
-            let model = try await Qwen3ASRModel.fromPretrained(
-                modelId: huggingFaceModelId,
-                cacheDir: modelFolder,
-                offlineMode: true,
-                progressHandler: { [weak self] progress, status in
-                    Task {
-                        await self?.publishModelLoadProgress(
-                            status: status,
-                            progress: progress,
-                            generation: currentLoadGeneration
-                        )
-                    }
+            notifyState(.loading(status: "Loading model...", progress: nil))
+
+            try await newProvider.load(from: modelFolder) { [weak self] progress, status in
+                Task {
+                    await self?.publishModelLoadProgress(
+                        status: status,
+                        progress: progress,
+                        generation: currentLoadGeneration
+                    )
                 }
-            )
+            }
 
             try Task.checkCancellation()
             guard loadGeneration == currentLoadGeneration else { throw CancellationError() }
 
-            qwen3ASR = model
+            provider = newProvider
             loadedModelId = modelIdToLoad
             setReady(true)
             notifyState(.ready)
@@ -295,7 +265,6 @@ actor TranscriptionService {
 
             try await Task.sleep(for: backoffDelay)
 
-            // Exponential backoff with max cap
             backoffDelay = min(backoffDelay * 2, maxBackoff)
         }
     }

@@ -1,6 +1,6 @@
 # Jabber
 
-A macOS menu bar app for local speech-to-text transcription using Qwen3-ASR and MLX.
+A macOS menu bar app for local speech-to-text transcription using on-device ASR models.
 
 All audio is processed entirely on-device — nothing leaves your Mac.
 
@@ -48,9 +48,11 @@ For a release build with signing:
 
 Model options are available in Settings:
 
-- Base: Qwen3-ASR 0.6B 4-bit (~700MB)
-- Medium: Qwen3-ASR 1.7B 4-bit (~1.6GB)
-- Large: Qwen3-ASR 1.7B 8-bit (~2.5GB)
+- Qwen3-ASR: Qwen3-ASR 1.7B 8-bit (~2.5GB) — 52 languages, highest accuracy
+- Parakeet: NVIDIA Parakeet TDT v3 0.6B INT8 (~634MB) — 25 European languages, fastest
+- Nemotron: NVIDIA Nemotron Speech Streaming 0.6B INT8 (~600MB) — English-only, native punctuation
+
+During onboarding, you'll pick a language and Jabber recommends the best model for it.
 
 ## Permissions
 
@@ -87,3 +89,25 @@ The workflow generates `appcast.xml` as an artifact. Host it at:
 ## License
 
 Public Domain — see [LICENSE](LICENSE). Do whatever you want with it.
+
+## Acknowledgements
+
+Jabber uses the following open-source models and libraries:
+
+### Models
+
+| Model | Creator | License | Link |
+|-------|---------|---------|------|
+| Qwen3-ASR | Alibaba Qwen Team | [Apache 2.0](https://www.apache.org/licenses/LICENSE-2.0) | [huggingface.co/Qwen/Qwen3-ASR-0.6B](https://huggingface.co/Qwen/Qwen3-ASR-0.6B) |
+| Parakeet TDT v3 | NVIDIA | [CC-BY-4.0](https://creativecommons.org/licenses/by/4.0/) | [huggingface.co/nvidia/parakeet-tdt-0.6b-v3](https://huggingface.co/nvidia/parakeet-tdt-0.6b-v3) |
+| Nemotron Speech Streaming | NVIDIA | [OpenMDW-1.1](https://www.openmodeldefinition.org/) | [huggingface.co/nvidia/nemotron-speech-streaming-en-0.6b](https://huggingface.co/nvidia/nemotron-speech-streaming-en-0.6b) |
+
+Parakeet TDT v3 CoreML conversion by [aufklarer](https://huggingface.co/aufklarer/Parakeet-TDT-v3-CoreML-INT8).
+
+### Libraries
+
+| Library | License | Link |
+|---------|---------|------|
+| [speech-swift](https://github.com/soniqo/speech-swift) | Apache 2.0 | ASR/TTS models for Apple Silicon |
+| [Sparkle](https://sparkle-project.org/) | MIT | Software update framework |
+| [mediaremote-adapter](https://github.com/ejbills/mediaremote-adapter) | MIT | Media remote control |

@@ -8,6 +8,7 @@ final class OnboardingCoordinator {
     enum Step: Int, CaseIterable {
         case welcome
         case microphone
+        case language
         case modelDownload
         case accessibility
         case ready
@@ -18,6 +19,8 @@ final class OnboardingCoordinator {
                 return "Welcome"
             case .microphone:
                 return "Microphone"
+            case .language:
+                return "Language"
             case .modelDownload:
                 return "Speech Model"
             case .accessibility:
@@ -33,6 +36,7 @@ final class OnboardingCoordinator {
     private(set) var isAccessibilityTrusted = false
     private(set) var didSkipAccessibility = false
     private(set) var downloadErrorMessage: String?
+    private(set) var onboardingSelectedLanguage: String
 
     private let permissionService: PermissionService
     private let modelManager: ModelManager
@@ -45,6 +49,7 @@ final class OnboardingCoordinator {
     ) {
         self.permissionService = permissionService
         self.modelManager = modelManager
+        self.onboardingSelectedLanguage = TypedSettings[.selectedLanguage]
     }
 
     var canContinue: Bool {
@@ -53,6 +58,8 @@ final class OnboardingCoordinator {
             return true
         case .microphone:
             return microphoneStatus == .authorized
+        case .language:
+            return !onboardingSelectedLanguage.isEmpty
         case .modelDownload:
             return modelManager.hasAnyDownloadedModel
         case .accessibility:
@@ -73,6 +80,24 @@ final class OnboardingCoordinator {
         }
     }
 
+    func selectLanguage(_ languageCode: String) {
+        onboardingSelectedLanguage = languageCode
+        TypedSettings[.selectedLanguage] = languageCode
+
+        let recommended = LanguageModelCatalog.recommendedModelId(for: languageCode)
+        TypedSettings[.selectedModel] = recommended
+
+        modelManager.refreshModels()
+    }
+
+    func recommendedModelIdForSelectedLanguage() -> String {
+        LanguageModelCatalog.recommendedModelId(for: onboardingSelectedLanguage)
+    }
+
+    func compatibleModelsForSelectedLanguage() -> [LanguageModelCatalog.Route] {
+        LanguageModelCatalog.routes(for: onboardingSelectedLanguage)
+    }
+
     func start() {
         refreshState()
         startPermissionPolling()
@@ -88,6 +113,9 @@ final class OnboardingCoordinator {
         case .welcome:
             move(to: .microphone)
         case .microphone:
+            guard canContinue else { return }
+            move(to: .language)
+        case .language:
             guard canContinue else { return }
             move(to: .modelDownload)
         case .modelDownload:
@@ -130,7 +158,7 @@ final class OnboardingCoordinator {
     }
 
     func handleModelDownloadState(_ state: ModelDownloadState) {
-        guard state.modelId == AppMode.baseModelId else { return }
+        guard compatibleModelsForSelectedLanguage().contains(where: { $0.modelId == state.modelId }) else { return }
 
         switch state.phase {
         case .started, .progress, .finished:
@@ -146,7 +174,7 @@ final class OnboardingCoordinator {
         refreshState()
 
         if nextStep == .modelDownload {
-            startBaseModelDownloadIfNeeded()
+            startRecommendedModelDownloadIfNeeded()
         }
     }
 
@@ -160,7 +188,7 @@ final class OnboardingCoordinator {
     private func autoAdvanceForGrantedPermission() {
         switch step {
         case .microphone where microphoneStatus == .authorized:
-            move(to: .modelDownload)
+            move(to: .language)
         case .accessibility where isAccessibilityTrusted:
             move(to: .ready)
         default:
@@ -168,10 +196,11 @@ final class OnboardingCoordinator {
         }
     }
 
-    private func startBaseModelDownloadIfNeeded() {
+    private func startRecommendedModelDownloadIfNeeded() {
         guard !modelManager.hasAnyDownloadedModel else { return }
 
-        if !modelManager.startDownload(AppMode.baseModelId) {
+        let recommended = recommendedModelIdForSelectedLanguage()
+        if !modelManager.startDownload(recommended) {
             modelManager.refreshModels()
         }
     }

@@ -24,12 +24,15 @@ final class ModelManager {
     static let shared = ModelManager()
     private let logger = Logger(subsystem: "com.rselbach.jabber", category: "ModelManager")
     private static let legacyModelIdMigration: [String: String] = [
-        "tiny": AppMode.baseModelId,
-        "small": AppMode.baseModelId,
-        "large-v3": AppMode.largeModelId,
-        "qwen3-asr-0.6b-mlx-4bit": AppMode.baseModelId,
-        "qwen3-asr-1.7b-mlx-4bit": AppMode.mediumModelId,
-        "qwen3-asr-1.7b-mlx-8bit": AppMode.largeModelId
+        "tiny": AppMode.qwen3ModelId,
+        "small": AppMode.qwen3ModelId,
+        "large-v3": AppMode.qwen3ModelId,
+        "base": AppMode.qwen3ModelId,
+        "medium": AppMode.qwen3ModelId,
+        "large": AppMode.qwen3ModelId,
+        "qwen3-asr-0.6b-mlx-4bit": AppMode.qwen3ModelId,
+        "qwen3-asr-1.7b-mlx-4bit": AppMode.qwen3ModelId,
+        "qwen3-asr-1.7b-mlx-8bit": AppMode.qwen3ModelId
     ]
 
     struct Model: Identifiable {
@@ -37,6 +40,7 @@ final class ModelManager {
         let name: String
         let description: String
         let sizeHint: String
+        let family: AppMode.ModelFamily
         var isDownloaded: Bool
         var isDownloading: Bool
         var downloadProgress: Double
@@ -47,18 +51,11 @@ final class ModelManager {
     private var activeDownloads: [String: ActiveDownload] = [:]
     private let downloadProgressReportInterval: TimeInterval = 0.1
     private let settings: SettingsStore
-    private let qwen3ASRCacheBaseURL: URL?
+    private let cacheBaseURL: URL?
 
     private struct ActiveDownload {
         let id: UUID
         let task: Task<URL, Error>
-    }
-
-    private struct ModelDefinition {
-        let id: String
-        let name: String
-        let description: String
-        let sizeHint: String
     }
 
     private func updateModel(_ modelId: String, update: (inout Model) -> Void) {
@@ -66,21 +63,14 @@ final class ModelManager {
         update(&models[index])
     }
 
-    private let modelDefinitions: [ModelDefinition] = AppMode.qwen3ASRVariants.map {
-        .init(
-            id: $0.modelId,
-            name: $0.name,
-            description: $0.description,
-            sizeHint: $0.sizeHint
-        )
-    }
+    private let modelDefinitions: [AppMode.ModelDefinition] = AppMode.modelDefinitions
 
     init(
         settings: SettingsStore = .standard,
-        qwen3ASRCacheBaseURL: URL? = nil
+        cacheBaseURL: URL? = nil
     ) {
         self.settings = settings
-        self.qwen3ASRCacheBaseURL = qwen3ASRCacheBaseURL
+        self.cacheBaseURL = cacheBaseURL
         migrateSelectedModelIfNeeded()
         refreshModels()
     }
@@ -101,20 +91,22 @@ final class ModelManager {
     @discardableResult
     func migrateSelectedModelIfNeeded(notify: Bool = false) -> Bool {
         let current = settings[.selectedModel]
-        let migrated: String
 
         if let legacyReplacement = Self.legacyModelIdMigration[current] {
-            migrated = legacyReplacement
-        } else if Self.isQwen3ASRModel(current) {
-            return false
-        } else {
-            migrated = AppMode.baseModelId
+            guard legacyReplacement != current else { return false }
+            logger.info("Migrating selected model from '\(current)' to '\(legacyReplacement)'")
+            settings[.selectedModel] = legacyReplacement
+            if notify {
+                NotificationCenter.default.post(name: Constants.Notifications.modelDidChange, object: nil)
+            }
+            return true
         }
 
-        guard migrated != current else { return false }
+        guard AppMode.modelDefinition(for: current) == nil else { return false }
 
-        logger.info("Migrating selected model from '\(current)' to '\(migrated)'")
-        settings[.selectedModel] = migrated
+        let fallback = AppMode.parakeetModelId
+        logger.info("Migrating selected model from '\(current)' to '\(fallback)'")
+        settings[.selectedModel] = fallback
         if notify {
             NotificationCenter.default.post(name: Constants.Notifications.modelDidChange, object: nil)
         }
@@ -134,6 +126,7 @@ final class ModelManager {
                 name: def.name,
                 description: def.description,
                 sizeHint: def.sizeHint,
+                family: def.family,
                 isDownloaded: isDownloaded,
                 isDownloading: !isDownloaded && wasDownloading,
                 downloadProgress: isDownloaded ? 1.0 : previousProgress
@@ -150,7 +143,7 @@ final class ModelManager {
     }
 
     func ensureModelDownloaded(_ modelId: String) async throws -> URL {
-        if let existing = qwen3ASRModelFolder(for: modelId) {
+        if let existing = modelFolder(for: modelId) {
             updateModel(modelId) { model in
                 model.isDownloaded = true
                 model.isDownloading = false
@@ -191,7 +184,7 @@ final class ModelManager {
             throw ModelError.modelNotFound(modelId: modelId)
         }
 
-        if let existing = localModelFolder(for: modelId) {
+        if let existing = modelFolder(for: modelId) {
             updateModel(modelId) { model in
                 model.isDownloaded = true
                 model.isDownloading = false
@@ -220,7 +213,6 @@ final class ModelManager {
             do {
                 _ = try await task.value
             } catch is CancellationError {
-                // Cancellation state is published by performDownload.
             } catch {
                 self?.logger.error("Model download failed for \(modelId): \(error.localizedDescription)")
             }
@@ -231,7 +223,7 @@ final class ModelManager {
     }
 
     private func performDownload(modelId: String) async throws -> URL {
-        if let existing = localModelFolder(for: modelId) {
+        if let existing = modelFolder(for: modelId) {
             updateModel(modelId) { model in
                 model.isDownloaded = true
                 model.isDownloading = false
@@ -267,7 +259,7 @@ final class ModelManager {
 
         let modelFolder: URL
         do {
-            modelFolder = try await downloadQwen3ASRModel(modelId: modelId, modelName: modelName)
+            modelFolder = try await downloadModelFiles(modelId: modelId, modelName: modelName)
         } catch is CancellationError {
             postDownloadState(
                 modelId: modelId,
@@ -311,12 +303,11 @@ final class ModelManager {
     func deleteModel(_ modelId: String) throws {
         let currentModel = settings[.selectedModel]
 
-        // Prevent deleting currently selected model if it's the only one
         if currentModel == modelId, downloadedModels.count == 1 {
             throw ModelError.cannotDeleteActiveModel
         }
 
-        guard let modelPath = localModelFolder(for: modelId) else {
+        guard let modelPath = modelFolder(for: modelId) else {
             throw ModelError.modelNotFound(modelId: modelId)
         }
 
@@ -326,13 +317,10 @@ final class ModelManager {
 
         try FileManager.default.removeItem(at: modelPath)
 
-        // If we deleted the currently selected model, switch to another before
-        // posting a single modelDidChange so the transcription service loads the
-        // new selection instead of re-downloading the one we just deleted.
         let didSwitchSelection: Bool
         if currentModel == modelId {
             let fallback = downloadedModels.first(where: { $0.id != modelId })?.id
-                ?? AppMode.baseModelId
+                ?? AppMode.parakeetModelId
             settings[.selectedModel] = fallback
             didSwitchSelection = true
         } else {
@@ -347,8 +335,8 @@ final class ModelManager {
     }
 
     private func installedModelIds() -> [String] {
-        return modelDefinitions.compactMap { def in
-            localModelFolder(for: def.id) != nil ? def.id : nil
+        modelDefinitions.compactMap { def in
+            modelFolder(for: def.id) != nil ? def.id : nil
         }
     }
 
@@ -364,24 +352,53 @@ final class ModelManager {
         Self.isQwen3ASRModel(modelId)
     }
 
-    private func localModelFolder(for modelId: String) -> URL? {
-        qwen3ASRModelFolder(for: modelId)
+    private func modelFolder(for modelId: String) -> URL? {
+        guard let def = AppMode.modelDefinition(for: modelId) else { return nil }
+
+        let candidates = [
+            cacheFolder(for: def.huggingFaceModelId),
+            oldCacheFolder(for: def.huggingFaceModelId)
+        ]
+
+        for folder in candidates {
+            let validation = ModelInstallationValidator.validate(folder: folder, for: def.family)
+            guard validation.folderExists else { continue }
+            if validation.isComplete {
+                return folder
+            }
+            logger.warning("Ignoring incomplete model folder at \(folder.path): \(validation.failureDescription)")
+        }
+
+        return nil
     }
 
-    private func downloadQwen3ASRModel(modelId: String, modelName: String) async throws -> URL {
-        guard let huggingFaceModelId = Self.qwen3ASRHuggingFaceModelId(for: modelId) else {
+    private func downloadModelFiles(modelId: String, modelName: String) async throws -> URL {
+        guard let def = AppMode.modelDefinition(for: modelId) else {
             throw ModelError.modelNotFound(modelId: modelId)
         }
 
         let downloadFolder = try HuggingFaceDownloader.getCacheDirectory(
-            for: huggingFaceModelId,
-            basePath: qwen3ASRCacheBase()
+            for: def.huggingFaceModelId,
+            basePath: cacheBase()
         )
 
+        let additionalFiles: [String]
+        switch def.family {
+        case .qwen3ASR:
+            additionalFiles = ["vocab.json", "merges.txt", "tokenizer_config.json"]
+        case .parakeetASR, .nemotronASR:
+            additionalFiles = [
+                "encoder.mlmodelc/**",
+                "decoder.mlmodelc/**",
+                "joint.mlmodelc/**",
+                "vocab.json"
+            ]
+        }
+
         try await HuggingFaceDownloader.downloadWeights(
-            modelId: huggingFaceModelId,
+            modelId: def.huggingFaceModelId,
             to: downloadFolder,
-            additionalFiles: ["vocab.json", "merges.txt", "tokenizer_config.json"],
+            additionalFiles: additionalFiles,
             progressHandler: { @Sendable [weak self] progress in
                 Task { @MainActor in
                     self?.publishDownloadProgress(
@@ -394,12 +411,12 @@ final class ModelManager {
             }
         )
 
-        let validation = ModelInstallationValidator.validateQwen3ASRModelFolder(at: downloadFolder)
+        let validation = ModelInstallationValidator.validate(folder: downloadFolder, for: def.family)
         if validation.isComplete {
             return downloadFolder
         }
 
-        if let verifiedFolder = qwen3ASRModelFolder(for: modelId) {
+        if let verifiedFolder = modelFolder(for: modelId) {
             return verifiedFolder
         }
 
@@ -409,48 +426,26 @@ final class ModelManager {
         )
     }
 
-    private func qwen3ASRModelFolder(for modelId: String) -> URL? {
-        guard let huggingFaceModelId = Self.qwen3ASRHuggingFaceModelId(for: modelId) else {
-            return nil
-        }
-
-        let candidates = [
-            qwen3ASRCacheFolder(for: huggingFaceModelId),
-            qwen3ASROldCacheFolder(for: huggingFaceModelId)
-        ]
-
-        for folder in candidates {
-            let validation = ModelInstallationValidator.validateQwen3ASRModelFolder(at: folder)
-            guard validation.folderExists else { continue }
-            if validation.isComplete {
-                return folder
-            }
-            logger.warning("Ignoring incomplete model folder at \(folder.path): \(validation.failureDescription)")
-        }
-
-        return nil
-    }
-
-    private func qwen3ASRCacheFolder(for huggingFaceModelId: String) -> URL {
+    private func cacheFolder(for huggingFaceModelId: String) -> URL {
         let components = huggingFaceModelId.split(separator: "/", maxSplits: 1).map(String.init)
         guard components.count == 2 else {
-            return qwen3ASROldCacheFolder(for: huggingFaceModelId)
+            return oldCacheFolder(for: huggingFaceModelId)
         }
 
-        return qwen3ASRCacheBase()
+        return cacheBase()
             .appendingPathComponent("models")
             .appendingPathComponent(components[0])
             .appendingPathComponent(components[1])
     }
 
-    private func qwen3ASROldCacheFolder(for huggingFaceModelId: String) -> URL {
-        qwen3ASRCacheBase()
+    private func oldCacheFolder(for huggingFaceModelId: String) -> URL {
+        cacheBase()
             .appendingPathComponent(HuggingFaceDownloader.sanitizedCacheKey(for: huggingFaceModelId))
     }
 
-    private func qwen3ASRCacheBase() -> URL {
-        if let qwen3ASRCacheBaseURL {
-            return qwen3ASRCacheBaseURL
+    private func cacheBase() -> URL {
+        if let cacheBaseURL {
+            return cacheBaseURL
         }
 
         let environment = ProcessInfo.processInfo.environment

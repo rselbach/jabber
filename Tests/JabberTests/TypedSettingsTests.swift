@@ -28,7 +28,7 @@ final class TypedSettingsTests: XCTestCase {
     }
 
     func testDefaultValues() {
-        XCTAssertEqual(settings[.selectedModel], AppMode.baseModelId, "Default model should be base")
+        XCTAssertEqual(settings[.selectedModel], AppMode.parakeetModelId, "Default model should be parakeet")
         XCTAssertEqual(settings[.selectedLanguage], Constants.defaultLanguage, "Default language should match system")
         XCTAssertEqual(settings[.outputMode], TypingService.OutputMode.directTyping.rawValue)
         XCTAssertEqual(settings[.hotkeyActivationMode], HotkeyActivationMode.defaultMode.rawValue)
@@ -77,14 +77,14 @@ final class TypedSettingsTests: XCTestCase {
 
     func testRemoveResetsToDefault() {
         // Set a non-default value
-        settings[.selectedModel] = AppMode.largeModelId
-        XCTAssertEqual(settings[.selectedModel], AppMode.largeModelId)
+        settings[.selectedModel] = AppMode.parakeetModelId
+        XCTAssertEqual(settings[.selectedModel], AppMode.parakeetModelId)
 
         // Remove it
         settings.remove(.selectedModel)
 
         // Should return to default
-        XCTAssertEqual(settings[.selectedModel], AppMode.baseModelId)
+        XCTAssertEqual(settings[.selectedModel], AppMode.parakeetModelId)
         XCTAssertFalse(settings.isSet(.selectedModel))
     }
 

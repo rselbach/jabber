@@ -27,7 +27,7 @@ final class DictationHistoryStoreTests: XCTestCase {
         let entry = try await store.save(DictationHistorySession(
             samples: [0, 0.5, -1, 1],
             transcript: "cool cool cool",
-            modelID: AppMode.baseModelId,
+            modelID: AppMode.qwen3ModelId,
             language: "en",
             timestamp: timestamp
         ))
@@ -51,8 +51,8 @@ final class DictationHistoryStoreTests: XCTestCase {
 
         XCTAssertEqual(decodedEntry.id, entry.id)
         XCTAssertEqual(decodedEntry.transcript, "cool cool cool")
-        XCTAssertEqual(decodedEntry.modelID, AppMode.baseModelId)
-        XCTAssertEqual(decodedEntry.modelName, "Base")
+        XCTAssertEqual(decodedEntry.modelID, AppMode.qwen3ModelId)
+        XCTAssertEqual(decodedEntry.modelName, "Qwen3-ASR")
         XCTAssertEqual(decodedEntry.language, "en")
         XCTAssertEqual(decodedEntry.duration, 4.0 / 16_000.0, accuracy: 0.000_001)
     }
@@ -110,7 +110,7 @@ final class DictationHistoryStoreTests: XCTestCase {
         DictationHistorySession(
             samples: Array(repeating: 0.25, count: 100),
             transcript: transcript,
-            modelID: AppMode.mediumModelId,
+            modelID: AppMode.qwen3ModelId,
             language: "auto",
             timestamp: timestamp
         )

@@ -6,6 +6,7 @@ final class DictationCoordinatorTests: XCTestCase {
     private var audioCapture: FakeAudioCapture!
     private var transcriptionService: FakeTranscriptionService!
     private var typingService: FakeTypingService!
+    private var mediaPlaybackService: FakeMediaPlaybackService!
     private var coordinator: DictationCoordinator!
 
     override func setUp() async throws {
@@ -13,10 +14,12 @@ final class DictationCoordinatorTests: XCTestCase {
         audioCapture = FakeAudioCapture()
         transcriptionService = FakeTranscriptionService()
         typingService = FakeTypingService()
+        mediaPlaybackService = FakeMediaPlaybackService()
         coordinator = DictationCoordinator(
             audioCapture: audioCapture,
             transcriptionService: transcriptionService,
             typingService: typingService,
+            mediaPlaybackService: mediaPlaybackService,
             streamingPreviewInterval: .milliseconds(10),
             minimumStreamingPreviewSampleCount: 16_000
         )
@@ -27,6 +30,7 @@ final class DictationCoordinatorTests: XCTestCase {
         audioCapture = nil
         transcriptionService = nil
         typingService = nil
+        mediaPlaybackService = nil
         try await super.tearDown()
     }
 
@@ -52,6 +56,13 @@ final class DictationCoordinatorTests: XCTestCase {
         XCTAssertTrue(coordinator.isRecording)
         XCTAssertFalse(coordinator.isIdle)
         XCTAssertTrue(audioCapture.didStart)
+    }
+
+    func testStartRequestsMediaPause() {
+        XCTAssertTrue(coordinator.start())
+
+        XCTAssertEqual(mediaPlaybackService.pauseCallCount, 1)
+        XCTAssertEqual(mediaPlaybackService.resumeCallCount, 0)
     }
 
     func testStartFailsWhenAlreadyRecording() {
@@ -82,6 +93,8 @@ final class DictationCoordinatorTests: XCTestCase {
         XCTAssertFalse(coordinator.start())
         XCTAssertTrue(coordinator.isIdle)
         XCTAssertNotNil(reportedError)
+        XCTAssertEqual(mediaPlaybackService.pauseCallCount, 1)
+        XCTAssertEqual(mediaPlaybackService.resumeCallCount, 1)
     }
 
     func testStopWithoutSpeechReturnsToIdle() {
@@ -91,6 +104,7 @@ final class DictationCoordinatorTests: XCTestCase {
         XCTAssertTrue(coordinator.isIdle)
         XCTAssertTrue(audioCapture.didStop)
         XCTAssertTrue(typingService.outputs.isEmpty)
+        XCTAssertEqual(mediaPlaybackService.resumeCallCount, 1)
     }
 
     func testStopWithSpeechTranscribesAndOutputs() async {
@@ -113,6 +127,29 @@ final class DictationCoordinatorTests: XCTestCase {
         XCTAssertTrue(coordinator.isIdle)
         XCTAssertEqual(typingService.outputs, ["hello world"])
         XCTAssertEqual(typingService.targetProcessIDs, [nil])
+    }
+
+    func testStopWithSpeechResumesMediaAfterTranscriptionCompletes() async {
+        audioCapture.storedSamples = makeLoudSamples()
+        transcriptionService.transcribeDelay = .milliseconds(50)
+        transcriptionService.transcribeResult = .success("six seasons and a movie")
+
+        let idleExpectation = XCTestExpectation(description: "coordinator returns to idle")
+        coordinator.onStateChange = { state in
+            if state == .idle {
+                idleExpectation.fulfill()
+            }
+        }
+
+        XCTAssertTrue(coordinator.start())
+        coordinator.stop()
+
+        XCTAssertTrue(coordinator.isTranscribing)
+        XCTAssertEqual(mediaPlaybackService.resumeCallCount, 0)
+
+        await fulfillment(of: [idleExpectation], timeout: 1.0)
+
+        XCTAssertEqual(mediaPlaybackService.resumeCallCount, 1)
     }
 
     func testStopWithSpeechOutputsToCapturedTargetProcessID() async {
@@ -231,6 +268,7 @@ final class DictationCoordinatorTests: XCTestCase {
 
         XCTAssertTrue(coordinator.isIdle)
         XCTAssertTrue(audioCapture.didStop)
+        XCTAssertEqual(mediaPlaybackService.resumeCallCount, 1)
     }
 
     func testCancelDuringTranscriptionDiscardsResult() async {
@@ -496,5 +534,18 @@ final class FakeTypingService: OutputProtocol, @unchecked Sendable {
     func output(_ text: String, targetProcessID: pid_t?) {
         outputs.append(text)
         targetProcessIDs.append(targetProcessID)
+    }
+}
+
+final class FakeMediaPlaybackService: MediaPlaybackProtocol, @unchecked Sendable {
+    private(set) var pauseCallCount = 0
+    private(set) var resumeCallCount = 0
+
+    func pauseForDictationIfNeeded() {
+        pauseCallCount += 1
+    }
+
+    func resumeAfterDictationIfNeeded() {
+        resumeCallCount += 1
     }
 }

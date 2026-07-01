@@ -21,7 +21,6 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(dirname "${SCRIPT_DIR}")"
 APP_NAME="Jabber"
-BUNDLE_ID="com.rselbach.jabber"
 
 # Configurable via environment
 SIGNING_IDENTITY="${SIGNING_IDENTITY:-Developer ID Application}"
@@ -178,6 +177,7 @@ create_bundle() {
   cp "${PROJECT_ROOT}/Info.plist" "${contents}/Info.plist"
   
   copy_sparkle_framework "${frameworks}"
+  copy_mediaremote_adapter "${frameworks}" "${resources}"
   
   # Add rpath for Frameworks directory
   install_name_tool -add_rpath @executable_path/../Frameworks "${macos}/${APP_NAME}"
@@ -212,6 +212,32 @@ copy_sparkle_framework() {
   echo "    Copied Sparkle.framework from ${sparkle_path}"
 }
 
+copy_mediaremote_adapter() {
+  local frameworks_dir="$1"
+  local resources_dir="$2"
+  local adapter_library="${PROJECT_ROOT}/.build/release/libMediaRemoteAdapter.dylib"
+  local adapter_resources
+  adapter_resources="${PROJECT_ROOT}/.build/release"
+  adapter_resources+="/MediaRemoteAdapter_MediaRemoteAdapter.bundle"
+
+  if [[ ! -f "${adapter_library}" ]]; then
+    echo "Error: libMediaRemoteAdapter.dylib not found for release build." >&2
+    echo "Run 'swift build -c release' and try again." >&2
+    exit 1
+  fi
+
+  if [[ ! -d "${adapter_resources}" ]]; then
+    echo "Error: MediaRemoteAdapter resources not found for release build." >&2
+    echo "Run 'swift build -c release' and try again." >&2
+    exit 1
+  fi
+
+  cp "${adapter_library}" "${frameworks_dir}/"
+
+  cp -R "${adapter_resources}" "${resources_dir}/"
+  echo "    Copied MediaRemoteAdapter dynamic library and resources"
+}
+
 compile_assets() {
   local resources_dir="$1"
   local assets_path="${PROJECT_ROOT}/Sources/Jabber/Assets.xcassets"
@@ -237,6 +263,11 @@ sign_app() {
   codesign --force --options runtime --deep \
     --sign "${SIGNING_IDENTITY}" \
     "${app_bundle}/Contents/Frameworks/Sparkle.framework"
+
+  # Sign MediaRemoteAdapter before signing the executable/app bundle.
+  codesign --force --options runtime \
+    --sign "${SIGNING_IDENTITY}" \
+    "${app_bundle}/Contents/Frameworks/libMediaRemoteAdapter.dylib"
 
   # Sign MLX's Metal library before signing the executable/app bundle.
   # codesign treats files in Contents/MacOS as nested code objects.

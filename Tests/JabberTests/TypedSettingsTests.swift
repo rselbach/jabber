@@ -91,31 +91,41 @@ final class TypedSettingsTests: XCTestCase {
     func testBoolSettingDefaultsAndPersistence() {
         XCTAssertFalse(settings[.didShowFirstRunSetup])
         XCTAssertFalse(settings[.onboardingCompleted])
+        XCTAssertFalse(settings[.pauseMediaDuringRecording])
         XCTAssertFalse(settings.isSet(.didShowFirstRunSetup))
         XCTAssertFalse(settings.isSet(.onboardingCompleted))
+        XCTAssertFalse(settings.isSet(.pauseMediaDuringRecording))
 
         settings[.didShowFirstRunSetup] = true
         settings[.onboardingCompleted] = true
+        settings[.pauseMediaDuringRecording] = true
 
         XCTAssertTrue(settings[.didShowFirstRunSetup])
         XCTAssertTrue(settings[.onboardingCompleted])
+        XCTAssertTrue(settings[.pauseMediaDuringRecording])
         XCTAssertTrue(settings.isSet(.didShowFirstRunSetup))
         XCTAssertTrue(settings.isSet(.onboardingCompleted))
+        XCTAssertTrue(settings.isSet(.pauseMediaDuringRecording))
     }
 
     func testBoolSettingRemoveResetsToDefault() {
         settings[.didShowFirstRunSetup] = true
         settings[.onboardingCompleted] = true
+        settings[.pauseMediaDuringRecording] = true
         XCTAssertTrue(settings[.didShowFirstRunSetup])
         XCTAssertTrue(settings[.onboardingCompleted])
+        XCTAssertTrue(settings[.pauseMediaDuringRecording])
 
         settings.remove(.didShowFirstRunSetup)
         settings.remove(.onboardingCompleted)
+        settings.remove(.pauseMediaDuringRecording)
 
         XCTAssertFalse(settings[.didShowFirstRunSetup])
         XCTAssertFalse(settings[.onboardingCompleted])
+        XCTAssertFalse(settings[.pauseMediaDuringRecording])
         XCTAssertFalse(settings.isSet(.didShowFirstRunSetup))
         XCTAssertFalse(settings.isSet(.onboardingCompleted))
+        XCTAssertFalse(settings.isSet(.pauseMediaDuringRecording))
     }
 
     func testIntSettingDefaultsAndPersistence() {

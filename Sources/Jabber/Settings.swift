@@ -30,6 +30,7 @@ enum TypedSetting<T>: Sendable {
 enum BoolSetting: Sendable {
     case didShowFirstRunSetup
     case onboardingCompleted
+    case pauseMediaDuringRecording
 
     var key: String {
         switch self {
@@ -37,12 +38,14 @@ enum BoolSetting: Sendable {
             return AppSettingKey.didShowFirstRunSetup
         case .onboardingCompleted:
             return AppSettingKey.onboardingCompleted
+        case .pauseMediaDuringRecording:
+            return AppSettingKey.pauseMediaDuringRecording
         }
     }
 
     var `default`: Bool {
         switch self {
-        case .didShowFirstRunSetup, .onboardingCompleted:
+        case .didShowFirstRunSetup, .onboardingCompleted, .pauseMediaDuringRecording:
             return false
         }
     }

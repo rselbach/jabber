@@ -36,6 +36,12 @@ protocol OutputProtocol: AnyObject {
 
 extension TypingService: OutputProtocol {}
 
+@MainActor
+protocol MediaPlaybackProtocol: AnyObject {
+    func pauseForDictationIfNeeded()
+    func resumeAfterDictationIfNeeded()
+}
+
 /// Owns the entire dictation lifecycle: recording, speech detection,
 /// transcription, and output. All state changes are serialized on the main
 /// actor and announced through `onStateChange`.
@@ -77,6 +83,7 @@ final class DictationCoordinator {
     private let audioCapture: any AudioCaptureProtocol
     private let transcriptionService: any TranscriptionProtocol
     private let typingService: any OutputProtocol
+    private let mediaPlaybackService: any MediaPlaybackProtocol
     private var activity = TranscriptionActivityTracker()
     private var transcriptionTask: Task<Void, Never>?
     private var streamingTask: Task<Void, Never>?
@@ -92,12 +99,14 @@ final class DictationCoordinator {
         audioCapture: any AudioCaptureProtocol,
         transcriptionService: any TranscriptionProtocol,
         typingService: any OutputProtocol,
+        mediaPlaybackService: any MediaPlaybackProtocol = MediaPlaybackService.shared,
         streamingPreviewInterval: Duration = .milliseconds(500),
         minimumStreamingPreviewSampleCount: Int = 16_000
     ) {
         self.audioCapture = audioCapture
         self.transcriptionService = transcriptionService
         self.typingService = typingService
+        self.mediaPlaybackService = mediaPlaybackService
         self.streamingPreviewInterval = streamingPreviewInterval
         self.minimumStreamingPreviewSampleCount = minimumStreamingPreviewSampleCount
 
@@ -119,6 +128,8 @@ final class DictationCoordinator {
         currentSessionID = sessionID
         currentTargetProcessID = targetProcessID
 
+        mediaPlaybackService.pauseForDictationIfNeeded()
+
         do {
             try audioCapture.startCapture()
             state = .recording
@@ -129,6 +140,7 @@ final class DictationCoordinator {
             logger.error("Failed to start audio capture: \(error.localizedDescription)")
             currentSessionID = nil
             currentTargetProcessID = nil
+            mediaPlaybackService.resumeAfterDictationIfNeeded()
             onTranscriptionError?(error)
             return false
         }
@@ -197,6 +209,7 @@ final class DictationCoordinator {
             state = .idle
             onStateChange?(.idle)
         }
+        mediaPlaybackService.resumeAfterDictationIfNeeded()
     }
 
     private func startStreamingPreview(sessionID: UUID) {
@@ -312,5 +325,6 @@ final class DictationCoordinator {
         transcriptionTask = nil
         state = .idle
         onStateChange?(.idle)
+        mediaPlaybackService.resumeAfterDictationIfNeeded()
     }
 }

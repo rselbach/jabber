@@ -9,6 +9,7 @@ struct SettingsView: View {
     @AppStorage(AppSettingKey.hotkeyKeyCode) private var hotkeyKeyCode = Int(HotkeyShortcut.defaultShortcut.keyCode)
     @AppStorage(AppSettingKey.hotkeyModifiers) private var hotkeyModifiers = Int(HotkeyShortcut.defaultShortcut.modifiers)
     @AppStorage(AppSettingKey.hotkeyActivationMode) private var hotkeyActivationMode = HotkeyActivationMode.defaultMode.rawValue
+    @AppStorage(AppSettingKey.pauseMediaDuringRecording) private var pauseMediaDuringRecording = false
     @AppStorage(AppSettingKey.vocabularyPrompt) private var vocabularyPrompt = ""
     @AppStorage(AppSettingKey.selectedLanguage) private var selectedLanguage = Constants.defaultLanguage
     @AppStorage(AppSettingKey.onboardingCompleted) private var onboardingCompleted = false
@@ -163,6 +164,16 @@ struct SettingsView: View {
                 }
             } header: {
                 Text("Output")
+            }
+
+            Section {
+                Toggle("Pause media while recording", isOn: $pauseMediaDuringRecording)
+
+                Text("When enabled, Jabber pauses current media playback when dictation starts and resumes only if Jabber paused it.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            } header: {
+                Text("Media")
             }
 
             Section {

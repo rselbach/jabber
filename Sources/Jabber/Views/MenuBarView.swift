@@ -10,6 +10,7 @@ struct MenuBarView: View {
     @State private var modelManager = ModelManager.shared
     @State private var permissionRefreshTick = false
     @ObservedObject var updaterController: UpdaterController
+    let onAppearAction: () -> Void
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -99,6 +100,7 @@ struct MenuBarView: View {
         .padding()
         .frame(width: 320)
         .onAppear {
+            onAppearAction()
             refreshMenuState()
         }
         .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
@@ -165,5 +167,5 @@ struct MenuBarView: View {
 }
 
 #Preview {
-    MenuBarView(updaterController: UpdaterController())
+    MenuBarView(updaterController: UpdaterController(), onAppearAction: {})
 }

@@ -4,7 +4,7 @@ import os
 
 @MainActor
 final class AudioCaptureService {
-    private let engine = AVAudioEngine()
+    private var engineStorage: AnyObject?
     private let targetSampleRate: Double = 16_000
     private let converterQueue = DispatchQueue(label: "com.jabber.audioconverter")
     nonisolated(unsafe) private var converter: AVAudioConverter?
@@ -37,6 +37,16 @@ final class AudioCaptureService {
         converterQueue.sync { converter = newConverter }
     }
 
+    private func audioEngine() -> AVAudioEngine {
+        if let engine = engineStorage as? AVAudioEngine {
+            return engine
+        }
+
+        let engine = AVAudioEngine()
+        engineStorage = engine
+        return engine
+    }
+
     func startCapture() throws {
         guard !isCapturing else { return }
 
@@ -44,6 +54,7 @@ final class AudioCaptureService {
             capturedSamples.removeAll(keepingCapacity: true)
         }
 
+        let engine = audioEngine()
         let inputNode = engine.inputNode
         let inputFormat = inputNode.inputFormat(forBus: 0)
 
@@ -83,6 +94,7 @@ final class AudioCaptureService {
             return true
         }
         guard wasCapturing else { return }
+        guard let engine = engineStorage as? AVAudioEngine else { return }
         engine.inputNode.removeTap(onBus: 0)
         engine.stop()
         setConverter(nil)

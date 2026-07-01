@@ -65,10 +65,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         updaterController.checkForUpdatesOnLaunchIfNeeded()
 
-        modelLoadTask = Task { [weak self] in
-            guard let self else { return }
-            await loadModel()
-        }
+        startModelLoadingTask()
+        scheduleUIReadyFallbackIfNeeded()
         scheduleFirstRunSetupPrompt()
     }
 
@@ -124,6 +122,26 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         )
     }
 
+    func markUIReadyFromView() {
+        AppReadinessGate.shared.markUIReady()
+    }
+
+    private func scheduleUIReadyFallbackIfNeeded() {
+        guard !shouldShowAutomaticOnboarding() else { return }
+
+        Task { @MainActor in
+            await Task.yield()
+            AppReadinessGate.shared.markUIReady()
+        }
+    }
+
+    private func startModelLoadingTask() {
+        modelLoadTask = Task { [weak self] in
+            guard let self else { return }
+            await loadModel()
+        }
+    }
+
     @objc private func handleModelChange() {
         modelLoadTask?.cancel()
         dictationCoordinator.cancel()
@@ -136,7 +154,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func loadModel() async {
+        await AppReadinessGate.shared.waitForUIReady()
         guard !Task.isCancelled else { return }
+
         let currentLoadID = UUID()
         modelLoadID = currentLoadID
         isModelLoadInProgress = true
@@ -169,10 +189,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let response = alert.runModal()
         if response == .alertFirstButtonReturn {
             modelLoadTask?.cancel()
-            modelLoadTask = Task { [weak self] in
-                guard let self else { return }
-                await self.loadModel()
-            }
+            startModelLoadingTask()
         }
     }
 
@@ -231,7 +248,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         popover = NSPopover()
         popover?.contentSize = NSSize(width: 320, height: 420)
         popover?.behavior = .transient
-        popover?.contentViewController = NSHostingController(rootView: MenuBarView(updaterController: updaterController))
+        popover?.contentViewController = NSHostingController(rootView: MenuBarView(
+            updaterController: updaterController,
+            onAppearAction: { [weak self] in
+                self?.markUIReadyFromView()
+            }
+        ))
     }
 
     private func setupHotkey() {
@@ -526,9 +548,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         NSApp.setActivationPolicy(.regular)
 
         let coordinator = OnboardingCoordinator()
-        let rootView = OnboardingView(coordinator: coordinator) { [weak self] in
-            self?.completeOnboarding()
-        }
+        let rootView = OnboardingView(
+            coordinator: coordinator,
+            onComplete: { [weak self] in
+                self?.completeOnboarding()
+            },
+            onAppearAction: { [weak self] in
+                self?.markUIReadyFromView()
+            }
+        )
 
         let window = NSWindow(
             contentRect: NSRect(x: 0, y: 0, width: 520, height: 420),

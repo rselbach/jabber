@@ -3,6 +3,7 @@ import SwiftUI
 
 struct SettingsView: View {
     @ObservedObject var updaterController: UpdaterController
+    let onAppearAction: () -> Void
 
     @AppStorage(AppSettingKey.selectedModel) private var selectedModel = AppMode.baseModelId
     @AppStorage(AppSettingKey.outputMode) private var outputMode = TypingService.OutputMode.directTyping.rawValue
@@ -53,6 +54,7 @@ struct SettingsView: View {
         }
         .frame(width: 520, height: 560)
         .onAppear {
+            onAppearAction()
             outputMode = TypingService.migratedOutputModeRawValue(outputMode)
             hotkeyActivationMode = selectedHotkeyActivationMode.rawValue
             permissionRefreshTick.toggle()
@@ -606,5 +608,5 @@ private extension DictationHistoryEntry {
 }
 
 #Preview {
-    SettingsView(updaterController: UpdaterController())
+    SettingsView(updaterController: UpdaterController(), onAppearAction: {})
 }

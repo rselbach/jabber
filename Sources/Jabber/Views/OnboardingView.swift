@@ -4,6 +4,7 @@ import SwiftUI
 struct OnboardingView: View {
     @Bindable var coordinator: OnboardingCoordinator
     let onComplete: () -> Void
+    let onAppearAction: () -> Void
 
     @AppStorage(AppSettingKey.hotkeyKeyCode) private var hotkeyKeyCode = Int(HotkeyShortcut.defaultShortcut.keyCode)
     @AppStorage(AppSettingKey.hotkeyModifiers) private var hotkeyModifiers = Int(HotkeyShortcut.defaultShortcut.modifiers)
@@ -21,6 +22,7 @@ struct OnboardingView: View {
         .padding(28)
         .frame(width: 520, height: 420)
         .onAppear {
+            onAppearAction()
             coordinator.start()
             modelManager.refreshModels()
         }
@@ -259,5 +261,5 @@ struct OnboardingView: View {
 }
 
 #Preview {
-    OnboardingView(coordinator: OnboardingCoordinator()) {}
+    OnboardingView(coordinator: OnboardingCoordinator(), onComplete: {}, onAppearAction: {})
 }

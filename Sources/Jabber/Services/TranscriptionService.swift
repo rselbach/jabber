@@ -117,6 +117,9 @@ actor TranscriptionService {
     }
 
     func ensureModelLoaded() async throws {
+        await AppReadinessGate.shared.waitForUIReady()
+        try Task.checkCancellation()
+
         let desiredModelId = await ModelManager.shared.selectedModelId()
         if loadedModelId == desiredModelId,
            qwen3ASR != nil {

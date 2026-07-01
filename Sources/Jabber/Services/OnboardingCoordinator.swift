@@ -29,8 +29,8 @@ final class OnboardingCoordinator {
     }
 
     private(set) var step: Step = .welcome
-    private(set) var microphoneStatus: AVAuthorizationStatus
-    private(set) var isAccessibilityTrusted: Bool
+    private(set) var microphoneStatus: AVAuthorizationStatus = .notDetermined
+    private(set) var isAccessibilityTrusted = false
     private(set) var didSkipAccessibility = false
     private(set) var downloadErrorMessage: String?
 
@@ -45,8 +45,6 @@ final class OnboardingCoordinator {
     ) {
         self.permissionService = permissionService
         self.modelManager = modelManager
-        microphoneStatus = permissionService.microphoneAuthorizationStatus()
-        isAccessibilityTrusted = permissionService.refreshAccessibilityPermissionStatus()
     }
 
     var canContinue: Bool {

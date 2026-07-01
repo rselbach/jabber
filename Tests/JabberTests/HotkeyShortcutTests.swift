@@ -11,6 +11,13 @@ final class HotkeyShortcutTests: XCTestCase {
         XCTAssertNil(HotkeyShortcut.defaultShortcut.validationError)
     }
 
+    func testDefaultActivationModeIsHold() {
+        XCTAssertEqual(HotkeyActivationMode.defaultMode, .hold)
+        XCTAssertEqual(HotkeyActivationMode.hold.displayName, "Hold")
+        XCTAssertEqual(HotkeyActivationMode.toggle.displayName, "Toggle")
+        XCTAssertEqual(HotkeyActivationMode.automatic.displayName, "Automatic")
+    }
+
     func testDisplayStringIncludesModifierSymbolsInStableOrder() {
         let shortcut = HotkeyShortcut(
             keyCode: UInt32(kVK_ANSI_A),

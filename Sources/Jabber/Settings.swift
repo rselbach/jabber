@@ -12,6 +12,7 @@ enum TypedSetting<T>: Sendable {
     case selectedModel
     case selectedLanguage
     case outputMode
+    case hotkeyActivationMode
     case vocabularyPrompt
 
     /// The UserDefaults key for this setting
@@ -20,6 +21,7 @@ enum TypedSetting<T>: Sendable {
         case .selectedModel: return AppSettingKey.selectedModel
         case .selectedLanguage: return AppSettingKey.selectedLanguage
         case .outputMode: return AppSettingKey.outputMode
+        case .hotkeyActivationMode: return AppSettingKey.hotkeyActivationMode
         case .vocabularyPrompt: return AppSettingKey.vocabularyPrompt
         }
     }
@@ -81,6 +83,8 @@ extension TypedSetting where T == String {
             return Constants.defaultLanguage
         case .outputMode:
             return TypingService.OutputMode.directTyping.rawValue
+        case .hotkeyActivationMode:
+            return HotkeyActivationMode.defaultMode.rawValue
         case .vocabularyPrompt:
             return ""
         }
@@ -102,13 +106,19 @@ struct SettingsStore: Sendable {
     subscript(setting: TypedSetting<String>) -> String {
         get {
             let value = userDefaults.string(forKey: setting.key) ?? setting.default
-            guard case .outputMode = setting else { return value }
-
-            let migratedValue = TypingService.migratedOutputModeRawValue(value)
-            if migratedValue != value {
-                userDefaults.set(migratedValue, forKey: setting.key)
+            let resolvedValue: String
+            switch setting {
+            case .outputMode:
+                resolvedValue = TypingService.migratedOutputModeRawValue(value)
+            case .hotkeyActivationMode:
+                resolvedValue = HotkeyActivationMode(rawValue: value)?.rawValue ?? setting.default
+            case .selectedModel, .selectedLanguage, .vocabularyPrompt:
+                resolvedValue = value
             }
-            return migratedValue
+            if resolvedValue != value {
+                userDefaults.set(resolvedValue, forKey: setting.key)
+            }
+            return resolvedValue
         }
         nonmutating set {
             userDefaults.set(newValue, forKey: setting.key)

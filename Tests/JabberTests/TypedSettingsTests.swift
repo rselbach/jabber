@@ -31,6 +31,7 @@ final class TypedSettingsTests: XCTestCase {
         XCTAssertEqual(settings[.selectedModel], AppMode.baseModelId, "Default model should be base")
         XCTAssertEqual(settings[.selectedLanguage], Constants.defaultLanguage, "Default language should match system")
         XCTAssertEqual(settings[.outputMode], TypingService.OutputMode.directTyping.rawValue)
+        XCTAssertEqual(settings[.hotkeyActivationMode], HotkeyActivationMode.defaultMode.rawValue)
         XCTAssertEqual(settings[.vocabularyPrompt], "", "Default vocabulary should be empty")
     }
 
@@ -39,6 +40,13 @@ final class TypedSettingsTests: XCTestCase {
 
         XCTAssertEqual(settings[.outputMode], TypingService.OutputMode.directTyping.rawValue)
         XCTAssertEqual(userDefaults.string(forKey: AppSettingKey.outputMode), TypingService.OutputMode.directTyping.rawValue)
+    }
+
+    func testInvalidHotkeyActivationModeMigratesToDefault() {
+        userDefaults.set("changnesia", forKey: AppSettingKey.hotkeyActivationMode)
+
+        XCTAssertEqual(settings[.hotkeyActivationMode], HotkeyActivationMode.defaultMode.rawValue)
+        XCTAssertEqual(userDefaults.string(forKey: AppSettingKey.hotkeyActivationMode), HotkeyActivationMode.defaultMode.rawValue)
     }
 
     func testSettingAndGettingValues() {
@@ -152,6 +160,13 @@ final class TypedSettingsTests: XCTestCase {
         settings[.hotkeyModifiers] = 0
 
         XCTAssertEqual(settings.hotkeyShortcut, .defaultShortcut)
+    }
+
+    func testHotkeyActivationModePersists() {
+        settings.hotkeyActivationMode = .automatic
+
+        XCTAssertEqual(settings.hotkeyActivationMode, .automatic)
+        XCTAssertEqual(settings[.hotkeyActivationMode], HotkeyActivationMode.automatic.rawValue)
     }
 
     func testPersistenceAcrossAccesses() {

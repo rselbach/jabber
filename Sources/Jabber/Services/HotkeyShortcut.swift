@@ -192,6 +192,36 @@ struct HotkeyShortcut: Equatable, Sendable {
     ]
 }
 
+enum HotkeyActivationMode: String, CaseIterable, Sendable {
+    case hold
+    case toggle
+    case automatic
+
+    static let defaultMode = HotkeyActivationMode.hold
+
+    var displayName: String {
+        switch self {
+        case .hold:
+            return "Hold"
+        case .toggle:
+            return "Toggle"
+        case .automatic:
+            return "Automatic"
+        }
+    }
+
+    var description: String {
+        switch self {
+        case .hold:
+            return "Press and hold to record, release to stop."
+        case .toggle:
+            return "Tap once to start recording, tap again to stop."
+        case .automatic:
+            return "Quick tap toggles recording; holding behaves like push-to-talk."
+        }
+    }
+}
+
 extension SettingsStore {
     var hotkeyShortcut: HotkeyShortcut {
         get {
@@ -209,6 +239,15 @@ extension SettingsStore {
             self[.hotkeyModifiers] = Int(newValue.modifiers)
         }
     }
+
+    var hotkeyActivationMode: HotkeyActivationMode {
+        get {
+            HotkeyActivationMode(rawValue: self[.hotkeyActivationMode]) ?? .defaultMode
+        }
+        nonmutating set {
+            self[.hotkeyActivationMode] = newValue.rawValue
+        }
+    }
 }
 
 extension TypedSettings {
@@ -218,6 +257,15 @@ extension TypedSettings {
         }
         set {
             SettingsStore.standard.hotkeyShortcut = newValue
+        }
+    }
+
+    static var hotkeyActivationMode: HotkeyActivationMode {
+        get {
+            SettingsStore.standard.hotkeyActivationMode
+        }
+        set {
+            SettingsStore.standard.hotkeyActivationMode = newValue
         }
     }
 }

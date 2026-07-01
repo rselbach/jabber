@@ -34,14 +34,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var lastModelUnavailableNotice = CFAbsoluteTime(0)
     private var lastTranscriptionBusyNotice = CFAbsoluteTime(0)
     private var didPromptAccessibility = false
+    private static let automaticHotkeyHoldThreshold: TimeInterval = 0.4
 
     // Hotkey press tracking: a press that awaits microphone permission can
     // have its key released before `start()` runs, leaving a "stuck" recording.
-    // `currentHotkeyPressID` identifies the in-flight press; if a release
-    // arrives while it is still awaiting start, `abortedHotkeyPressID` records
-    // it so the press aborts instead of starting a recording after release.
+    // `currentHotkeyPressID` identifies each attempted press; if a release
+    // arrives while a press is still awaiting start, `abortedHotkeyPressIDs`
+    // records it so the press aborts instead of starting after release.
     private var currentHotkeyPressID = 0
-    private var abortedHotkeyPressID: Int?
+    private var pendingHotkeyStartID: Int?
+    private var abortedHotkeyPressIDs: Set<Int> = []
+    private var activeHotkeyPressMode: HotkeyActivationMode?
+    private var automaticHotkeyPressStartedAt: CFAbsoluteTime?
+    private var automaticHotkeyPressStartedRecording = false
 
     private var modelState: TranscriptionService.State = .notReady
 
@@ -232,13 +237,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func setupHotkey() {
         hotkeyManager.onKeyDown = { [weak self] in
             Task { @MainActor in
-                await self?.handleHotkeyDown()
+                await self?.handleHotkeyDownEvent()
             }
         }
 
         hotkeyManager.onKeyUp = { [weak self] in
             Task { @MainActor in
-                self?.handleHotkeyUp()
+                self?.handleHotkeyUpEvent()
             }
         }
 
@@ -317,9 +322,74 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         hotkeyManager.register(TypedSettings.hotkeyShortcut)
     }
 
-    private func handleHotkeyDown() async {
+    private var hasActiveOrPendingRecording: Bool {
+        dictationCoordinator.isRecording || pendingHotkeyStartID != nil
+    }
+
+    private func handleHotkeyDownEvent() async {
+        guard activeHotkeyPressMode == nil else { return }
+
+        let mode = TypedSettings.hotkeyActivationMode
+        activeHotkeyPressMode = mode
+
+        switch mode {
+        case .hold:
+            await startDictationFromHotkey()
+        case .toggle:
+            if hasActiveOrPendingRecording {
+                stopOrAbortDictationFromHotkey()
+            } else {
+                await startDictationFromHotkey()
+            }
+        case .automatic:
+            automaticHotkeyPressStartedAt = CFAbsoluteTimeGetCurrent()
+            if hasActiveOrPendingRecording {
+                automaticHotkeyPressStartedRecording = false
+                stopOrAbortDictationFromHotkey()
+            } else {
+                automaticHotkeyPressStartedRecording = true
+                await startDictationFromHotkey()
+            }
+        }
+    }
+
+    private func handleHotkeyUpEvent() {
+        let mode = activeHotkeyPressMode ?? TypedSettings.hotkeyActivationMode
+        activeHotkeyPressMode = nil
+
+        switch mode {
+        case .hold:
+            stopOrAbortDictationFromHotkey()
+        case .toggle:
+            break
+        case .automatic:
+            defer {
+                automaticHotkeyPressStartedAt = nil
+                automaticHotkeyPressStartedRecording = false
+            }
+
+            guard automaticHotkeyPressStartedRecording,
+                  let startedAt = automaticHotkeyPressStartedAt else {
+                return
+            }
+
+            let heldDuration = CFAbsoluteTimeGetCurrent() - startedAt
+            if heldDuration >= Self.automaticHotkeyHoldThreshold {
+                stopOrAbortDictationFromHotkey()
+            }
+        }
+    }
+
+    private func startDictationFromHotkey() async {
         currentHotkeyPressID += 1
         let pressID = currentHotkeyPressID
+        pendingHotkeyStartID = pressID
+        defer {
+            if pendingHotkeyStartID == pressID {
+                pendingHotkeyStartID = nil
+            }
+            abortedHotkeyPressIDs.remove(pressID)
+        }
 
         guard transcriptionService.isReady else {
             let now = CFAbsoluteTimeGetCurrent()
@@ -352,8 +422,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         // If the key was released while we were awaiting permission, treat this
         // press as aborted rather than starting a recording after release.
-        if abortedHotkeyPressID == pressID {
-            abortedHotkeyPressID = nil
+        if abortedHotkeyPressIDs.remove(pressID) != nil {
             return
         }
 
@@ -370,13 +439,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         _ = dictationCoordinator.start(targetProcessID: targetProcessID)
     }
 
-    private func handleHotkeyUp() {
+    private func stopOrAbortDictationFromHotkey() {
         if dictationCoordinator.isRecording {
             dictationCoordinator.stop()
         } else {
             // Release arrived before recording began (e.g. during the permission
             // await). Mark the in-flight press aborted so it does not start.
-            abortedHotkeyPressID = currentHotkeyPressID
+            abortedHotkeyPressIDs.insert(pendingHotkeyStartID ?? currentHotkeyPressID)
         }
     }
 

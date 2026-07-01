@@ -8,6 +8,7 @@ struct SettingsView: View {
     @AppStorage(AppSettingKey.outputMode) private var outputMode = TypingService.OutputMode.directTyping.rawValue
     @AppStorage(AppSettingKey.hotkeyKeyCode) private var hotkeyKeyCode = Int(HotkeyShortcut.defaultShortcut.keyCode)
     @AppStorage(AppSettingKey.hotkeyModifiers) private var hotkeyModifiers = Int(HotkeyShortcut.defaultShortcut.modifiers)
+    @AppStorage(AppSettingKey.hotkeyActivationMode) private var hotkeyActivationMode = HotkeyActivationMode.defaultMode.rawValue
     @AppStorage(AppSettingKey.vocabularyPrompt) private var vocabularyPrompt = ""
     @AppStorage(AppSettingKey.selectedLanguage) private var selectedLanguage = Constants.defaultLanguage
     @AppStorage(AppSettingKey.onboardingCompleted) private var onboardingCompleted = false
@@ -44,6 +45,7 @@ struct SettingsView: View {
         .frame(width: 520, height: 560)
         .onAppear {
             outputMode = TypingService.migratedOutputModeRawValue(outputMode)
+            hotkeyActivationMode = selectedHotkeyActivationMode.rawValue
             permissionRefreshTick.toggle()
             _ = modelManager.migrateSelectedModelIfNeeded()
             modelManager.refreshModels()
@@ -127,6 +129,10 @@ struct SettingsView: View {
         hotkeyShortcut.displayString
     }
 
+    private var selectedHotkeyActivationMode: HotkeyActivationMode {
+        HotkeyActivationMode(rawValue: hotkeyActivationMode) ?? .defaultMode
+    }
+
     private var generalTab: some View {
         Form {
             setupSection
@@ -174,6 +180,19 @@ struct SettingsView: View {
                     shortcut: hotkeyShortcut,
                     onShortcutChange: applyHotkeyShortcut
                 )
+
+                Picker("Activation", selection: $hotkeyActivationMode) {
+                    ForEach(HotkeyActivationMode.allCases, id: \.self) { mode in
+                        Text(mode.displayName).tag(mode.rawValue)
+                    }
+                }
+                .onChange(of: hotkeyActivationMode) { _, newValue in
+                    applyHotkeyActivationModeRawValue(newValue)
+                }
+
+                Text(selectedHotkeyActivationMode.description)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
 
                 Button("Reset to ⌥ Space") {
                     applyHotkeyShortcut(.defaultShortcut)
@@ -267,6 +286,17 @@ struct SettingsView: View {
         NotificationCenter.default.post(
             name: Constants.Notifications.hotkeyDidChange,
             object: shortcut
+        )
+    }
+
+    private func applyHotkeyActivationModeRawValue(_ rawValue: String) {
+        let mode = HotkeyActivationMode(rawValue: rawValue) ?? .defaultMode
+        if hotkeyActivationMode != mode.rawValue {
+            hotkeyActivationMode = mode.rawValue
+        }
+        NotificationCenter.default.post(
+            name: Constants.Notifications.hotkeyDidChange,
+            object: mode
         )
     }
 

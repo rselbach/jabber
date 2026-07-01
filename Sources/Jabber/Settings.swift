@@ -31,6 +31,7 @@ enum BoolSetting: Sendable {
     case didShowFirstRunSetup
     case onboardingCompleted
     case pauseMediaDuringRecording
+    case saveHistoryEnabled
 
     var key: String {
         switch self {
@@ -40,12 +41,14 @@ enum BoolSetting: Sendable {
             return AppSettingKey.onboardingCompleted
         case .pauseMediaDuringRecording:
             return AppSettingKey.pauseMediaDuringRecording
+        case .saveHistoryEnabled:
+            return AppSettingKey.saveHistoryEnabled
         }
     }
 
     var `default`: Bool {
         switch self {
-        case .didShowFirstRunSetup, .onboardingCompleted, .pauseMediaDuringRecording:
+        case .didShowFirstRunSetup, .onboardingCompleted, .pauseMediaDuringRecording, .saveHistoryEnabled:
             return false
         }
     }

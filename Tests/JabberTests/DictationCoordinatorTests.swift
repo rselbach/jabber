@@ -7,6 +7,7 @@ final class DictationCoordinatorTests: XCTestCase {
     private var transcriptionService: FakeTranscriptionService!
     private var typingService: FakeTypingService!
     private var mediaPlaybackService: FakeMediaPlaybackService!
+    private var dictationHistoryStore: FakeDictationHistoryStore!
     private var coordinator: DictationCoordinator!
 
     override func setUp() async throws {
@@ -15,11 +16,13 @@ final class DictationCoordinatorTests: XCTestCase {
         transcriptionService = FakeTranscriptionService()
         typingService = FakeTypingService()
         mediaPlaybackService = FakeMediaPlaybackService()
+        dictationHistoryStore = FakeDictationHistoryStore()
         coordinator = DictationCoordinator(
             audioCapture: audioCapture,
             transcriptionService: transcriptionService,
             typingService: typingService,
             mediaPlaybackService: mediaPlaybackService,
+            dictationHistoryStore: dictationHistoryStore,
             streamingPreviewInterval: .milliseconds(10),
             minimumStreamingPreviewSampleCount: 16_000
         )
@@ -31,6 +34,7 @@ final class DictationCoordinatorTests: XCTestCase {
         transcriptionService = nil
         typingService = nil
         mediaPlaybackService = nil
+        dictationHistoryStore = nil
         try await super.tearDown()
     }
 
@@ -127,6 +131,30 @@ final class DictationCoordinatorTests: XCTestCase {
         XCTAssertTrue(coordinator.isIdle)
         XCTAssertEqual(typingService.outputs, ["hello world"])
         XCTAssertEqual(typingService.targetProcessIDs, [nil])
+    }
+
+    func testStopWithSpeechSavesDictationHistoryAfterTranscriptionCompletes() async {
+        audioCapture.storedSamples = makeLoudSamples()
+        transcriptionService.currentModelID = AppMode.mediumModelId
+        transcriptionService.transcribeResult = .success(" troy and abed in the morning ")
+
+        let idleExpectation = XCTestExpectation(description: "coordinator returns to idle")
+        coordinator.onStateChange = { state in
+            if state == .idle {
+                idleExpectation.fulfill()
+            }
+        }
+
+        XCTAssertTrue(coordinator.start())
+        coordinator.stop()
+
+        await fulfillment(of: [idleExpectation], timeout: 1.0)
+
+        XCTAssertEqual(dictationHistoryStore.sessions.count, 1)
+        XCTAssertEqual(dictationHistoryStore.sessions[0].samples, audioCapture.storedSamples)
+        XCTAssertEqual(dictationHistoryStore.sessions[0].transcript, " troy and abed in the morning ")
+        XCTAssertEqual(dictationHistoryStore.sessions[0].modelID, AppMode.mediumModelId)
+        XCTAssertEqual(dictationHistoryStore.sessions[0].language, Constants.defaultLanguage)
     }
 
     func testStopWithSpeechResumesMediaAfterTranscriptionCompletes() async {
@@ -405,6 +433,7 @@ final class FakeTranscriptionService: TranscriptionProtocol, @unchecked Sendable
     private var _transcribeResult: Result<String, Error> = .success("")
     private var _streamingDelay: Duration?
     private var _transcribeDelay: Duration?
+    private var _currentModelID: String? = AppMode.baseModelId
     private var _streamingSampleCounts: [Int] = []
     private var _callOrder: [Call] = []
     private var _holdStreamingUntilReleased = false
@@ -446,6 +475,11 @@ final class FakeTranscriptionService: TranscriptionProtocol, @unchecked Sendable
         set { lock.withLock { _transcribeDelay = newValue } }
     }
 
+    var currentModelID: String? {
+        get { lock.withLock { _currentModelID } }
+        set { lock.withLock { _currentModelID = newValue } }
+    }
+
     var streamingSampleCounts: [Int] {
         lock.withLock { _streamingSampleCounts }
     }
@@ -470,6 +504,10 @@ final class FakeTranscriptionService: TranscriptionProtocol, @unchecked Sendable
 
     func setLanguage(_ language: String) async {
         self.language = language
+    }
+
+    func currentModelId() async -> String? {
+        currentModelID
     }
 
     func transcribeStreaming(samples: [Float]) async throws -> String {
@@ -547,5 +585,13 @@ final class FakeMediaPlaybackService: MediaPlaybackProtocol, @unchecked Sendable
 
     func resumeAfterDictationIfNeeded() {
         resumeCallCount += 1
+    }
+}
+
+final class FakeDictationHistoryStore: DictationHistoryProtocol, @unchecked Sendable {
+    private(set) var sessions: [DictationHistorySession] = []
+
+    func saveSession(_ session: DictationHistorySession) async {
+        sessions.append(session)
     }
 }

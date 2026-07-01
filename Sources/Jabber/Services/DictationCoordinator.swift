@@ -21,6 +21,7 @@ protocol TranscriptionProtocol: AnyObject, Sendable {
     var supportsStreamingTranscription: Bool { get }
     func setVocabularyPrompt(_ prompt: String) async
     func setLanguage(_ language: String) async
+    func currentModelId() async -> String?
     func transcribeStreaming(samples: [Float]) async throws -> String
     func transcribe(samples: [Float]) async throws -> String
 }
@@ -84,6 +85,7 @@ final class DictationCoordinator {
     private let transcriptionService: any TranscriptionProtocol
     private let typingService: any OutputProtocol
     private let mediaPlaybackService: any MediaPlaybackProtocol
+    private let dictationHistoryStore: any DictationHistoryProtocol
     private var activity = TranscriptionActivityTracker()
     private var transcriptionTask: Task<Void, Never>?
     private var streamingTask: Task<Void, Never>?
@@ -100,6 +102,7 @@ final class DictationCoordinator {
         transcriptionService: any TranscriptionProtocol,
         typingService: any OutputProtocol,
         mediaPlaybackService: any MediaPlaybackProtocol = MediaPlaybackService.shared,
+        dictationHistoryStore: any DictationHistoryProtocol = DictationHistoryStore.shared,
         streamingPreviewInterval: Duration = .milliseconds(500),
         minimumStreamingPreviewSampleCount: Int = 16_000
     ) {
@@ -107,6 +110,7 @@ final class DictationCoordinator {
         self.transcriptionService = transcriptionService
         self.typingService = typingService
         self.mediaPlaybackService = mediaPlaybackService
+        self.dictationHistoryStore = dictationHistoryStore
         self.streamingPreviewInterval = streamingPreviewInterval
         self.minimumStreamingPreviewSampleCount = minimumStreamingPreviewSampleCount
 
@@ -295,6 +299,15 @@ final class DictationCoordinator {
             guard currentSessionID == sessionID else {
                 throw CancellationError()
             }
+
+            let modelID = await transcriptionService.currentModelId() ?? TypedSettings[.selectedModel]
+            let language = TypedSettings[.selectedLanguage]
+            await dictationHistoryStore.saveSession(DictationHistorySession(
+                samples: samples,
+                transcript: text,
+                modelID: modelID,
+                language: language
+            ))
 
             let trimmedText = text.trimmingCharacters(in: .whitespacesAndNewlines)
             if !trimmedText.isEmpty {

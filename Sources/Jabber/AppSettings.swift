@@ -8,6 +8,7 @@ enum AppSettingKey {
     static let hotkeyModifiers = "hotkeyModifiers"
     static let hotkeyActivationMode = "hotkeyActivationMode"
     static let pauseMediaDuringRecording = "pauseMediaDuringRecording"
+    static let saveHistoryEnabled = "saveHistoryEnabled"
     static let vocabularyPrompt = "vocabularyPrompt"
     static let didShowFirstRunSetup = "didShowFirstRunSetup"
     static let onboardingCompleted = "onboardingCompleted"

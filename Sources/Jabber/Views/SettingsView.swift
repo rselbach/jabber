@@ -10,6 +10,7 @@ struct SettingsView: View {
     @AppStorage(AppSettingKey.hotkeyModifiers) private var hotkeyModifiers = Int(HotkeyShortcut.defaultShortcut.modifiers)
     @AppStorage(AppSettingKey.hotkeyActivationMode) private var hotkeyActivationMode = HotkeyActivationMode.defaultMode.rawValue
     @AppStorage(AppSettingKey.pauseMediaDuringRecording) private var pauseMediaDuringRecording = false
+    @AppStorage(AppSettingKey.saveHistoryEnabled) private var saveHistoryEnabled = false
     @AppStorage(AppSettingKey.vocabularyPrompt) private var vocabularyPrompt = ""
     @AppStorage(AppSettingKey.selectedLanguage) private var selectedLanguage = Constants.defaultLanguage
     @AppStorage(AppSettingKey.onboardingCompleted) private var onboardingCompleted = false
@@ -20,6 +21,7 @@ struct SettingsView: View {
     @State private var showError = false
     @State private var pendingDeleteModelId: String?
     @State private var pendingDeleteModelName: String?
+    @State private var historyEntries: [DictationHistoryEntry] = []
 
     @State private var selectedTab = "general"
 
@@ -42,6 +44,12 @@ struct SettingsView: View {
                 .tabItem {
                     Label("Vocabulary", systemImage: "text.book.closed")
                 }
+
+            historyTab
+                .tag("history")
+                .tabItem {
+                    Label("History", systemImage: "clock.arrow.circlepath")
+                }
         }
         .frame(width: 520, height: 560)
         .onAppear {
@@ -50,6 +58,7 @@ struct SettingsView: View {
             permissionRefreshTick.toggle()
             _ = modelManager.migrateSelectedModelIfNeeded()
             modelManager.refreshModels()
+            refreshHistoryEntries()
         }
         .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
             permissionRefreshTick.toggle()
@@ -363,6 +372,73 @@ struct SettingsView: View {
         }
         .formStyle(.grouped)
     }
+
+    private var historyTab: some View {
+        Form {
+            Section {
+                Toggle("Save dictation history", isOn: $saveHistoryEnabled)
+
+                Text("When enabled, Jabber saves recent audio and transcripts locally for debugging. Retention is capped at 50 sessions or 500MB.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+
+                HStack {
+                    Button("Refresh") {
+                        refreshHistoryEntries()
+                    }
+                    .buttonStyle(.borderless)
+
+                    Button("Reveal History Folder") {
+                        revealHistoryFolder()
+                    }
+                    .buttonStyle(.borderless)
+                }
+            } header: {
+                Text("Local Debug History")
+            }
+
+            Section {
+                if historyEntries.isEmpty {
+                    Text(saveHistoryEnabled ? "No saved dictations yet." : "History is disabled.")
+                        .foregroundStyle(.secondary)
+                } else {
+                    ForEach(historyEntries) { entry in
+                        HistoryEntryRow(entry: entry) {
+                            revealHistoryEntry(entry)
+                        }
+                    }
+                }
+            } header: {
+                Text("Recent Sessions")
+            }
+        }
+        .formStyle(.grouped)
+    }
+
+    private func refreshHistoryEntries() {
+        Task { @MainActor in
+            historyEntries = await DictationHistoryStore.shared.entries()
+        }
+    }
+
+    private func revealHistoryFolder() {
+        Task { @MainActor in
+            let historyDirectoryURL = DictationHistoryStore.shared.historyDirectoryURL()
+            do {
+                try FileManager.default.createDirectory(at: historyDirectoryURL, withIntermediateDirectories: true)
+                NSWorkspace.shared.activateFileViewerSelecting([historyDirectoryURL])
+            } catch {
+                presentError("Failed to open history folder: \(error.localizedDescription)")
+            }
+        }
+    }
+
+    private func revealHistoryEntry(_ entry: DictationHistoryEntry) {
+        Task { @MainActor in
+            let audioURL = DictationHistoryStore.shared.audioURL(for: entry)
+            NSWorkspace.shared.activateFileViewerSelecting([audioURL])
+        }
+    }
 }
 
 struct LanguagePicker: View {
@@ -479,6 +555,53 @@ struct ModelRow: View {
             onDownload()
         }
         .buttonStyle(.bordered)
+    }
+}
+
+struct HistoryEntryRow: View {
+    let entry: DictationHistoryEntry
+    let onReveal: () -> Void
+
+    var body: some View {
+        HStack(alignment: .top) {
+            VStack(alignment: .leading, spacing: 4) {
+                Text(entry.timestamp.formatted(date: .abbreviated, time: .shortened))
+                    .fontWeight(.semibold)
+
+                Text(entry.transcript.isEmpty ? "No transcript text" : entry.transcript)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(2)
+
+                Text("\(entry.modelName) • \(entry.languageDisplayName) • \(entry.durationDisplayText) • \(entry.audioSizeDisplayText)")
+                    .font(.caption2)
+                    .foregroundStyle(.tertiary)
+            }
+
+            Spacer()
+
+            Button("Reveal") {
+                onReveal()
+            }
+            .buttonStyle(.borderless)
+        }
+    }
+}
+
+private extension DictationHistoryEntry {
+    var durationDisplayText: String {
+        String(format: "%.1fs", duration)
+    }
+
+    var audioSizeDisplayText: String {
+        ByteCountFormatter.string(fromByteCount: audioByteCount, countStyle: .file)
+    }
+
+    var languageDisplayName: String {
+        if language == "auto" {
+            return "Auto"
+        }
+        return Constants.sortedLanguages.first { $0.code == language }?.name ?? language
     }
 }
 

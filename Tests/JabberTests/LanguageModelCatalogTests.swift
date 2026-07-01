@@ -72,7 +72,7 @@ final class LanguageModelCatalogTests: XCTestCase {
     func testQwen3SupportsAllLanguages() {
         for code in Constants.validLanguageCodes {
             XCTAssertTrue(LanguageModelCatalog.supportsLanguage(code, modelId: AppMode.qwen3ModelId),
-                         "Qwen3 should support language '\(code)'")
+                          "Qwen3 should support language '\(code)'")
         }
     }
 
@@ -106,7 +106,7 @@ final class LanguageModelCatalogTests: XCTestCase {
         for code in AppMode.parakeetLanguageCodes {
             let routes = LanguageModelCatalog.routes(for: code)
             XCTAssertTrue(routes.contains { $0.modelId == AppMode.parakeetModelId },
-                         "Parakeet should be in routes for language '\(code)'")
+                          "Parakeet should be in routes for language '\(code)'")
         }
     }
 
@@ -114,7 +114,7 @@ final class LanguageModelCatalogTests: XCTestCase {
         XCTAssertTrue(LanguageModelCatalog.supportsLanguage("en", modelId: AppMode.nemotronModelId))
         for code in AppMode.parakeetLanguageCodes where code != "en" {
             XCTAssertFalse(LanguageModelCatalog.supportsLanguage(code, modelId: AppMode.nemotronModelId),
-                         "Nemotron should not support language '\(code)'")
+                           "Nemotron should not support language '\(code)'")
         }
     }
 }

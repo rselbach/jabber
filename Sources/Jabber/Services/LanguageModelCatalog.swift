@@ -5,7 +5,9 @@ enum LanguageModelCatalog {
         let modelId: String
         let isRecommended: Bool
 
-        var id: String { modelId }
+        var id: String {
+            modelId
+        }
     }
 
     static let popularLanguageCodes: [String] = [

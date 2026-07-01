@@ -49,7 +49,7 @@ final class OnboardingCoordinator {
     ) {
         self.permissionService = permissionService
         self.modelManager = modelManager
-        self.onboardingSelectedLanguage = TypedSettings[.selectedLanguage]
+        onboardingSelectedLanguage = TypedSettings[.selectedLanguage]
     }
 
     var canContinue: Bool {

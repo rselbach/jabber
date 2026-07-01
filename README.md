@@ -51,6 +51,7 @@ Model options are available in Settings:
 - Qwen3-ASR: Qwen3-ASR 1.7B 8-bit (~2.5GB) — 52 languages, highest accuracy
 - Parakeet: NVIDIA Parakeet TDT v3 0.6B INT8 (~634MB) — 25 European languages, fastest
 - Nemotron: NVIDIA Nemotron Speech Streaming 0.6B INT8 (~600MB) — English-only, native punctuation
+- Apple Speech: Built-in macOS 26 speech recognition — no download required
 
 During onboarding, you'll pick a language and Jabber recommends the best model for it.
 
@@ -101,6 +102,7 @@ Jabber uses the following open-source models and libraries:
 | Qwen3-ASR | Alibaba Qwen Team | [Apache 2.0](https://www.apache.org/licenses/LICENSE-2.0) | [huggingface.co/Qwen/Qwen3-ASR-0.6B](https://huggingface.co/Qwen/Qwen3-ASR-0.6B) |
 | Parakeet TDT v3 | NVIDIA | [CC-BY-4.0](https://creativecommons.org/licenses/by/4.0/) | [huggingface.co/nvidia/parakeet-tdt-0.6b-v3](https://huggingface.co/nvidia/parakeet-tdt-0.6b-v3) |
 | Nemotron Speech Streaming | NVIDIA | [OpenMDW-1.1](https://www.openmodeldefinition.org/) | [huggingface.co/nvidia/nemotron-speech-streaming-en-0.6b](https://huggingface.co/nvidia/nemotron-speech-streaming-en-0.6b) |
+| Apple Speech | Apple | [Apple SLA](https://www.apple.com/legal/sla/) | Built-in macOS 26 Speech framework |
 
 Parakeet TDT v3 CoreML conversion by [aufklarer](https://huggingface.co/aufklarer/Parakeet-TDT-v3-CoreML-INT8).
 

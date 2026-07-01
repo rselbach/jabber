@@ -132,6 +132,13 @@ enum ModelInstallationValidator {
             return validateQwen3ASRModelFolder(at: folder)
         case .parakeetASR, .nemotronASR:
             return validateParakeetModelFolder(at: folder)
+        case .appleSpeech:
+            return ModelFolderValidation(
+                folderExists: true,
+                missingRequiredFiles: [],
+                hasWeights: true,
+                readErrorDescription: nil
+            )
         }
     }
 }

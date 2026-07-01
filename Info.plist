@@ -22,6 +22,8 @@
     <true/>
     <key>NSMicrophoneUsageDescription</key>
     <string>Jabber uses your microphone to capture audio for local speech-to-text transcription. Audio is processed entirely on your device and never leaves your Mac.</string>
+    <key>NSSpeechRecognitionUsageDescription</key>
+    <string>Jabber uses Apple's built-in speech recognition to transcribe your audio on-device when the Apple Speech model is selected.</string>
     <key>NSHighResolutionCapable</key>
     <true/>
     <key>CFBundleIconFile</key>

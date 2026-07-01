@@ -50,16 +50,27 @@ final class LanguageModelCatalogTests: XCTestCase {
         XCTAssertTrue(ids.contains(AppMode.qwen3ModelId))
     }
 
-    func testNonEuropeanLanguageOnlyHasQwen3() {
+    func testNonEuropeanLanguageOnlyHasQwen3AndAppleSpeech() {
         let ids = LanguageModelCatalog.compatibleModelIds(for: "zh")
-        XCTAssertEqual(ids.count, 1)
-        XCTAssertEqual(ids.first, AppMode.qwen3ModelId)
+        XCTAssertTrue(ids.contains(AppMode.qwen3ModelId))
+        XCTAssertTrue(ids.contains(AppMode.appleSpeechModelId))
+        XCTAssertFalse(ids.contains(AppMode.parakeetModelId))
+    }
+
+    func testAppleSpeechIsNeverRecommended() {
+        for code in ["auto", "en", "de", "ja", "zh"] {
+            let routes = LanguageModelCatalog.routes(for: code)
+            let appleRoute = routes.first { $0.modelId == AppMode.appleSpeechModelId }
+            XCTAssertNotNil(appleRoute, "Apple Speech should appear for language '\(code)'")
+            XCTAssertFalse(appleRoute?.isRecommended == true, "Apple Speech should never be recommended")
+        }
     }
 
     func testSupportsLanguageReturnsTrueForMatchingModel() {
         XCTAssertTrue(LanguageModelCatalog.supportsLanguage("de", modelId: AppMode.parakeetModelId))
         XCTAssertTrue(LanguageModelCatalog.supportsLanguage("ja", modelId: AppMode.qwen3ModelId))
         XCTAssertTrue(LanguageModelCatalog.supportsLanguage("en", modelId: AppMode.nemotronModelId))
+        XCTAssertTrue(LanguageModelCatalog.supportsLanguage("zh", modelId: AppMode.appleSpeechModelId))
     }
 
     func testSupportsLanguageReturnsFalseForNonMatchingModel() {

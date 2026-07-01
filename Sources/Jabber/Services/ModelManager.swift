@@ -143,6 +143,15 @@ final class ModelManager {
     }
 
     func ensureModelDownloaded(_ modelId: String) async throws -> URL {
+        if let def = AppMode.modelDefinition(for: modelId), def.isBuiltIn {
+            updateModel(modelId) { model in
+                model.isDownloaded = true
+                model.isDownloading = false
+                model.downloadProgress = 1.0
+            }
+            return cacheBase()
+        }
+
         if let existing = modelFolder(for: modelId) {
             updateModel(modelId) { model in
                 model.isDownloaded = true
@@ -301,6 +310,10 @@ final class ModelManager {
     }
 
     func deleteModel(_ modelId: String) throws {
+        guard let def = AppMode.modelDefinition(for: modelId), !def.isBuiltIn else {
+            throw ModelError.modelNotFound(modelId: modelId)
+        }
+
         let currentModel = settings[.selectedModel]
 
         if currentModel == modelId, downloadedModels.count == 1 {
@@ -336,7 +349,8 @@ final class ModelManager {
 
     private func installedModelIds() -> [String] {
         modelDefinitions.compactMap { def in
-            modelFolder(for: def.id) != nil ? def.id : nil
+            if def.isBuiltIn { return def.id }
+            return modelFolder(for: def.id) != nil ? def.id : nil
         }
     }
 
@@ -393,6 +407,8 @@ final class ModelManager {
                 "joint.mlmodelc/**",
                 "vocab.json"
             ]
+        case .appleSpeech:
+            throw ModelError.modelNotFound(modelId: modelId)
         }
 
         try await HuggingFaceDownloader.downloadWeights(

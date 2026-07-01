@@ -18,6 +18,7 @@ enum LanguageModelCatalog {
         if languageCode == "auto" {
             return [
                 .init(modelId: AppMode.parakeetModelId, isRecommended: true),
+                .init(modelId: AppMode.appleSpeechModelId, isRecommended: false),
                 .init(modelId: AppMode.nemotronModelId, isRecommended: false),
                 .init(modelId: AppMode.qwen3ModelId, isRecommended: false)
             ]
@@ -26,6 +27,7 @@ enum LanguageModelCatalog {
         if languageCode == "en" {
             return [
                 .init(modelId: AppMode.nemotronModelId, isRecommended: true),
+                .init(modelId: AppMode.appleSpeechModelId, isRecommended: false),
                 .init(modelId: AppMode.parakeetModelId, isRecommended: false),
                 .init(modelId: AppMode.qwen3ModelId, isRecommended: false)
             ]
@@ -34,12 +36,14 @@ enum LanguageModelCatalog {
         if AppMode.parakeetLanguageCodes.contains(languageCode) {
             return [
                 .init(modelId: AppMode.parakeetModelId, isRecommended: true),
+                .init(modelId: AppMode.appleSpeechModelId, isRecommended: false),
                 .init(modelId: AppMode.qwen3ModelId, isRecommended: false)
             ]
         }
 
         return [
-            .init(modelId: AppMode.qwen3ModelId, isRecommended: true)
+            .init(modelId: AppMode.qwen3ModelId, isRecommended: true),
+            .init(modelId: AppMode.appleSpeechModelId, isRecommended: false)
         ]
     }
 

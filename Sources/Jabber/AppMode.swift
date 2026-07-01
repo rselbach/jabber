@@ -4,11 +4,13 @@ enum AppMode {
     static let qwen3ModelId = "qwen3"
     static let parakeetModelId = "parakeet"
     static let nemotronModelId = "nemotron"
+    static let appleSpeechModelId = "apple-speech"
 
     enum ModelFamily: String, CaseIterable {
         case qwen3ASR
         case parakeetASR
         case nemotronASR
+        case appleSpeech
     }
 
     struct ModelDefinition: Identifiable {
@@ -22,6 +24,7 @@ enum AppMode {
         let license: String
         let licenseUrl: String
         let attribution: String
+        let isBuiltIn: Bool
 
         var supportsAllLanguages: Bool {
             supportedLanguageCodes == nil
@@ -39,7 +42,8 @@ enum AppMode {
             supportedLanguageCodes: nil,
             license: "Apache 2.0",
             licenseUrl: "https://www.apache.org/licenses/LICENSE-2.0",
-            attribution: "Qwen3-ASR by Alibaba Qwen Team"
+            attribution: "Qwen3-ASR by Alibaba Qwen Team",
+            isBuiltIn: false
         ),
         .init(
             id: parakeetModelId,
@@ -51,7 +55,8 @@ enum AppMode {
             supportedLanguageCodes: parakeetLanguageCodes,
             license: "CC-BY-4.0",
             licenseUrl: "https://creativecommons.org/licenses/by/4.0/",
-            attribution: "Parakeet TDT v3 by NVIDIA"
+            attribution: "Parakeet TDT v3 by NVIDIA",
+            isBuiltIn: false
         ),
         .init(
             id: nemotronModelId,
@@ -63,7 +68,21 @@ enum AppMode {
             supportedLanguageCodes: ["en"],
             license: "OpenMDW-1.1",
             licenseUrl: "https://www.openmodeldefinition.org/",
-            attribution: "Nemotron Speech Streaming by NVIDIA"
+            attribution: "Nemotron Speech Streaming by NVIDIA",
+            isBuiltIn: false
+        ),
+        .init(
+            id: appleSpeechModelId,
+            family: .appleSpeech,
+            huggingFaceModelId: "",
+            name: "Apple Speech",
+            description: "Built-in macOS speech recognition — no download required",
+            sizeHint: "Built-in",
+            supportedLanguageCodes: nil,
+            license: "Apple System",
+            licenseUrl: "https://www.apple.com/legal/sla/",
+            attribution: "Apple Speech Framework (macOS 26+)",
+            isBuiltIn: true
         )
     ]
 

@@ -53,7 +53,8 @@ final class ModelManagerTests: XCTestCase {
         XCTAssertTrue(modelIds.contains("qwen3"), "Should have Qwen3-ASR model")
         XCTAssertTrue(modelIds.contains("parakeet"), "Should have Parakeet model")
         XCTAssertTrue(modelIds.contains("nemotron"), "Should have Nemotron model")
-        XCTAssertEqual(modelIds.count, 3, "Should expose three models")
+        XCTAssertTrue(modelIds.contains("apple-speech"), "Should have Apple Speech model")
+        XCTAssertEqual(modelIds.count, 4, "Should expose four models")
     }
 
     func testQwen3ASRVariantResolvesHuggingFaceId() {
@@ -136,6 +137,14 @@ final class ModelManagerTests: XCTestCase {
         XCTAssertEqual(qwenModel.name, "Qwen3-ASR")
         XCTAssertEqual(qwenModel.description, "Qwen3-ASR 1.7B 8-bit — 52 languages, highest accuracy")
         XCTAssertEqual(qwenModel.sizeHint, "~2.5GB")
+    }
+
+    func testBuiltInModelAlwaysDownloaded() {
+        guard let appleModel = modelManager.models.first(where: { $0.id == "apple-speech" }) else {
+            XCTFail("Apple Speech model not found")
+            return
+        }
+        XCTAssertTrue(appleModel.isDownloaded, "Built-in model should always be downloaded")
     }
 
     func testSelectModelReturnsFalseForNonExistentModel() {

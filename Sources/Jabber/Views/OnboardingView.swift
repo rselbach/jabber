@@ -215,7 +215,7 @@ struct OnboardingView: View {
                     }
 
                     if model.isDownloaded {
-                        Text("Downloaded")
+                        Text(isBuiltIn(model) ? "Built-in" : "Downloaded")
                             .font(.caption2)
                             .foregroundStyle(.green)
                     }
@@ -255,6 +255,10 @@ struct OnboardingView: View {
             }
         }
         .padding(.vertical, 4)
+    }
+
+    private func isBuiltIn(_ model: ModelManager.Model) -> Bool {
+        AppMode.modelDefinition(for: model.id)?.isBuiltIn ?? false
     }
 
     private var accessibilityStep: some View {

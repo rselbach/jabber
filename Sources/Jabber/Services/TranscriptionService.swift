@@ -171,6 +171,8 @@ actor TranscriptionService {
             return ParakeetASRProvider(modelId: modelId, huggingFaceModelId: def.huggingFaceModelId)
         case .nemotronASR:
             return NemotronASRProvider(modelId: modelId, huggingFaceModelId: def.huggingFaceModelId)
+        case .appleSpeech:
+            return AppleSpeechProvider(modelId: modelId)
         }
     }
 

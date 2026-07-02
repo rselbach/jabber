@@ -271,33 +271,34 @@ final class HotkeyManager: @unchecked Sendable {
 
         switch type {
         case .flagsChanged:
-            // Ignore flag changes for any modifier other than the configured
-            // physical key (e.g. Left Option when Right Option is configured).
-            guard keyCode == shortcut.keyCode else {
+            // Translate the flag transition into a gesture input via the
+            // reducer's pure mapping, then feed it. CGEventFlags are cumulative
+            // per family (Left and Right Option share `.maskAlternate`), so the
+            // configured key's release while a sibling stays held still reports
+            // the family flag as set; the mapping disambiguates that release
+            // from a press using the gesture phase. See
+            // `ModifierOnlyGestureReducer.input(forFlagsChanged:)`.
+            //
+            // Direction is read from the event's own flags, not from
+            // CGEventSource.keyState: the tap is a head-insert `.defaultTap`,
+            // so this callback runs BEFORE the session key-state updates, and
+            // keyState(.combinedSessionState) still reflects the pre-transition
+            // state — a press would read as a release and be dropped, so the
+            // gesture never fires. The event flags reflect state AFTER the
+            // transition and are the reliable signal.
+            lock.lock()
+            let gestureState = gesture.state
+            lock.unlock()
+            guard let gestureInput = ModifierOnlyGestureReducer.input(
+                forFlagsChanged: keyCode,
+                flags: event.flags,
+                shortcutKeyCode: shortcut.keyCode,
+                gestureState: gestureState
+            ) else {
                 return Unmanaged.passUnretained(event)
             }
-            // Determine down/up from the event's own modifier flags, NOT from
-            // CGEventSource.keyState. The tap is a head-insert `.defaultTap`,
-            // so this callback runs BEFORE the session key-state is updated;
-            // keyState(.combinedSessionState) therefore still reflects the
-            // pre-transition state and would invert the gesture — a press reads
-            // as a release (keyState==false) and is silently dropped, so the
-            // gesture never fires. The event flags reflect state AFTER the
-            // transition and are the reliable signal. keyState is kept only as a
-            // last-resort fallback for key codes we can't map to a flag family.
-            //
-            // The flags are cumulative per family (e.g. .maskAlternate is set if
-            // EITHER Option key is down), so a release of the configured key
-            // while its sibling stays held is only observed once the whole
-            // family clears — matching FluidVoice's modifier-only semantics.
-            let isDown: Bool
-            if let familyFlag = HotkeyShortcut.cgEventFlag(forKeyCode: keyCode) {
-                isDown = event.flags.contains(familyFlag)
-            } else {
-                isDown = CGEventSource.keyState(.combinedSessionState, key: CGKeyCode(keyCode))
-            }
-            logger.debug("Event tap flagsChanged keyCode=\(keyCode) isDown=\(isDown)")
-            feed(isDown ? .modifierDown : .modifierUp)
+            logger.debug("Event tap flagsChanged keyCode=\(keyCode) gestureState=\(String(describing: gestureState)) input=\(String(describing: gestureInput))")
+            feed(gestureInput)
 
         case .keyDown:
             // Modifier keys surface as flagsChanged, not keyDown; any other
@@ -558,5 +559,55 @@ struct ModifierOnlyGestureReducer: Sendable, Equatable {
             state = .active
             return .fireDown
         }
+    }
+
+    /// Map a `flagsChanged` event from the modifier-only event tap to the
+    /// gesture input it represents, or `nil` when the event should be ignored.
+    ///
+    /// Pure and table-testable: the live tap callback passes the event's key
+    /// code and flags, the configured shortcut's key code, and the reducer's
+    /// current `state`, then feeds the result to `handle(_:)`.
+    ///
+    /// `CGEventFlags` masks are cumulative per family — Left and Right Option
+    /// both report `.maskAlternate` — so a release of the configured key while
+    /// its sibling stays held still shows the family flag as set. The press/
+    /// release ambiguity is resolved with the gesture phase, since a key cannot
+    /// transition down twice:
+    ///
+    /// - Family flag set and the configured key is NOT already tracked down
+    ///   (`state == .idle`) → a press of the configured key → `.modifierDown`.
+    /// - Family flag set and the configured key IS already tracked down
+    ///   (`state` is `.pending`/`.active`) → the key was already down, so this
+    ///   flagsChanged can only be the release of the configured side while a
+    ///   sibling keeps the family flag high → `.modifierUp`.
+    /// - Family flag cleared → the configured key (and any sibling) is up →
+    ///   `.modifierUp`.
+    /// - Event for any key code other than the configured one (e.g. a sibling
+    ///   modifier) → `nil` (ignored).
+    static func input(
+        forFlagsChanged keyCode: UInt32,
+        flags: CGEventFlags,
+        shortcutKeyCode: UInt32,
+        gestureState: State
+    ) -> Input? {
+        // Only the configured physical key drives the gesture; sibling-modifier
+        // events (e.g. Left Option when Right Option is configured) are ignored.
+        guard keyCode == shortcutKeyCode else { return nil }
+
+        guard let familyFlag = HotkeyShortcut.cgEventFlag(forKeyCode: keyCode) else {
+            return nil
+        }
+
+        let familyIsSet = flags.contains(familyFlag)
+        let configuredKeyTrackedDown = (gestureState == .pending || gestureState == .active)
+
+        if familyIsSet, !configuredKeyTrackedDown {
+            return .modifierDown
+        }
+        // Either the family flag cleared (the configured key — and any sibling —
+        // is up), or the family flag is still set while the configured key is
+        // already tracked down: a key cannot press twice, so the latter is the
+        // configured-side release with a sibling still holding the family flag.
+        return .modifierUp
     }
 }

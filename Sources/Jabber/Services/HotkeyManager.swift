@@ -26,6 +26,15 @@ final class HotkeyManager: @unchecked Sendable {
     private var eventTap: CFMachPort?
     private var runLoopSource: CFRunLoopSource?
     private var modifierOnlyShortcut: HotkeyShortcut?
+    // Bounded backoff for re-enabling the tap after the system disables it
+    // (.tapDisabledByTimeout / .tapDisabledByUserInput). Without a bound, a
+    // revoked Accessibility grant turns the main run loop into a tight
+    // disable→re-enable→disable loop (log spam + CPU burn). `recentTapDisables`
+    // holds in-window disable timestamps (pure decision lives in
+    // `EventTapReenablePolicy`); `eventTapDead` latches once we give up so a
+    // stale in-flight callback cannot re-enter teardown. Held under `lock`.
+    private var recentTapDisables: [Date] = []
+    private var eventTapDead = false
     // Pure decision logic for the gesture (debounce/cancel rules). Held under
     // `lock`; mutated only from the event tap callback and the debounce timer.
     private var gesture = ModifierOnlyGestureReducer()
@@ -96,6 +105,8 @@ final class HotkeyManager: @unchecked Sendable {
         runLoopSource = nil
         modifierOnlyShortcut = nil
         gesture.reset()
+        recentTapDisables = []
+        eventTapDead = false
         let debounce = modifierOnlyDebounce
         modifierOnlyDebounce = nil
         lock.unlock()
@@ -220,6 +231,8 @@ final class HotkeyManager: @unchecked Sendable {
         lock.lock()
         modifierOnlyShortcut = shortcut
         gesture.reset()
+        recentTapDisables = []
+        eventTapDead = false
         modifierOnlyDebounce?.cancel()
         modifierOnlyDebounce = nil
         eventTap = tap
@@ -233,10 +246,73 @@ final class HotkeyManager: @unchecked Sendable {
         return noErr
     }
 
-    private func currentEventTap() -> CFMachPort? {
+    /// Clear the rapid-disable history once a real event proves the tap is alive.
+    private func resetTapDisableHistory() {
         lock.lock()
-        defer { lock.unlock() }
-        return eventTap
+        recentTapDisables = []
+        lock.unlock()
+    }
+
+    /// Handle a `.tapDisabledByTimeout` / `.tapDisabledByUserInput` with a
+    /// bounded backoff. Re-enables are allowed while rapid re-disables stay
+    /// under `EventTapReenablePolicy.maxReenables` within its window; once the
+    /// bound is exceeded the tap is torn down, marked dead, and the failure is
+    /// surfaced through the existing registration-failure path (typically:
+    /// Accessibility permission was revoked).
+    ///
+    /// Pass-through invariant: always returns the incoming event unchanged.
+    private func handleTapDisabled(type: CGEventType, event: CGEvent) -> Unmanaged<CGEvent>? {
+        let now = Date()
+
+        // Decide under the lock; do CG/CF and dispatch work after release to
+        // keep the critical section free of reentrancy.
+        var reenableTap: CFMachPort?
+        var reenableCount = 0
+        var teardownTap: CFMachPort?
+        var teardownSource: CFRunLoopSource?
+        var teardownDebounce: DispatchWorkItem?
+
+        lock.lock()
+        let (updated, shouldReenable) = EventTapReenablePolicy.shouldReenable(
+            recentDisableTimes: recentTapDisables,
+            newDisableTime: now
+        )
+        recentTapDisables = updated
+        if shouldReenable {
+            reenableTap = eventTap
+            reenableCount = recentTapDisables.count
+        } else if !eventTapDead {
+            // Bound exceeded: give up and tear down the tap.
+            eventTapDead = true
+            teardownTap = eventTap
+            teardownSource = runLoopSource
+            teardownDebounce = modifierOnlyDebounce
+            eventTap = nil
+            runLoopSource = nil
+            modifierOnlyShortcut = nil
+            gesture.reset()
+            recentTapDisables = []
+            modifierOnlyDebounce = nil
+        }
+        lock.unlock()
+
+        if let tap = reenableTap {
+            logger.warning("CGEventTap disabled by system (\(String(describing: type))); re-enabling (\(reenableCount) recent disable(s)). If this repeats, Accessibility permission is likely missing.")
+            CGEvent.tapEnable(tap: tap, enable: true)
+        } else if teardownTap != nil {
+            if let tap = teardownTap {
+                CGEvent.tapEnable(tap: tap, enable: false)
+            }
+            if let source = teardownSource {
+                CFRunLoopRemoveSource(CFRunLoopGetMain(), source, .commonModes)
+            }
+            teardownDebounce?.cancel()
+            logger.error("CGEventTap repeatedly disabled by system (\(String(describing: type))); giving up re-enable after \(EventTapReenablePolicy.maxReenables) rapid disables. Accessibility permission was likely revoked.")
+            dispatchRegistrationFailure(OSStatus(eventNotHandledErr))
+        }
+        // `eventTapDead` already latched: the tap is gone, nothing left to do.
+
+        return Unmanaged.passUnretained(event)
     }
 
     /// Handle an event from the modifier-only CGEventTap.
@@ -250,12 +326,12 @@ final class HotkeyManager: @unchecked Sendable {
     /// must pass the event through.
     private func handleEventTapEvent(type: CGEventType, event: CGEvent) -> Unmanaged<CGEvent>? {
         if type == .tapDisabledByTimeout || type == .tapDisabledByUserInput {
-            logger.warning("CGEventTap disabled by system (\(String(describing: type))); re-enabling. If this repeats, Accessibility permission is likely missing.")
-            if let tap = currentEventTap() {
-                CGEvent.tapEnable(tap: tap, enable: true)
-            }
-            return Unmanaged.passUnretained(event)
+            return handleTapDisabled(type: type, event: event)
         }
+
+        // The tap delivered a real event, so it is healthy: clear the
+        // rapid-disable history so a later burst is evaluated from scratch.
+        resetTapDisableHistory()
 
         lock.lock()
         let shortcut = modifierOnlyShortcut
@@ -609,5 +685,58 @@ struct ModifierOnlyGestureReducer: Sendable, Equatable {
         // already tracked down: a key cannot press twice, so the latter is the
         // configured-side release with a sibling still holding the family flag.
         return .modifierUp
+    }
+}
+
+/// Pure decision logic for the CGEventTap re-enable backoff.
+///
+/// When the system disables the modifier-only event tap
+/// (`.tapDisabledByTimeout` / `.tapDisabledByUserInput`) the manager used to
+/// re-enable it unconditionally. If Accessibility permission is revoked (or the
+/// tap is otherwise unsatisfiable) that produces a tight
+/// disable→re-enable→disable loop on the main run loop — log spam and CPU burn.
+/// This policy bounds the loop: as long as rapid re-disables stay under
+/// `maxReenables` within `rapidWindow`, re-enabling proceeds; once the bound is
+/// exceeded within the window the manager tears the tap down and surfaces a
+/// registration failure.
+///
+/// Pure and table-testable: the manager records disable timestamps and asks
+/// this policy whether to continue. The window filter drops stale disables, so
+/// "the tap stayed alive for a while" needs no timer; the manager additionally
+/// clears the history whenever a real event is delivered (a second, event-driven
+/// reset condition).
+///
+/// Semantics: `shouldReenable` returns `false` once `maxReenables` rapid
+/// disables have accumulated within `rapidWindow` — i.e. up to `maxReenables`
+/// re-enables are tolerated, and the disable that pushes the in-window count
+/// past that bound trips give-up.
+enum EventTapReenablePolicy: Sendable {
+    /// Maximum in-window re-disables tolerated before give-up.
+    static let maxReenables = 5
+    /// Rolling window (seconds) within which rapid re-disables are counted.
+    static let rapidWindow: TimeInterval = 5
+
+    /// Decide whether to re-enable the tap after another disable.
+    ///
+    /// - Parameters:
+    ///   - recentDisableTimes: Disable timestamps recorded so far (oldest
+    ///     first), already filtered to the window by prior calls.
+    ///   - newDisableTime: Timestamp of the disable currently being handled.
+    ///   - maxReenables: Override of `maxReenables` (for tests).
+    ///   - rapidWindow: Override of `rapidWindow` (for tests).
+    /// - Returns: `updated` is the new in-window history (caller should store
+    ///   it); `reenable` is `false` once the in-window count exceeds
+    ///   `maxReenables`.
+    static func shouldReenable(
+        recentDisableTimes: [Date],
+        newDisableTime: Date,
+        maxReenables: Int = EventTapReenablePolicy.maxReenables,
+        rapidWindow: TimeInterval = EventTapReenablePolicy.rapidWindow
+    ) -> (updated: [Date], reenable: Bool) {
+        let cutoff = newDisableTime.addingTimeInterval(-rapidWindow)
+        let inWindow = recentDisableTimes.filter { $0 >= cutoff }
+        let updated = inWindow + [newDisableTime]
+        let reenable = updated.count <= maxReenables
+        return (updated, reenable)
     }
 }

@@ -160,13 +160,29 @@ final class AudioCaptureService {
         return min(1, sqrt(max(0, sum / Float(frames))))
     }
 
+    /// output frame capacity needed to resample `inputFrames` from
+    /// `inputRate` to `outputRate`; rounds up so no samples drop and is
+    /// floored at one frame to keep downstream buffers non-empty.
+    nonisolated static func outputFrameCapacity(
+        inputFrames: AVAudioFrameCount,
+        inputRate: Double,
+        outputRate: Double
+    ) -> AVAudioFrameCount {
+        let raw = Double(inputFrames) * outputRate / inputRate
+        return AVAudioFrameCount(max(1, raw.rounded(.up)))
+    }
+
     nonisolated private func convertBuffer(
         _ buffer: AVAudioPCMBuffer,
         using converter: AVAudioConverter
     ) -> (buffer: AVAudioPCMBuffer?, error: Error?) {
         // Convert to 16kHz mono
         let outputFormat = converter.outputFormat
-        let outputFrameCapacity = AVAudioFrameCount(max(1, Int(Double(buffer.frameLength) * outputFormat.sampleRate / buffer.format.sampleRate)))
+        let outputFrameCapacity = Self.outputFrameCapacity(
+            inputFrames: buffer.frameLength,
+            inputRate: buffer.format.sampleRate,
+            outputRate: outputFormat.sampleRate
+        )
         guard let convertedBuffer = AVAudioPCMBuffer(
             pcmFormat: outputFormat,
             frameCapacity: outputFrameCapacity

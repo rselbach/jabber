@@ -15,8 +15,14 @@ final class HotkeyManager: @unchecked Sendable {
     // registered with Carbon — a bare modifier produces no key-down event and
     // Carbon modifier flags do not encode the physical side. We observe flag
     // transitions (and key-downs, to detect Option+key typing) with a
-    // listen-only CGEventTap, using the event's key code + physical key state
-    // to distinguish left/right.
+    // CGEventTap, using the event's key code + physical key state to
+    // distinguish left/right.
+    //
+    // The tap uses `.defaultTap` (not `.listenOnly`) so a lone modifier can be
+    // observed with only Accessibility permission — `.listenOnly` would prompt
+    // for Input Monitoring. Because `.defaultTap` can swallow/alter input, the
+    // callback MUST always pass the event through unmodified; we never drop or
+    // synthesize events, we only read them. See `handleEventTapEvent`.
     private var eventTap: CFMachPort?
     private var runLoopSource: CFRunLoopSource?
     private var modifierOnlyShortcut: HotkeyShortcut?
@@ -165,13 +171,12 @@ final class HotkeyManager: @unchecked Sendable {
             return status
         }
 
-        // A CGEventTap that observes flagsChanged + keyDown needs Accessibility
-        // (to read events at all) and Input Monitoring (specifically for
-        // keyDown). Preflight Accessibility here — there is a clean API — and
-        // fail loudly with a precise message when it is missing. Input
-        // Monitoring has no public preflight API, so its absence surfaces as a
-        // tap that creates successfully but never delivers events; the logging
-        // below makes that case diagnosable instead of a silent no-op.
+        // A `.defaultTap` CGEventTap that observes flagsChanged + keyDown
+        // needs only Accessibility permission (the `.listenOnly` option would
+        // additionally require Input Monitoring to observe key-downs). We
+        // preflight Accessibility here — there is a clean API — and fail loudly
+        // with a precise message when it is missing. If the grant is missing at
+        // runtime the tap fails to create (handled below) or delivers no events.
         guard AXIsProcessTrusted() else {
             let status = OSStatus(eventNotHandledErr)
             logger.error("Modifier-only shortcut requires Accessibility permission; not granted")
@@ -183,8 +188,11 @@ final class HotkeyManager: @unchecked Sendable {
 
         // We need key-down in addition to flags-changed so we can detect
         // Option+key (and other combo) typing while the modifier is held and
-        // cancel the pending start before it fires. Listen-only: we never
-        // swallow or modify user input.
+        // cancel the pending start before it fires. We use `.defaultTap` (not
+        // `.listenOnly`) so a lone modifier works with Accessibility alone and
+        // never triggers the Input Monitoring prompt. The callback is read-only
+        // in effect: it always returns the event unchanged — see the invariant
+        // note on `handleEventTapEvent`.
         let eventMask = CGEventMask(
             (1 << CGEventType.flagsChanged.rawValue)
                 | (1 << CGEventType.keyDown.rawValue)
@@ -194,16 +202,17 @@ final class HotkeyManager: @unchecked Sendable {
         guard let tap = CGEvent.tapCreate(
             tap: .cgSessionEventTap,
             place: .headInsertEventTap,
-            options: .listenOnly,
+            options: .defaultTap,
             eventsOfInterest: eventMask,
             callback: HotkeyManager.eventTapCallback,
             userInfo: refcon
         ) else {
-            // tapCreate returns nil when permission is missing. Observing
-            // key-down specifically requires Input Monitoring (a separate grant
-            // from Accessibility), which is the most common cause here.
+            // tapCreate returns nil when permission is missing. With
+            // `.defaultTap` the only grant required is Accessibility (already
+            // preflighted above); reaching here usually means the grant was
+            // revoked between the check and creation.
             let status = OSStatus(eventNotHandledErr)
-            logger.error("Failed to create event tap for modifier-only shortcut (grant Input Monitoring and Accessibility in System Settings)")
+            logger.error("Failed to create event tap for modifier-only shortcut (grant Accessibility in System Settings)")
             dispatchRegistrationFailure(status)
             return status
         }
@@ -230,9 +239,18 @@ final class HotkeyManager: @unchecked Sendable {
         return eventTap
     }
 
+    /// Handle an event from the modifier-only CGEventTap.
+    ///
+    /// INVARIANT: this must always return the incoming event unchanged
+    /// (`Unmanaged.passUnretained(event)`). The tap is created with
+    /// `.defaultTap` so a lone modifier can be observed under Accessibility
+    /// alone (no Input Monitoring prompt); `.defaultTap` can swallow input, so
+    /// dropping or returning `nil` here would eat the user's keystrokes. Every
+    /// branch below — including the disabled-by-system and no-shortcut guards —
+    /// must pass the event through.
     private func handleEventTapEvent(type: CGEventType, event: CGEvent) -> Unmanaged<CGEvent>? {
         if type == .tapDisabledByTimeout || type == .tapDisabledByUserInput {
-            logger.warning("CGEventTap disabled by system (\(String(describing: type))); re-enabling. If this repeats, Input Monitoring permission is likely missing.")
+            logger.warning("CGEventTap disabled by system (\(String(describing: type))); re-enabling. If this repeats, Accessibility permission is likely missing.")
             if let tap = currentEventTap() {
                 CGEvent.tapEnable(tap: tap, enable: true)
             }
@@ -258,12 +276,26 @@ final class HotkeyManager: @unchecked Sendable {
             guard keyCode == shortcut.keyCode else {
                 return Unmanaged.passUnretained(event)
             }
-            // Physical key state — distinguishes left/right reliably, unlike
-            // the aggregate .option/.control/.shift/.command event flags.
-            let isDown = CGEventSource.keyState(
-                .combinedSessionState,
-                key: CGKeyCode(keyCode)
-            )
+            // Determine down/up from the event's own modifier flags, NOT from
+            // CGEventSource.keyState. The tap is a head-insert `.defaultTap`,
+            // so this callback runs BEFORE the session key-state is updated;
+            // keyState(.combinedSessionState) therefore still reflects the
+            // pre-transition state and would invert the gesture — a press reads
+            // as a release (keyState==false) and is silently dropped, so the
+            // gesture never fires. The event flags reflect state AFTER the
+            // transition and are the reliable signal. keyState is kept only as a
+            // last-resort fallback for key codes we can't map to a flag family.
+            //
+            // The flags are cumulative per family (e.g. .maskAlternate is set if
+            // EITHER Option key is down), so a release of the configured key
+            // while its sibling stays held is only observed once the whole
+            // family clears — matching FluidVoice's modifier-only semantics.
+            let isDown: Bool
+            if let familyFlag = HotkeyShortcut.cgEventFlag(forKeyCode: keyCode) {
+                isDown = event.flags.contains(familyFlag)
+            } else {
+                isDown = CGEventSource.keyState(.combinedSessionState, key: CGKeyCode(keyCode))
+            }
             logger.debug("Event tap flagsChanged keyCode=\(keyCode) isDown=\(isDown)")
             feed(isDown ? .modifierDown : .modifierUp)
 

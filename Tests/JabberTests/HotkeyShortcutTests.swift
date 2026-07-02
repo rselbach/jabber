@@ -106,4 +106,19 @@ final class HotkeyShortcutTests: XCTestCase {
         XCTAssertEqual(HotkeyShortcut.carbonModifier(forKeyCode: UInt32(kVK_RightControl)), UInt32(controlKey))
         XCTAssertNil(HotkeyShortcut.carbonModifier(forKeyCode: UInt32(kVK_Space)))
     }
+
+    func testCGEventFlagMappingForKeyCodes() {
+        // Both physical sides of a modifier share one cumulative CGEventFlags
+        // mask — this is what the event tap reads to detect a flag transition's
+        // direction without the lag of CGEventSource.keyState.
+        XCTAssertEqual(HotkeyShortcut.cgEventFlag(forKeyCode: UInt32(kVK_Option)), .maskAlternate)
+        XCTAssertEqual(HotkeyShortcut.cgEventFlag(forKeyCode: UInt32(kVK_RightOption)), .maskAlternate)
+        XCTAssertEqual(HotkeyShortcut.cgEventFlag(forKeyCode: UInt32(kVK_Command)), .maskCommand)
+        XCTAssertEqual(HotkeyShortcut.cgEventFlag(forKeyCode: UInt32(kVK_RightCommand)), .maskCommand)
+        XCTAssertEqual(HotkeyShortcut.cgEventFlag(forKeyCode: UInt32(kVK_Shift)), .maskShift)
+        XCTAssertEqual(HotkeyShortcut.cgEventFlag(forKeyCode: UInt32(kVK_RightShift)), .maskShift)
+        XCTAssertEqual(HotkeyShortcut.cgEventFlag(forKeyCode: UInt32(kVK_Control)), .maskControl)
+        XCTAssertEqual(HotkeyShortcut.cgEventFlag(forKeyCode: UInt32(kVK_RightControl)), .maskControl)
+        XCTAssertNil(HotkeyShortcut.cgEventFlag(forKeyCode: UInt32(kVK_Space)))
+    }
 }

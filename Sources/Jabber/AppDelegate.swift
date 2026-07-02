@@ -278,7 +278,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             let display = shortcut.displayString
             let message: String
             if shortcut.isModifierOnly {
-                message = "Could not register \(display) as a global hotkey. Lone modifier keys require Accessibility (and Input Monitoring) permission in System Settings. OSStatus: \(status)"
+                message = "Could not register \(display) as a global hotkey. Lone modifier keys require Accessibility permission in System Settings. OSStatus: \(status)"
             } else {
                 message = "Could not register the global hotkey (\(display)). It may be in use by another application. OSStatus: \(status)"
             }

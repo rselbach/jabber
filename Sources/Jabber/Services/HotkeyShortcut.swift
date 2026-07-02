@@ -67,6 +67,29 @@ struct HotkeyShortcut: Equatable, Sendable {
         }
     }
 
+    /// Maps a modifier key code to the cumulative `CGEventFlags` mask for its
+    /// family (both physical sides of a modifier share one flag — e.g. Left and
+    /// Right Option both report `.maskAlternate`). Returns `nil` for codes that
+    /// are not a standalone modifier key.
+    ///
+    /// Used by the modifier-only event tap to read a flag transition's direction
+    /// from the event itself rather than `CGEventSource.keyState`, which lags
+    /// inside a `.defaultTap` callback (it still reflects pre-transition state).
+    static func cgEventFlag(forKeyCode keyCode: UInt32) -> CGEventFlags? {
+        switch keyCode {
+        case UInt32(kVK_Command), UInt32(kVK_RightCommand):
+            return .maskCommand
+        case UInt32(kVK_Shift), UInt32(kVK_RightShift):
+            return .maskShift
+        case UInt32(kVK_Option), UInt32(kVK_RightOption):
+            return .maskAlternate
+        case UInt32(kVK_Control), UInt32(kVK_RightControl):
+            return .maskControl
+        default:
+            return nil
+        }
+    }
+
     static func validationError(
         keyCode: UInt32,
         modifiers: UInt32

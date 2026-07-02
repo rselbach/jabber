@@ -6,6 +6,7 @@ import SwiftUI
 final class WaveformView: ObservableObject {
     @Published private var circularBuffer: [Float] = []
     @Published private(set) var isProcessing = false
+    @Published private(set) var processingLabel = "Transcribing..."
     @Published private(set) var partialTranscription = ""
     @Published private(set) var targetAppIcon: NSImage?
 
@@ -37,12 +38,21 @@ final class WaveformView: ObservableObject {
         writeIndex = 0
         isFull = false
         isProcessing = false
+        processingLabel = "Transcribing..."
         partialTranscription = ""
         targetAppIcon = nil
     }
 
     func showProcessing() {
         isProcessing = true
+        processingLabel = "Transcribing..."
+    }
+
+    /// Switches the processing overlay to a "Refining..." state used while
+    /// Apple Intelligence post-processing runs. Same UI as transcription.
+    func showRefining() {
+        isProcessing = true
+        processingLabel = "Refining..."
     }
 
     func updatePartialTranscription(_ text: String) {

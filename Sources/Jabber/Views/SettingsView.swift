@@ -13,6 +13,7 @@ struct SettingsView: View {
     @AppStorage(AppSettingKey.pauseMediaDuringRecording) private var pauseMediaDuringRecording = false
     @AppStorage(AppSettingKey.saveHistoryEnabled) private var saveHistoryEnabled = false
     @AppStorage(AppSettingKey.vocabularyPrompt) private var vocabularyPrompt = ""
+    @AppStorage(AppSettingKey.postProcessingEnabled) private var postProcessingEnabled = false
     @AppStorage(AppSettingKey.selectedLanguage) private var selectedLanguage = Constants.defaultLanguage
     @AppStorage(AppSettingKey.onboardingCompleted) private var onboardingCompleted = false
 
@@ -241,6 +242,16 @@ struct SettingsView: View {
                     .foregroundStyle(.secondary)
             } header: {
                 Text("Transcription Language")
+            }
+
+            Section {
+                Toggle("Refine transcripts with Apple Intelligence", isOn: $postProcessingEnabled)
+
+                Text("When enabled, Jabber asks the on-device Apple Intelligence model to clean up the final transcript — fixing punctuation, removing filler words and self-corrections — before typing it. Requires an Apple Intelligence-capable Mac with Apple Intelligence turned on. Falls back to the raw transcript if unavailable.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            } header: {
+                Text("Apple Intelligence")
             }
 
             Section {

@@ -10,6 +10,7 @@ enum AppSettingKey {
     static let pauseMediaDuringRecording = "pauseMediaDuringRecording"
     static let saveHistoryEnabled = "saveHistoryEnabled"
     static let vocabularyPrompt = "vocabularyPrompt"
+    static let postProcessingEnabled = "postProcessingEnabled"
     static let didShowFirstRunSetup = "didShowFirstRunSetup"
     static let onboardingCompleted = "onboardingCompleted"
 }

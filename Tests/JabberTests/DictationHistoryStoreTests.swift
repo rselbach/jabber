@@ -98,6 +98,80 @@ final class DictationHistoryStoreTests: XCTestCase {
         ))
     }
 
+    func testDecodesLegacyEntryMissingPostProcessingFields() throws {
+        // Simulates a metadata.json written before post-processing existed:
+        // no rawTranscript / wasPostProcessed / postProcessingErrorDescription keys.
+        let legacyJSON = """
+        {
+            "id": "00000000-0000-0000-0000-000000000001",
+            "timestamp": "2024-01-01T00:00:00Z",
+            "duration": 0.5,
+            "sampleRate": 16000,
+            "modelID": "qwen3",
+            "modelName": "Qwen3-ASR",
+            "language": "en",
+            "transcript": "cool cool cool",
+            "directoryName": "legacy",
+            "audioFilename": "audio.wav",
+            "audioByteCount": 84
+        }
+        """
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+
+        let entry = try decoder.decode(DictationHistoryEntry.self, from: Data(legacyJSON.utf8))
+
+        XCTAssertEqual(entry.transcript, "cool cool cool")
+        XCTAssertNil(entry.rawTranscript)
+        XCTAssertFalse(entry.wasPostProcessed)
+        XCTAssertNil(entry.postProcessingErrorDescription)
+    }
+
+    func testSaveRoundTripsPostProcessingMetadata() async throws {
+        let store = makeStore()
+        let timestamp = Date(timeIntervalSince1970: 1_735_689_600)
+
+        let entry = try await store.save(DictationHistorySession(
+            samples: [0, 0.5, -1, 1],
+            transcript: "Hello.",
+            modelID: AppMode.qwen3ModelId,
+            language: "en",
+            timestamp: timestamp,
+            rawTranscript: " um hello ",
+            wasPostProcessed: true,
+            postProcessingErrorDescription: nil
+        ))
+
+        let entries = await store.entries()
+        XCTAssertEqual(entries.count, 1)
+        let loaded = try XCTUnwrap(entries.first)
+        XCTAssertEqual(loaded.id, entry.id)
+        XCTAssertEqual(loaded.transcript, "Hello.")
+        XCTAssertEqual(loaded.rawTranscript, " um hello ")
+        XCTAssertTrue(loaded.wasPostProcessed)
+        XCTAssertNil(loaded.postProcessingErrorDescription)
+    }
+
+    func testSaveRoundTripsPostProcessingErrorDescription() async throws {
+        let store = makeStore()
+
+        _ = try await store.save(DictationHistorySession(
+            samples: [0.25],
+            transcript: "raw fallback",
+            modelID: AppMode.qwen3ModelId,
+            language: "en",
+            rawTranscript: nil,
+            wasPostProcessed: false,
+            postProcessingErrorDescription: "boom"
+        ))
+
+        let entries = await store.entries()
+        let loaded = try XCTUnwrap(entries.first)
+        XCTAssertEqual(loaded.transcript, "raw fallback")
+        XCTAssertFalse(loaded.wasPostProcessed)
+        XCTAssertEqual(loaded.postProcessingErrorDescription, "boom")
+    }
+
     private func makeStore(maxEntryCount: Int = 50, maxByteCount: Int64 = 500 * 1024 * 1024) -> DictationHistoryStore {
         DictationHistoryStore(
             directoryURL: historyDirectoryURL,

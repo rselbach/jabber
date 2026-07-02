@@ -33,6 +33,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private var lastModelUnavailableNotice = CFAbsoluteTime(0)
     private var lastTranscriptionBusyNotice = CFAbsoluteTime(0)
+    private var lastPostProcessingFailureNotice = CFAbsoluteTime(0)
     private var didPromptAccessibility = false
     private static let automaticHotkeyHoldThreshold: TimeInterval = 0.4
 
@@ -326,6 +327,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 message: "Could not transcribe audio: \(error.localizedDescription)",
                 critical: false
             )
+        }
+
+        dictationCoordinator.onRefining = { [weak self] in
+            self?.overlayWindow.showRefining()
+        }
+
+        dictationCoordinator.onPostProcessingError = { [weak self] error in
+            guard let self else { return }
+            self.logger.error("Post-processing failed: \(error.localizedDescription)")
+            self.showPostProcessingFailureNotice(error)
         }
     }
 
@@ -676,6 +687,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         NotificationService.shared.showWarning(
             title: "Still Transcribing",
             message: "Jabber is finishing the previous dictation. Try again in a moment."
+        )
+    }
+
+    /// Non-blocking notice that Apple Intelligence refinement failed and the
+    /// raw transcript was typed instead. Rate-limited so a flaky model does
+    /// not spam a notification on every dictation.
+    private func showPostProcessingFailureNotice(_ error: Error) {
+        let now = CFAbsoluteTimeGetCurrent()
+        guard now - lastPostProcessingFailureNotice > 1.5 else { return }
+        lastPostProcessingFailureNotice = now
+        NotificationService.shared.showWarning(
+            title: "Couldn't Refine Transcript",
+            message: "Apple Intelligence cleanup failed (\(error.localizedDescription)). Typed the raw transcript instead."
         )
     }
 

@@ -96,24 +96,29 @@ final class TypedSettingsTests: XCTestCase {
         XCTAssertFalse(settings[.onboardingCompleted])
         XCTAssertFalse(settings[.pauseMediaDuringRecording])
         XCTAssertFalse(settings[.saveHistoryEnabled])
+        XCTAssertFalse(settings[.postProcessingEnabled])
         XCTAssertFalse(settings.isSet(.didShowFirstRunSetup))
         XCTAssertFalse(settings.isSet(.onboardingCompleted))
         XCTAssertFalse(settings.isSet(.pauseMediaDuringRecording))
         XCTAssertFalse(settings.isSet(.saveHistoryEnabled))
+        XCTAssertFalse(settings.isSet(.postProcessingEnabled))
 
         settings[.didShowFirstRunSetup] = true
         settings[.onboardingCompleted] = true
         settings[.pauseMediaDuringRecording] = true
         settings[.saveHistoryEnabled] = true
+        settings[.postProcessingEnabled] = true
 
         XCTAssertTrue(settings[.didShowFirstRunSetup])
         XCTAssertTrue(settings[.onboardingCompleted])
         XCTAssertTrue(settings[.pauseMediaDuringRecording])
         XCTAssertTrue(settings[.saveHistoryEnabled])
+        XCTAssertTrue(settings[.postProcessingEnabled])
         XCTAssertTrue(settings.isSet(.didShowFirstRunSetup))
         XCTAssertTrue(settings.isSet(.onboardingCompleted))
         XCTAssertTrue(settings.isSet(.pauseMediaDuringRecording))
         XCTAssertTrue(settings.isSet(.saveHistoryEnabled))
+        XCTAssertTrue(settings.isSet(.postProcessingEnabled))
     }
 
     func testBoolSettingRemoveResetsToDefault() {
@@ -121,24 +126,29 @@ final class TypedSettingsTests: XCTestCase {
         settings[.onboardingCompleted] = true
         settings[.pauseMediaDuringRecording] = true
         settings[.saveHistoryEnabled] = true
+        settings[.postProcessingEnabled] = true
         XCTAssertTrue(settings[.didShowFirstRunSetup])
         XCTAssertTrue(settings[.onboardingCompleted])
         XCTAssertTrue(settings[.pauseMediaDuringRecording])
         XCTAssertTrue(settings[.saveHistoryEnabled])
+        XCTAssertTrue(settings[.postProcessingEnabled])
 
         settings.remove(.didShowFirstRunSetup)
         settings.remove(.onboardingCompleted)
         settings.remove(.pauseMediaDuringRecording)
         settings.remove(.saveHistoryEnabled)
+        settings.remove(.postProcessingEnabled)
 
         XCTAssertFalse(settings[.didShowFirstRunSetup])
         XCTAssertFalse(settings[.onboardingCompleted])
         XCTAssertFalse(settings[.pauseMediaDuringRecording])
         XCTAssertFalse(settings[.saveHistoryEnabled])
+        XCTAssertFalse(settings[.postProcessingEnabled])
         XCTAssertFalse(settings.isSet(.didShowFirstRunSetup))
         XCTAssertFalse(settings.isSet(.onboardingCompleted))
         XCTAssertFalse(settings.isSet(.pauseMediaDuringRecording))
         XCTAssertFalse(settings.isSet(.saveHistoryEnabled))
+        XCTAssertFalse(settings.isSet(.postProcessingEnabled))
     }
 
     func testIntSettingDefaultsAndPersistence() {

@@ -84,6 +84,10 @@ final class OverlayWindow: OverlayWindowController {
         waveformView?.showProcessing()
     }
 
+    func showRefining() {
+        waveformView?.showRefining()
+    }
+
     func setTargetAppIcon(_ icon: NSImage?) {
         waveformView?.setTargetAppIcon(icon)
     }
@@ -203,7 +207,7 @@ struct WaveformContainer: View {
             HStack(spacing: 8) {
                 ProgressView()
                     .controlSize(.small)
-                Text("Transcribing...")
+                Text(waveformView.processingLabel)
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
             }

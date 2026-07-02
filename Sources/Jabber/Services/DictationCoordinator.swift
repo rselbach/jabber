@@ -81,12 +81,20 @@ final class DictationCoordinator {
     var onAudioConversionError: ((Error) -> Void)?
     var onNoSpeechDetected: (() -> Void)?
     var onTranscriptionError: ((Error) -> Void)?
+    /// Invoked when post-processing begins, so the overlay can switch to a
+    /// "Refining..." label. Not invoked when post-processing is disabled.
+    var onRefining: (() -> Void)?
+    /// Invoked when post-processing fails (provider throws or returns empty).
+    /// Distinct from `onTranscriptionError` so the raw transcript still types
+    /// out without a blocking "Transcription Failed" message.
+    var onPostProcessingError: ((Error) -> Void)?
 
     private let audioCapture: any AudioCaptureProtocol
     private let transcriptionService: any TranscriptionProtocol
     private let typingService: any OutputProtocol
     private let mediaPlaybackService: any MediaPlaybackProtocol
     private let dictationHistoryStore: any DictationHistoryProtocol
+    private let postProcessingProvider: (any PostProcessingProvider)?
     private var activity = TranscriptionActivityTracker()
     private var transcriptionTask: Task<Void, Never>?
     private var streamingTask: Task<Void, Never>?
@@ -104,6 +112,7 @@ final class DictationCoordinator {
         typingService: any OutputProtocol,
         mediaPlaybackService: any MediaPlaybackProtocol = MediaPlaybackService.shared,
         dictationHistoryStore: any DictationHistoryProtocol = DictationHistoryStore.shared,
+        postProcessingProvider: (any PostProcessingProvider)? = AppleIntelligencePostProcessor(),
         streamingPreviewInterval: Duration = .milliseconds(500),
         minimumStreamingPreviewSampleCount: Int = 16_000
     ) {
@@ -112,6 +121,7 @@ final class DictationCoordinator {
         self.typingService = typingService
         self.mediaPlaybackService = mediaPlaybackService
         self.dictationHistoryStore = dictationHistoryStore
+        self.postProcessingProvider = postProcessingProvider
         self.streamingPreviewInterval = streamingPreviewInterval
         self.minimumStreamingPreviewSampleCount = minimumStreamingPreviewSampleCount
 
@@ -304,16 +314,28 @@ final class DictationCoordinator {
 
             let modelID = await transcriptionService.currentModelId() ?? TypedSettings[.selectedModel]
             let language = TypedSettings[.selectedLanguage]
+
+            let postProcessingOutcome = try await applyPostProcessing(to: text)
+
             await dictationHistoryStore.saveSession(DictationHistorySession(
                 samples: samples,
-                transcript: text,
+                transcript: postProcessingOutcome.finalText,
                 modelID: modelID,
-                language: language
+                language: language,
+                rawTranscript: postProcessingOutcome.rawTranscript,
+                wasPostProcessed: postProcessingOutcome.wasPostProcessed,
+                postProcessingErrorDescription: postProcessingOutcome.errorDescription
             ))
 
-            let trimmedText = text.trimmingCharacters(in: .whitespacesAndNewlines)
+            let trimmedText = postProcessingOutcome.outputText.trimmingCharacters(in: .whitespacesAndNewlines)
             if !trimmedText.isEmpty {
                 typingService.output(trimmedText, targetProcessID: currentTargetProcessID)
+            } else if postProcessingOutcome.wasPostProcessed {
+                // Post-processor returned empty on success (e.g. "scratch that",
+                // "cancel", "never mind"). This is a valid cancellation: type
+                // nothing and show no no-speech warning, since speech *was*
+                // detected and processed.
+                logger.info("Post-processing produced an empty result; treating as user cancellation")
             } else {
                 onNoSpeechDetected?()
             }
@@ -331,6 +353,88 @@ final class DictationCoordinator {
 
         let language = TypedSettings[.selectedLanguage]
         await transcriptionService.setLanguage(language)
+    }
+
+    /// Result of the post-processing step. `outputText` is what gets typed;
+    /// `finalText` is what gets stored as the entry's transcript.
+    private struct PostProcessingOutcome {
+        var finalText: String
+        var outputText: String
+        var rawTranscript: String?
+        var wasPostProcessed: Bool
+        var errorDescription: String?
+    }
+
+    /// Runs the Apple Intelligence post-processor over `rawText` when enabled
+    /// and available. On any provider *failure* (the provider throws) it falls
+    /// back to the raw transcript and surfaces the error via
+    /// `onPostProcessingError`. A provider *success* that returns empty/
+    /// whitespace (e.g. the user said "scratch that" / "cancel") is a valid
+    /// cancelled result: nothing is typed and no error is surfaced.
+    /// Cancellation is rethrown so the surrounding task unwinds without saving
+    /// history or typing output.
+    private func applyPostProcessing(to rawText: String) async throws -> PostProcessingOutcome {
+        let rawTrimmed = rawText.trimmingCharacters(in: .whitespacesAndNewlines)
+
+        guard TypedSettings[.postProcessingEnabled],
+              !rawTrimmed.isEmpty,
+              let provider = postProcessingProvider else {
+            return PostProcessingOutcome(
+                finalText: rawText,
+                outputText: rawText,
+                rawTranscript: nil,
+                wasPostProcessed: false,
+                errorDescription: nil
+            )
+        }
+
+        guard provider.isAvailable else {
+            // Apple Intelligence not ready / not enabled / unsupported device.
+            // Logged but not surfaced as a user notification — it is a steady
+            // OS state that would spam every dictation otherwise. The metadata
+            // is still recorded so users can see why nothing was refined.
+            logger.info("Post-processing enabled but provider unavailable; using raw transcript")
+            return PostProcessingOutcome(
+                finalText: rawText,
+                outputText: rawText,
+                rawTranscript: nil,
+                wasPostProcessed: false,
+                errorDescription: "Apple Intelligence unavailable"
+            )
+        }
+
+        onRefining?()
+
+        do {
+            try Task.checkCancellation()
+            let processed = try await provider.process(rawText)
+            // A post-processed empty/whitespace result is a VALID outcome, not a
+            // failure: the model may produce it by honoring a full self-correction
+            // ("scratch that", "cancel", "never mind"). Normalize whitespace-only
+            // to "" and report a successful (cancelled) result. Only a thrown
+            // error falls back to the raw transcript.
+            let normalized = processed.trimmingCharacters(in: .whitespacesAndNewlines)
+            return PostProcessingOutcome(
+                finalText: normalized,
+                outputText: normalized,
+                rawTranscript: rawText,
+                wasPostProcessed: true,
+                errorDescription: nil
+            )
+        } catch is CancellationError {
+            // Re-throw cancellation so the caller's catch unwinds the task.
+            throw CancellationError()
+        } catch {
+            logger.error("Post-processing failed, falling back to raw transcript: \(error.localizedDescription)")
+            onPostProcessingError?(error)
+            return PostProcessingOutcome(
+                finalText: rawText,
+                outputText: rawText,
+                rawTranscript: nil,
+                wasPostProcessed: false,
+                errorDescription: error.localizedDescription
+            )
+        }
     }
 
     private func finish(sessionID: UUID) {

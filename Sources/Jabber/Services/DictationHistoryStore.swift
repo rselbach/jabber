@@ -7,19 +7,31 @@ struct DictationHistorySession: Sendable {
     let modelID: String
     let language: String
     let timestamp: Date
+    /// Raw ASR transcript before post-processing. Only set when the session
+    /// was actually post-processed; otherwise `nil` and `transcript` is the
+    /// raw text. Additive — old sessions stay valid.
+    let rawTranscript: String?
+    let wasPostProcessed: Bool
+    let postProcessingErrorDescription: String?
 
     init(
         samples: [Float],
         transcript: String,
         modelID: String,
         language: String,
-        timestamp: Date = Date()
+        timestamp: Date = Date(),
+        rawTranscript: String? = nil,
+        wasPostProcessed: Bool = false,
+        postProcessingErrorDescription: String? = nil
     ) {
         self.samples = samples
         self.transcript = transcript
         self.modelID = modelID
         self.language = language
         self.timestamp = timestamp
+        self.rawTranscript = rawTranscript
+        self.wasPostProcessed = wasPostProcessed
+        self.postProcessingErrorDescription = postProcessingErrorDescription
     }
 }
 
@@ -35,6 +47,69 @@ struct DictationHistoryEntry: Codable, Equatable, Identifiable, Sendable {
     let directoryName: String
     let audioFilename: String
     let audioByteCount: Int64
+    /// Additive fields for Apple Intelligence post-processing metadata.
+    /// Optional/defaulting so entries written before this feature existed
+    /// still decode cleanly.
+    let rawTranscript: String?
+    let wasPostProcessed: Bool
+    let postProcessingErrorDescription: String?
+
+    init(
+        id: UUID,
+        timestamp: Date,
+        duration: TimeInterval,
+        sampleRate: Int,
+        modelID: String,
+        modelName: String,
+        language: String,
+        transcript: String,
+        directoryName: String,
+        audioFilename: String,
+        audioByteCount: Int64,
+        rawTranscript: String? = nil,
+        wasPostProcessed: Bool = false,
+        postProcessingErrorDescription: String? = nil
+    ) {
+        self.id = id
+        self.timestamp = timestamp
+        self.duration = duration
+        self.sampleRate = sampleRate
+        self.modelID = modelID
+        self.modelName = modelName
+        self.language = language
+        self.transcript = transcript
+        self.directoryName = directoryName
+        self.audioFilename = audioFilename
+        self.audioByteCount = audioByteCount
+        self.rawTranscript = rawTranscript
+        self.wasPostProcessed = wasPostProcessed
+        self.postProcessingErrorDescription = postProcessingErrorDescription
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case id, timestamp, duration, sampleRate, modelID, modelName, language
+        case transcript, directoryName, audioFilename, audioByteCount
+        case rawTranscript, wasPostProcessed, postProcessingErrorDescription
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(UUID.self, forKey: .id)
+        timestamp = try container.decode(Date.self, forKey: .timestamp)
+        duration = try container.decode(TimeInterval.self, forKey: .duration)
+        sampleRate = try container.decode(Int.self, forKey: .sampleRate)
+        modelID = try container.decode(String.self, forKey: .modelID)
+        modelName = try container.decode(String.self, forKey: .modelName)
+        language = try container.decode(String.self, forKey: .language)
+        transcript = try container.decode(String.self, forKey: .transcript)
+        directoryName = try container.decode(String.self, forKey: .directoryName)
+        audioFilename = try container.decode(String.self, forKey: .audioFilename)
+        audioByteCount = try container.decode(Int64.self, forKey: .audioByteCount)
+        // Additive fields: missing keys (old entries) fall back to defaults.
+        rawTranscript = try container.decodeIfPresent(String.self, forKey: .rawTranscript)
+        wasPostProcessed = try container.decodeIfPresent(Bool.self, forKey: .wasPostProcessed) ?? false
+        postProcessingErrorDescription = try container.decodeIfPresent(String.self, forKey: .postProcessingErrorDescription)
+    }
 }
 
 protocol DictationHistoryProtocol: AnyObject, Sendable {
@@ -110,7 +185,10 @@ actor DictationHistoryStore: DictationHistoryProtocol {
             transcript: session.transcript,
             directoryName: entryDirectoryName,
             audioFilename: Self.audioFilename,
-            audioByteCount: Int64(audioData.count)
+            audioByteCount: Int64(audioData.count),
+            rawTranscript: session.rawTranscript,
+            wasPostProcessed: session.wasPostProcessed,
+            postProcessingErrorDescription: session.postProcessingErrorDescription
         )
 
         let metadataURL = entryDirectoryURL.appendingPathComponent(Self.metadataFilename)

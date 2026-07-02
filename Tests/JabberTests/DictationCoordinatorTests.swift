@@ -8,6 +8,7 @@ final class DictationCoordinatorTests: XCTestCase {
     private var typingService: FakeTypingService!
     private var mediaPlaybackService: FakeMediaPlaybackService!
     private var dictationHistoryStore: FakeDictationHistoryStore!
+    private var postProcessor: FakePostProcessingProvider!
     private var coordinator: DictationCoordinator!
 
     override func setUp() async throws {
@@ -17,12 +18,15 @@ final class DictationCoordinatorTests: XCTestCase {
         typingService = FakeTypingService()
         mediaPlaybackService = FakeMediaPlaybackService()
         dictationHistoryStore = FakeDictationHistoryStore()
+        postProcessor = FakePostProcessingProvider()
+        UserDefaults.standard.removeObject(forKey: AppSettingKey.postProcessingEnabled)
         coordinator = DictationCoordinator(
             audioCapture: audioCapture,
             transcriptionService: transcriptionService,
             typingService: typingService,
             mediaPlaybackService: mediaPlaybackService,
             dictationHistoryStore: dictationHistoryStore,
+            postProcessingProvider: postProcessor,
             streamingPreviewInterval: .milliseconds(10),
             minimumStreamingPreviewSampleCount: 16_000
         )
@@ -35,6 +39,8 @@ final class DictationCoordinatorTests: XCTestCase {
         typingService = nil
         mediaPlaybackService = nil
         dictationHistoryStore = nil
+        postProcessor = nil
+        UserDefaults.standard.removeObject(forKey: AppSettingKey.postProcessingEnabled)
         try await super.tearDown()
     }
 
@@ -376,6 +382,184 @@ final class DictationCoordinatorTests: XCTestCase {
         XCTAssertNotNil(reportedError)
     }
 
+    // MARK: - Post-processing
+
+    private func enablePostProcessing() {
+        UserDefaults.standard.set(true, forKey: AppSettingKey.postProcessingEnabled)
+    }
+
+    func testPostProcessingDisabledDoesNotCallProvider() async {
+        audioCapture.storedSamples = makeLoudSamples()
+        transcriptionService.transcribeResult = .success(" um hello ")
+
+        let idleExpectation = expectationForIdle()
+        XCTAssertTrue(coordinator.start())
+        coordinator.stop()
+        await fulfillment(of: [idleExpectation], timeout: 1.0)
+
+        XCTAssertTrue(postProcessor.processCallCount == 0)
+        XCTAssertEqual(typingService.outputs, ["um hello"])
+        XCTAssertEqual(dictationHistoryStore.sessions.count, 1)
+        XCTAssertNil(dictationHistoryStore.sessions[0].rawTranscript)
+        XCTAssertFalse(dictationHistoryStore.sessions[0].wasPostProcessed)
+    }
+
+    func testPostProcessingEnabledOutputsProcessedTranscript() async {
+        enablePostProcessing()
+        postProcessor.isAvailable = true
+        postProcessor.result = .success("Hello.")
+        audioCapture.storedSamples = makeLoudSamples()
+        transcriptionService.transcribeResult = .success(" um hello ")
+
+        var refiningFired = false
+        coordinator.onRefining = { refiningFired = true }
+
+        let idleExpectation = expectationForIdle()
+        XCTAssertTrue(coordinator.start())
+        coordinator.stop()
+        await fulfillment(of: [idleExpectation], timeout: 1.0)
+
+        XCTAssertEqual(postProcessor.processCallCount, 1)
+        XCTAssertEqual(postProcessor.lastProcessedInput, " um hello ")
+        XCTAssertTrue(refiningFired)
+        XCTAssertEqual(typingService.outputs, ["Hello."])
+        XCTAssertEqual(dictationHistoryStore.sessions.count, 1)
+        let session = dictationHistoryStore.sessions[0]
+        XCTAssertEqual(session.transcript, "Hello.")
+        XCTAssertEqual(session.rawTranscript, " um hello ")
+        XCTAssertTrue(session.wasPostProcessed)
+        XCTAssertNil(session.postProcessingErrorDescription)
+    }
+
+    func testPostProcessingProviderThrowsOutputsRawAndSurfacesError() async {
+        enablePostProcessing()
+        postProcessor.isAvailable = true
+        struct GreendaleError: Error {}
+        postProcessor.result = .failure(GreendaleError())
+
+        var surfacedError: Error?
+        coordinator.onPostProcessingError = { error in surfacedError = error }
+
+        let idleExpectation = expectationForIdle()
+        audioCapture.storedSamples = makeLoudSamples()
+        transcriptionService.transcribeResult = .success("cool cool cool")
+        XCTAssertTrue(coordinator.start())
+        coordinator.stop()
+        await fulfillment(of: [idleExpectation], timeout: 1.0)
+
+        XCTAssertEqual(postProcessor.processCallCount, 1)
+        XCTAssertEqual(typingService.outputs, ["cool cool cool"])
+        XCTAssertNotNil(surfacedError)
+        let session = dictationHistoryStore.sessions[0]
+        XCTAssertEqual(session.transcript, "cool cool cool")
+        XCTAssertFalse(session.wasPostProcessed)
+        XCTAssertNil(session.rawTranscript)
+        XCTAssertNotNil(session.postProcessingErrorDescription)
+    }
+
+    func testPostProcessingEmptyResultIsSuccessfulCancel() async {
+        enablePostProcessing()
+        postProcessor.isAvailable = true
+        // FluidVoice-style full self-correction ("scratch that" / "cancel")
+        // makes the model return empty/whitespace. That is a valid success,
+        // not a fallback.
+        postProcessor.result = .success("   ")
+
+        var surfacedError: Error?
+        coordinator.onPostProcessingError = { error in surfacedError = error }
+
+        var didShowNoSpeech = false
+        coordinator.onNoSpeechDetected = { didShowNoSpeech = true }
+
+        let idleExpectation = expectationForIdle()
+        audioCapture.storedSamples = makeLoudSamples()
+        transcriptionService.transcribeResult = .success("troy and abed")
+        XCTAssertTrue(coordinator.start())
+        coordinator.stop()
+        await fulfillment(of: [idleExpectation], timeout: 1.0)
+
+        XCTAssertEqual(postProcessor.processCallCount, 1)
+        // No fallback to raw, nothing typed, no error surfaced.
+        XCTAssertTrue(typingService.outputs.isEmpty)
+        XCTAssertNil(surfacedError)
+        // No-speech warning must NOT fire: speech was detected and processed,
+        // the user just cancelled via a self-correction.
+        XCTAssertFalse(didShowNoSpeech)
+        let session = dictationHistoryStore.sessions[0]
+        XCTAssertEqual(session.transcript, "")
+        XCTAssertEqual(session.rawTranscript, "troy and abed")
+        XCTAssertTrue(session.wasPostProcessed)
+        XCTAssertNil(session.postProcessingErrorDescription)
+    }
+
+    func testPostProcessingInstructionsContainFluidVoiceCapabilities() {
+        // Guards against accidental regressions in the dictation prompt's
+        // breadth. Does not assert Apple model output, only that the key
+        // FluidVoice-style capabilities are present in the instructions.
+        let prompt = AppleIntelligencePostProcessor.instructions
+        XCTAssertTrue(prompt.contains("EXECUTE commands"))
+        XCTAssertTrue(prompt.contains("scratch that"))
+        XCTAssertTrue(prompt.contains("smiley face"))
+        XCTAssertTrue(prompt.contains("EXPAND abbreviations"))
+        XCTAssertTrue(prompt.contains("CONVERT numbers"))
+        // Markdown is now permitted when a command requires it (no blanket ban).
+        XCTAssertTrue(prompt.contains("plain text or markdown"))
+    }
+
+    func testPostProcessingUnavailableOutputsRawWithoutUserError() async {
+        enablePostProcessing()
+        postProcessor.isAvailable = false
+        postProcessor.result = .success("ignored")
+
+        var surfacedError: Error?
+        coordinator.onPostProcessingError = { error in surfacedError = error }
+
+        let idleExpectation = expectationForIdle()
+        audioCapture.storedSamples = makeLoudSamples()
+        transcriptionService.transcribeResult = .success("raw only")
+        XCTAssertTrue(coordinator.start())
+        coordinator.stop()
+        await fulfillment(of: [idleExpectation], timeout: 1.0)
+
+        XCTAssertEqual(postProcessor.processCallCount, 0)
+        XCTAssertEqual(typingService.outputs, ["raw only"])
+        XCTAssertNil(surfacedError)
+        let session = dictationHistoryStore.sessions[0]
+        XCTAssertEqual(session.transcript, "raw only")
+        XCTAssertFalse(session.wasPostProcessed)
+        XCTAssertEqual(session.postProcessingErrorDescription, "Apple Intelligence unavailable")
+    }
+
+    func testPostProcessingSkippedWhenRawTranscriptIsEmpty() async {
+        enablePostProcessing()
+        postProcessor.isAvailable = true
+        postProcessor.result = .success("should not happen")
+
+        var didShowNoSpeech = false
+        coordinator.onNoSpeechDetected = { didShowNoSpeech = true }
+
+        let idleExpectation = expectationForIdle()
+        audioCapture.storedSamples = makeLoudSamples()
+        transcriptionService.transcribeResult = .success("   ")
+        XCTAssertTrue(coordinator.start())
+        coordinator.stop()
+        await fulfillment(of: [idleExpectation], timeout: 1.0)
+
+        XCTAssertEqual(postProcessor.processCallCount, 0)
+        XCTAssertTrue(didShowNoSpeech)
+        XCTAssertTrue(typingService.outputs.isEmpty)
+    }
+
+    private func expectationForIdle() -> XCTestExpectation {
+        let expectation = XCTestExpectation(description: "coordinator returns to idle")
+        coordinator.onStateChange = { state in
+            if state == .idle {
+                expectation.fulfill()
+            }
+        }
+        return expectation
+    }
+
     private func makeLoudSamples() -> [Float] {
         let sampleCount = 16_000
         let amplitude: Float = 0.05
@@ -606,5 +790,40 @@ final class FakeDictationHistoryStore: DictationHistoryProtocol, @unchecked Send
 
     func saveSession(_ session: DictationHistorySession) async {
         sessions.append(session)
+    }
+}
+
+final class FakePostProcessingProvider: PostProcessingProvider, @unchecked Sendable {
+    private let lock = NSLock()
+    private var _isAvailable = true
+    private var _result: Result<String, Error> = .success("")
+    private var _processCallCount = 0
+    private var _lastProcessedInput: String?
+
+    var isAvailable: Bool {
+        get { lock.withLock { _isAvailable } }
+        set { lock.withLock { _isAvailable = newValue } }
+    }
+
+    var result: Result<String, Error> {
+        get { lock.withLock { _result } }
+        set { lock.withLock { _result = newValue } }
+    }
+
+    var processCallCount: Int {
+        lock.withLock { _processCallCount }
+    }
+
+    var lastProcessedInput: String? {
+        lock.withLock { _lastProcessedInput }
+    }
+
+    func process(_ transcript: String) async throws -> String {
+        let snapshot = lock.withLock {
+            _processCallCount += 1
+            _lastProcessedInput = transcript
+            return _result
+        }
+        return try snapshot.get()
     }
 }

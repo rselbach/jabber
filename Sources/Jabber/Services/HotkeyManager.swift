@@ -1,6 +1,7 @@
 import Carbon
 import CoreGraphics
 import Foundation
+@preconcurrency import ApplicationServices
 import os
 
 final class HotkeyManager: @unchecked Sendable {
@@ -164,6 +165,22 @@ final class HotkeyManager: @unchecked Sendable {
             return status
         }
 
+        // A CGEventTap that observes flagsChanged + keyDown needs Accessibility
+        // (to read events at all) and Input Monitoring (specifically for
+        // keyDown). Preflight Accessibility here — there is a clean API — and
+        // fail loudly with a precise message when it is missing. Input
+        // Monitoring has no public preflight API, so its absence surfaces as a
+        // tap that creates successfully but never delivers events; the logging
+        // below makes that case diagnosable instead of a silent no-op.
+        guard AXIsProcessTrusted() else {
+            let status = OSStatus(eventNotHandledErr)
+            logger.error("Modifier-only shortcut requires Accessibility permission; not granted")
+            dispatchRegistrationFailure(status)
+            return status
+        }
+
+        logger.info("Creating CGEventTap for modifier-only shortcut keyCode=\(shortcut.keyCode)")
+
         // We need key-down in addition to flags-changed so we can detect
         // Option+key (and other combo) typing while the modifier is held and
         // cancel the pending start before it fires. Listen-only: we never
@@ -182,10 +199,11 @@ final class HotkeyManager: @unchecked Sendable {
             callback: HotkeyManager.eventTapCallback,
             userInfo: refcon
         ) else {
-            // Most common cause: Accessibility / Input Monitoring not granted.
-            // Observing key-down events specifically requires Input Monitoring.
+            // tapCreate returns nil when permission is missing. Observing
+            // key-down specifically requires Input Monitoring (a separate grant
+            // from Accessibility), which is the most common cause here.
             let status = OSStatus(eventNotHandledErr)
-            logger.error("Failed to create event tap for modifier-only shortcut (check Accessibility / Input Monitoring permission)")
+            logger.error("Failed to create event tap for modifier-only shortcut (grant Input Monitoring and Accessibility in System Settings)")
             dispatchRegistrationFailure(status)
             return status
         }
@@ -202,6 +220,7 @@ final class HotkeyManager: @unchecked Sendable {
 
         CFRunLoopAddSource(CFRunLoopGetMain(), source, .commonModes)
         CGEvent.tapEnable(tap: tap, enable: true)
+        logger.info("CGEventTap enabled on main runloop for keyCode=\(shortcut.keyCode)")
         return noErr
     }
 
@@ -213,6 +232,7 @@ final class HotkeyManager: @unchecked Sendable {
 
     private func handleEventTapEvent(type: CGEventType, event: CGEvent) -> Unmanaged<CGEvent>? {
         if type == .tapDisabledByTimeout || type == .tapDisabledByUserInput {
+            logger.warning("CGEventTap disabled by system (\(String(describing: type))); re-enabling. If this repeats, Input Monitoring permission is likely missing.")
             if let tap = currentEventTap() {
                 CGEvent.tapEnable(tap: tap, enable: true)
             }
@@ -244,6 +264,7 @@ final class HotkeyManager: @unchecked Sendable {
                 .combinedSessionState,
                 key: CGKeyCode(keyCode)
             )
+            logger.debug("Event tap flagsChanged keyCode=\(keyCode) isDown=\(isDown)")
             feed(isDown ? .modifierDown : .modifierUp)
 
         case .keyDown:
@@ -253,6 +274,7 @@ final class HotkeyManager: @unchecked Sendable {
             guard !HotkeyShortcut.modifierOnlyKeyCodes.contains(keyCode) else {
                 return Unmanaged.passUnretained(event)
             }
+            logger.debug("Event tap keyDown keyCode=\(keyCode) (combo typing; cancelling pending modifier-only start)")
             feed(.otherKeyDown)
 
         default:
@@ -303,10 +325,12 @@ final class HotkeyManager: @unchecked Sendable {
     private func dispatchGesture(_ action: ModifierOnlyGestureReducer.Action) {
         switch action {
         case .fireDown:
+            logger.info("Modifier-only gesture fired: onKeyDown")
             Task { @MainActor in
                 self.onKeyDown?()
             }
         case .fireUp:
+            logger.info("Modifier-only gesture fired: onKeyUp")
             Task { @MainActor in
                 self.onKeyUp?()
             }

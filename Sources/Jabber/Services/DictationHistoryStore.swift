@@ -168,35 +168,50 @@ actor DictationHistoryStore: DictationHistoryProtocol {
         let entryID = UUID()
         let entryDirectoryName = Self.entryDirectoryName(timestamp: session.timestamp, id: entryID)
         let entryDirectoryURL = directoryURL.appendingPathComponent(entryDirectoryName, isDirectory: true)
-        try fileManager.createDirectory(at: entryDirectoryURL, withIntermediateDirectories: true)
 
-        let audioURL = entryDirectoryURL.appendingPathComponent(Self.audioFilename)
-        let audioData = try Self.wavData(samples: session.samples, sampleRate: Self.sampleRate)
-        try audioData.write(to: audioURL, options: .atomic)
+        let entry: DictationHistoryEntry
+        do {
+            try fileManager.createDirectory(at: entryDirectoryURL, withIntermediateDirectories: true)
 
-        let entry = DictationHistoryEntry(
-            id: entryID,
-            timestamp: session.timestamp,
-            duration: Double(session.samples.count) / Double(Self.sampleRate),
-            sampleRate: Self.sampleRate,
-            modelID: session.modelID,
-            modelName: Self.modelName(for: session.modelID),
-            language: session.language,
-            transcript: session.transcript,
-            directoryName: entryDirectoryName,
-            audioFilename: Self.audioFilename,
-            audioByteCount: Int64(audioData.count),
-            rawTranscript: session.rawTranscript,
-            wasPostProcessed: session.wasPostProcessed,
-            postProcessingErrorDescription: session.postProcessingErrorDescription
-        )
+            let audioURL = entryDirectoryURL.appendingPathComponent(Self.audioFilename)
+            let audioData = try Self.wavData(samples: session.samples, sampleRate: Self.sampleRate)
+            try audioData.write(to: audioURL, options: .atomic)
 
-        let metadataURL = entryDirectoryURL.appendingPathComponent(Self.metadataFilename)
-        let encoder = JSONEncoder()
-        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
-        encoder.dateEncodingStrategy = .iso8601
-        let metadataData = try encoder.encode(entry)
-        try metadataData.write(to: metadataURL, options: .atomic)
+            entry = DictationHistoryEntry(
+                id: entryID,
+                timestamp: session.timestamp,
+                duration: Double(session.samples.count) / Double(Self.sampleRate),
+                sampleRate: Self.sampleRate,
+                modelID: session.modelID,
+                modelName: Self.modelName(for: session.modelID),
+                language: session.language,
+                transcript: session.transcript,
+                directoryName: entryDirectoryName,
+                audioFilename: Self.audioFilename,
+                audioByteCount: Int64(audioData.count),
+                rawTranscript: session.rawTranscript,
+                wasPostProcessed: session.wasPostProcessed,
+                postProcessingErrorDescription: session.postProcessingErrorDescription
+            )
+
+            let metadataURL = entryDirectoryURL.appendingPathComponent(Self.metadataFilename)
+            let encoder = JSONEncoder()
+            encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+            encoder.dateEncodingStrategy = .iso8601
+            let metadataData = try encoder.encode(entry)
+            try metadataData.write(to: metadataURL, options: .atomic)
+        } catch {
+            // A failure after the entry directory is created (e.g. the audio or
+            // metadata write failing on ENOSPC) would otherwise leave an
+            // orphaned directory that loadEntries() skips but which still
+            // consumes the retention byte budget. Remove it, then rethrow.
+            do {
+                try fileManager.removeItem(at: entryDirectoryURL)
+            } catch {
+                logger.error("Failed to clean up partial dictation history entry at \(entryDirectoryURL.path): \(error.localizedDescription)")
+            }
+            throw error
+        }
 
         try enforceRetentionLimit()
         return entry

@@ -172,6 +172,42 @@ final class DictationHistoryStoreTests: XCTestCase {
         XCTAssertEqual(loaded.postProcessingErrorDescription, "boom")
     }
 
+    // MARK: - Bug 1: save() must not leave orphan directories on failure
+
+    func testSaveFailureLeavesNoOrphanDirectory() async throws {
+        let store = makeStore()
+
+        // Pre-create the history root with normal (writable) permissions so the
+        // entry subdirectory can be created, then force newly-created
+        // subdirectories to be non-writable (mode 0555) so the audio file write
+        // inside the entry directory fails with EACCES. `umask` is process-wide,
+        // so it applies to the actor's file operations too; it is restored the
+        // instant the call returns. This reproduces the "failure after entry
+        // directory creation" class of bugs that previously left orphans.
+        try FileManager.default.createDirectory(at: historyDirectoryURL, withIntermediateDirectories: true)
+
+        let previousMask = umask(0o222)
+        var thrown: Error?
+        do {
+            _ = try await store.save(session(
+                transcript: "Troy and Abed in the morning",
+                timestamp: Date(timeIntervalSince1970: 100)
+            ))
+        } catch {
+            thrown = error
+        }
+        umask(previousMask)
+
+        XCTAssertNotNil(thrown, "save should fail when the entry directory is non-writable")
+
+        let remaining = try FileManager.default.contentsOfDirectory(
+            at: historyDirectoryURL,
+            includingPropertiesForKeys: nil,
+            options: [.skipsHiddenFiles]
+        )
+        XCTAssertTrue(remaining.isEmpty, "a failed save must not leave an orphan entry directory behind")
+    }
+
     private func makeStore(maxEntryCount: Int = 50, maxByteCount: Int64 = 500 * 1024 * 1024) -> DictationHistoryStore {
         DictationHistoryStore(
             directoryURL: historyDirectoryURL,

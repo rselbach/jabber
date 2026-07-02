@@ -52,6 +52,11 @@ enum ModelInstallationValidator {
         "joint.mlmodelc"
     ]
 
+    /// File present at the root of every compiled CoreML `.mlmodelc` bundle.
+    /// Used to confirm a bundle was fully written, not just created as an
+    /// empty directory by an interrupted download.
+    static let coreMLBundleMarkerFile = "coremldata.bin"
+
     static func validateQwen3ASRModelFolder(at folder: URL) -> ModelFolderValidation {
         let fm = FileManager.default
         var isDirectory: ObjCBool = false
@@ -116,7 +121,12 @@ enum ModelInstallationValidator {
         let missingFiles = requiredCoreMLTransducerFiles.filter { !fileNames.contains($0) }
         let missingDirs = requiredCoreMLTransducerDirectories.filter { !fileNames.contains($0) }
         let missing = missingFiles + missingDirs
-        let hasWeights = requiredCoreMLTransducerDirectories.allSatisfy { fileNames.contains($0) }
+        let hasWeights = requiredCoreMLTransducerDirectories.allSatisfy { dirName in
+            let marker = folder
+                .appendingPathComponent(dirName)
+                .appendingPathComponent(coreMLBundleMarkerFile)
+            return fm.fileExists(atPath: marker.path)
+        }
 
         return ModelFolderValidation(
             folderExists: true,

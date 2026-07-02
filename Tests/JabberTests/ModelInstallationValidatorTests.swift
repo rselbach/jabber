@@ -70,9 +70,9 @@ final class ModelInstallationValidatorTests: XCTestCase {
     func testCompleteCoreMLTransducerFolderIsValid() throws {
         try writeFile(named: "config.json")
         try writeFile(named: "vocab.json")
-        try createDirectory(named: "encoder.mlmodelc")
-        try createDirectory(named: "decoder.mlmodelc")
-        try createDirectory(named: "joint.mlmodelc")
+        try createCoreMLBundle(named: "encoder.mlmodelc")
+        try createCoreMLBundle(named: "decoder.mlmodelc")
+        try createCoreMLBundle(named: "joint.mlmodelc")
 
         let validation = ModelInstallationValidator.validateCoreMLTransducerModelFolder(at: tempDir)
 
@@ -83,14 +83,40 @@ final class ModelInstallationValidatorTests: XCTestCase {
     func testMissingMlmodelcDirectoryIsInvalid() throws {
         try writeFile(named: "config.json")
         try writeFile(named: "vocab.json")
-        try createDirectory(named: "encoder.mlmodelc")
-        try createDirectory(named: "decoder.mlmodelc")
+        try createCoreMLBundle(named: "encoder.mlmodelc")
+        try createCoreMLBundle(named: "decoder.mlmodelc")
 
         let validation = ModelInstallationValidator.validateCoreMLTransducerModelFolder(at: tempDir)
 
         XCTAssertFalse(validation.isComplete)
         XCTAssertFalse(validation.hasWeights)
         XCTAssertTrue(validation.missingRequiredFiles.contains("joint.mlmodelc"))
+    }
+
+    func testEmptyMlmodelcBundlesAreInvalid() throws {
+        try writeFile(named: "config.json")
+        try writeFile(named: "vocab.json")
+        try createDirectory(named: "encoder.mlmodelc")
+        try createDirectory(named: "decoder.mlmodelc")
+        try createDirectory(named: "joint.mlmodelc")
+
+        let validation = ModelInstallationValidator.validateCoreMLTransducerModelFolder(at: tempDir)
+
+        XCTAssertFalse(validation.isComplete)
+        XCTAssertFalse(validation.hasWeights)
+    }
+
+    func testPartiallyPopulatedMlmodelcBundleIsInvalid() throws {
+        try writeFile(named: "config.json")
+        try writeFile(named: "vocab.json")
+        try createCoreMLBundle(named: "encoder.mlmodelc")
+        try createDirectory(named: "decoder.mlmodelc")
+        try createCoreMLBundle(named: "joint.mlmodelc")
+
+        let validation = ModelInstallationValidator.validateCoreMLTransducerModelFolder(at: tempDir)
+
+        XCTAssertFalse(validation.isComplete)
+        XCTAssertFalse(validation.hasWeights)
     }
 
     private func writeRequiredModelFiles(except excludedFile: String? = nil) throws {
@@ -108,6 +134,15 @@ final class ModelInstallationValidatorTests: XCTestCase {
         try FileManager.default.createDirectory(
             at: tempDir.appendingPathComponent(name),
             withIntermediateDirectories: true
+        )
+    }
+
+    private func createCoreMLBundle(named name: String) throws {
+        let bundle = tempDir.appendingPathComponent(name)
+        try FileManager.default.createDirectory(at: bundle, withIntermediateDirectories: true)
+        let data = Data("Human Being mascot".utf8)
+        try data.write(
+            to: bundle.appendingPathComponent(ModelInstallationValidator.coreMLBundleMarkerFile)
         )
     }
 }

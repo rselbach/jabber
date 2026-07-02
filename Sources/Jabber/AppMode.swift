@@ -2,13 +2,21 @@ import Foundation
 
 enum AppMode {
     static let qwen3ModelId = "qwen3"
-    static let parakeetModelId = "parakeet"
+    static let qwen3Small4BitModelId = "qwen3-0.6b-4bit"
+    static let qwen3Small8BitModelId = "qwen3-0.6b-8bit"
+    static let qwen3Large4BitModelId = "qwen3-1.7b-4bit"
     static let nemotronModelId = "nemotron"
     static let appleSpeechModelId = "apple-speech"
 
+    static let qwen3ModelIds = [
+        qwen3ModelId,
+        qwen3Large4BitModelId,
+        qwen3Small8BitModelId,
+        qwen3Small4BitModelId
+    ]
+
     enum ModelFamily: String, CaseIterable {
         case qwen3ASR
-        case parakeetASR
         case nemotronASR
         case appleSpeech
     }
@@ -36,7 +44,7 @@ enum AppMode {
             id: qwen3ModelId,
             family: .qwen3ASR,
             huggingFaceModelId: "aufklarer/Qwen3-ASR-1.7B-MLX-8bit",
-            name: "Qwen3-ASR",
+            name: "Qwen3-ASR 1.7B 8-bit",
             description: "Qwen3-ASR 1.7B 8-bit — 52 languages, highest accuracy",
             sizeHint: "~2.5GB",
             supportedLanguageCodes: nil,
@@ -46,16 +54,42 @@ enum AppMode {
             isBuiltIn: false
         ),
         .init(
-            id: parakeetModelId,
-            family: .parakeetASR,
-            huggingFaceModelId: "aufklarer/Parakeet-TDT-v3-CoreML-INT8",
-            name: "Parakeet",
-            description: "NVIDIA Parakeet TDT v3 — fastest, best European accuracy",
-            sizeHint: "~634MB",
-            supportedLanguageCodes: parakeetLanguageCodes,
-            license: "CC-BY-4.0",
-            licenseUrl: "https://creativecommons.org/licenses/by/4.0/",
-            attribution: "Parakeet TDT v3 by NVIDIA",
+            id: qwen3Large4BitModelId,
+            family: .qwen3ASR,
+            huggingFaceModelId: "aufklarer/Qwen3-ASR-1.7B-MLX-4bit",
+            name: "Qwen3-ASR 1.7B 4-bit",
+            description: "Qwen3-ASR 1.7B 4-bit — 52 languages, smaller 1.7B download",
+            sizeHint: "~1.3GB",
+            supportedLanguageCodes: nil,
+            license: "Apache 2.0",
+            licenseUrl: "https://www.apache.org/licenses/LICENSE-2.0",
+            attribution: "Qwen3-ASR by Alibaba Qwen Team",
+            isBuiltIn: false
+        ),
+        .init(
+            id: qwen3Small8BitModelId,
+            family: .qwen3ASR,
+            huggingFaceModelId: "aufklarer/Qwen3-ASR-0.6B-MLX-8bit",
+            name: "Qwen3-ASR 0.6B 8-bit",
+            description: "Qwen3-ASR 0.6B 8-bit — 52 languages, smaller model",
+            sizeHint: "~1GB",
+            supportedLanguageCodes: nil,
+            license: "Apache 2.0",
+            licenseUrl: "https://www.apache.org/licenses/LICENSE-2.0",
+            attribution: "Qwen3-ASR by Alibaba Qwen Team",
+            isBuiltIn: false
+        ),
+        .init(
+            id: qwen3Small4BitModelId,
+            family: .qwen3ASR,
+            huggingFaceModelId: "aufklarer/Qwen3-ASR-0.6B-MLX-4bit",
+            name: "Qwen3-ASR 0.6B 4-bit",
+            description: "Qwen3-ASR 0.6B 4-bit — 52 languages, smallest Qwen option",
+            sizeHint: "~600MB",
+            supportedLanguageCodes: nil,
+            license: "Apache 2.0",
+            licenseUrl: "https://www.apache.org/licenses/LICENSE-2.0",
+            attribution: "Qwen3-ASR by Alibaba Qwen Team",
             isBuiltIn: false
         ),
         .init(
@@ -84,12 +118,6 @@ enum AppMode {
             attribution: "Apple Speech Framework (macOS 26+)",
             isBuiltIn: true
         )
-    ]
-
-    static let parakeetLanguageCodes: Set<String> = [
-        "bg", "hr", "cs", "da", "nl", "en", "et", "fi", "fr", "de",
-        "el", "hu", "it", "lv", "lt", "mt", "pl", "pt", "ro", "sk",
-        "sl", "es", "sv", "ru", "uk"
     ]
 
     static func modelDefinition(for modelId: String) -> ModelDefinition? {

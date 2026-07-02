@@ -84,7 +84,7 @@ extension TypedSetting where T == String {
     var `default`: String {
         switch self {
         case .selectedModel:
-            return AppMode.parakeetModelId
+            return LanguageModelCatalog.recommendedModelId(for: Constants.defaultLanguage)
         case .selectedLanguage:
             return Constants.defaultLanguage
         case .outputMode:

@@ -2,7 +2,7 @@ import AppKit
 import SwiftUI
 
 struct MenuBarView: View {
-    @AppStorage(AppSettingKey.selectedModel) private var selectedModel = AppMode.parakeetModelId
+    @AppStorage(AppSettingKey.selectedModel) private var selectedModel = LanguageModelCatalog.recommendedModelId(for: Constants.defaultLanguage)
     @AppStorage(AppSettingKey.selectedLanguage) private var selectedLanguage = Constants.defaultLanguage
     @AppStorage(AppSettingKey.outputMode) private var outputMode = TypingService.OutputMode.directTyping.rawValue
     @AppStorage(AppSettingKey.hotkeyKeyCode) private var hotkeyKeyCode = Int(HotkeyShortcut.defaultShortcut.keyCode)
@@ -160,7 +160,10 @@ struct MenuBarView: View {
     }
 
     private func downloadBaseModel() {
-        if !modelManager.startDownload(AppMode.qwen3ModelId) {
+        let modelId = AppMode.modelDefinition(for: selectedModel)?.isBuiltIn == false
+            ? selectedModel
+            : LanguageModelCatalog.recommendedModelId(for: selectedLanguage)
+        if !modelManager.startDownload(modelId) {
             modelManager.refreshModels()
         }
     }

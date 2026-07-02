@@ -23,6 +23,7 @@ protocol TranscriptionProtocol: AnyObject, Sendable {
     func setLanguage(_ language: String) async
     func currentModelId() async -> String?
     func transcribeStreaming(samples: [Float]) async throws -> String
+    func resetStreamingTranscription() async
     func transcribe(samples: [Float]) async throws -> String
 }
 
@@ -236,6 +237,7 @@ final class DictationCoordinator {
     }
 
     private func runStreamingPreviewLoop(sessionID: UUID) async {
+        await transcriptionService.resetStreamingTranscription()
         await applyCurrentTranscriptionSettings()
 
         while !Task.isCancelled {

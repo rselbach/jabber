@@ -216,6 +216,7 @@ final class DictationCoordinatorTests: XCTestCase {
         await fulfillment(of: [partialExpectation], timeout: 1.0)
 
         XCTAssertEqual(partialTranscriptions, ["troy and abed"])
+        XCTAssertEqual(transcriptionService.resetStreamingCallCount, 1)
         XCTAssertEqual(transcriptionService.streamingSampleCounts, [16_000])
 
         coordinator.cancel()
@@ -263,6 +264,7 @@ final class DictationCoordinatorTests: XCTestCase {
         try await Task.sleep(for: .milliseconds(30))
 
         XCTAssertTrue(transcriptionService.streamingSampleCounts.isEmpty)
+        XCTAssertEqual(transcriptionService.resetStreamingCallCount, 0)
         coordinator.cancel()
     }
 
@@ -433,8 +435,9 @@ final class FakeTranscriptionService: TranscriptionProtocol, @unchecked Sendable
     private var _transcribeResult: Result<String, Error> = .success("")
     private var _streamingDelay: Duration?
     private var _transcribeDelay: Duration?
-    private var _currentModelID: String? = AppMode.parakeetModelId
+    private var _currentModelID: String? = AppMode.nemotronModelId
     private var _streamingSampleCounts: [Int] = []
+    private var _resetStreamingCallCount = 0
     private var _callOrder: [Call] = []
     private var _holdStreamingUntilReleased = false
     private var _streamingRelease: CheckedContinuation<Void, Never>?
@@ -484,6 +487,10 @@ final class FakeTranscriptionService: TranscriptionProtocol, @unchecked Sendable
         lock.withLock { _streamingSampleCounts }
     }
 
+    var resetStreamingCallCount: Int {
+        lock.withLock { _resetStreamingCallCount }
+    }
+
     var callOrder: [Call] {
         lock.withLock { _callOrder }
     }
@@ -508,6 +515,12 @@ final class FakeTranscriptionService: TranscriptionProtocol, @unchecked Sendable
 
     func currentModelId() async -> String? {
         currentModelID
+    }
+
+    func resetStreamingTranscription() async {
+        lock.withLock {
+            _resetStreamingCallCount += 1
+        }
     }
 
     func transcribeStreaming(samples: [Float]) async throws -> String {

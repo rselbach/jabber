@@ -41,12 +41,12 @@ enum ModelInstallationValidator {
         "tokenizer_config.json"
     ]
 
-    static let requiredParakeetFiles = [
+    static let requiredCoreMLTransducerFiles = [
         "config.json",
         "vocab.json"
     ]
 
-    static let requiredParakeetDirectories = [
+    static let requiredCoreMLTransducerDirectories = [
         "encoder.mlmodelc",
         "decoder.mlmodelc",
         "joint.mlmodelc"
@@ -88,13 +88,13 @@ enum ModelInstallationValidator {
         )
     }
 
-    static func validateParakeetModelFolder(at folder: URL) -> ModelFolderValidation {
+    static func validateCoreMLTransducerModelFolder(at folder: URL) -> ModelFolderValidation {
         let fm = FileManager.default
         var isDirectory: ObjCBool = false
         guard fm.fileExists(atPath: folder.path, isDirectory: &isDirectory), isDirectory.boolValue else {
             return ModelFolderValidation(
                 folderExists: false,
-                missingRequiredFiles: requiredParakeetFiles + requiredParakeetDirectories,
+                missingRequiredFiles: requiredCoreMLTransducerFiles + requiredCoreMLTransducerDirectories,
                 hasWeights: false,
                 readErrorDescription: nil
             )
@@ -106,17 +106,17 @@ enum ModelInstallationValidator {
         } catch {
             return ModelFolderValidation(
                 folderExists: true,
-                missingRequiredFiles: requiredParakeetFiles + requiredParakeetDirectories,
+                missingRequiredFiles: requiredCoreMLTransducerFiles + requiredCoreMLTransducerDirectories,
                 hasWeights: false,
                 readErrorDescription: error.localizedDescription
             )
         }
 
         let fileNames = Set(contents.map(\.lastPathComponent))
-        let missingFiles = requiredParakeetFiles.filter { !fileNames.contains($0) }
-        let missingDirs = requiredParakeetDirectories.filter { !fileNames.contains($0) }
+        let missingFiles = requiredCoreMLTransducerFiles.filter { !fileNames.contains($0) }
+        let missingDirs = requiredCoreMLTransducerDirectories.filter { !fileNames.contains($0) }
         let missing = missingFiles + missingDirs
-        let hasWeights = requiredParakeetDirectories.allSatisfy { fileNames.contains($0) }
+        let hasWeights = requiredCoreMLTransducerDirectories.allSatisfy { fileNames.contains($0) }
 
         return ModelFolderValidation(
             folderExists: true,
@@ -130,8 +130,8 @@ enum ModelInstallationValidator {
         switch family {
         case .qwen3ASR:
             return validateQwen3ASRModelFolder(at: folder)
-        case .parakeetASR, .nemotronASR:
-            return validateParakeetModelFolder(at: folder)
+        case .nemotronASR:
+            return validateCoreMLTransducerModelFolder(at: folder)
         case .appleSpeech:
             return ModelFolderValidation(
                 folderExists: true,

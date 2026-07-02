@@ -5,6 +5,9 @@ final class NemotronASRProvider: TranscriptionProvider, @unchecked Sendable {
     let modelId: String
     private let huggingFaceModelId: String
     private var model: NemotronStreamingASRModel?
+    private var streamingSession: NemotronStreamingASR.StreamingSession?
+    private var streamedSampleCount = 0
+    private var latestStreamingText = ""
 
     init(modelId: String, huggingFaceModelId: String) {
         self.modelId = modelId
@@ -26,6 +29,8 @@ final class NemotronASRProvider: TranscriptionProvider, @unchecked Sendable {
     }
 
     func transcribe(samples: [Float], language: String?, vocabularyPrompt: String?) async throws -> String {
+        defer { resetStreamingTranscription() }
+
         guard let model else {
             throw TranscriptionError.loadFailed
         }
@@ -34,7 +39,45 @@ final class NemotronASRProvider: TranscriptionProvider, @unchecked Sendable {
             .trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
+    func transcribeStreaming(samples: [Float], language: String?, vocabularyPrompt: String?) async throws -> String {
+        guard let model else {
+            throw TranscriptionError.loadFailed
+        }
+
+        if samples.count <= streamedSampleCount {
+            resetStreamingTranscription()
+        }
+
+        let session: NemotronStreamingASR.StreamingSession
+        if let existingSession = streamingSession {
+            session = existingSession
+        } else {
+            session = try model.createSession()
+            streamingSession = session
+        }
+
+        let delta = Array(samples.dropFirst(streamedSampleCount))
+        streamedSampleCount = samples.count
+        guard !delta.isEmpty else {
+            return latestStreamingText
+        }
+
+        let partials = try session.pushAudio(delta)
+        if let text = partials.last?.text.trimmingCharacters(in: .whitespacesAndNewlines), !text.isEmpty {
+            latestStreamingText = text
+        }
+
+        return latestStreamingText
+    }
+
+    func resetStreamingTranscription() {
+        streamingSession = nil
+        streamedSampleCount = 0
+        latestStreamingText = ""
+    }
+
     func unload() {
+        resetStreamingTranscription()
         model = nil
     }
 }

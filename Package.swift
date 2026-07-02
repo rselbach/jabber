@@ -22,7 +22,6 @@ let package = Package(
                 .product(name: "AudioCommon", package: "speech-swift"),
                 .product(name: "MediaRemoteAdapter", package: "mediaremote-adapter"),
                 .product(name: "Qwen3ASR", package: "speech-swift"),
-                .product(name: "ParakeetASR", package: "speech-swift"),
                 .product(name: "NemotronStreamingASR", package: "speech-swift"),
                 .product(name: "Sparkle", package: "Sparkle")
             ],

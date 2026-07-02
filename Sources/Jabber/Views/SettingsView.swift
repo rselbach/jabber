@@ -5,7 +5,7 @@ struct SettingsView: View {
     @ObservedObject var updaterController: UpdaterController
     let onAppearAction: () -> Void
 
-    @AppStorage(AppSettingKey.selectedModel) private var selectedModel = AppMode.parakeetModelId
+    @AppStorage(AppSettingKey.selectedModel) private var selectedModel = LanguageModelCatalog.recommendedModelId(for: Constants.defaultLanguage)
     @AppStorage(AppSettingKey.outputMode) private var outputMode = TypingService.OutputMode.directTyping.rawValue
     @AppStorage(AppSettingKey.hotkeyKeyCode) private var hotkeyKeyCode = Int(HotkeyShortcut.defaultShortcut.keyCode)
     @AppStorage(AppSettingKey.hotkeyModifiers) private var hotkeyModifiers = Int(HotkeyShortcut.defaultShortcut.modifiers)
@@ -295,7 +295,10 @@ struct SettingsView: View {
     }
 
     private func downloadBaseModel() {
-        if !modelManager.startDownload(AppMode.qwen3ModelId) {
+        let modelId = AppMode.modelDefinition(for: selectedModel)?.isBuiltIn == false
+            ? selectedModel
+            : LanguageModelCatalog.recommendedModelId(for: selectedLanguage)
+        if !modelManager.startDownload(modelId) {
             modelManager.refreshModels()
         }
     }

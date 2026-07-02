@@ -24,7 +24,7 @@ final class ModelManagerTests: XCTestCase {
             withIntermediateDirectories: true
         )
 
-        settings[.selectedModel] = AppMode.parakeetModelId
+        settings[.selectedModel] = AppMode.nemotronModelId
         modelManager = ModelManager(
             settings: settings,
             cacheBaseURL: cacheBaseURL
@@ -51,16 +51,31 @@ final class ModelManagerTests: XCTestCase {
 
         let modelIds = modelManager.models.map { $0.id }
         XCTAssertTrue(modelIds.contains("qwen3"), "Should have Qwen3-ASR model")
-        XCTAssertTrue(modelIds.contains("parakeet"), "Should have Parakeet model")
+        XCTAssertTrue(modelIds.contains(AppMode.qwen3Small4BitModelId), "Should have Qwen3-ASR 0.6B 4-bit model")
+        XCTAssertTrue(modelIds.contains(AppMode.qwen3Small8BitModelId), "Should have Qwen3-ASR 0.6B 8-bit model")
+        XCTAssertTrue(modelIds.contains(AppMode.qwen3Large4BitModelId), "Should have Qwen3-ASR 1.7B 4-bit model")
         XCTAssertTrue(modelIds.contains("nemotron"), "Should have Nemotron model")
         XCTAssertTrue(modelIds.contains("apple-speech"), "Should have Apple Speech model")
-        XCTAssertEqual(modelIds.count, 4, "Should expose four models")
+        XCTAssertFalse(modelIds.contains("parakeet"), "Should not expose Parakeet model")
+        XCTAssertEqual(modelIds.count, 6, "Should expose six models")
     }
 
     func testQwen3ASRVariantResolvesHuggingFaceId() {
         XCTAssertEqual(
             ModelManager.qwen3ASRHuggingFaceModelId(for: AppMode.qwen3ModelId),
             "aufklarer/Qwen3-ASR-1.7B-MLX-8bit"
+        )
+        XCTAssertEqual(
+            ModelManager.qwen3ASRHuggingFaceModelId(for: AppMode.qwen3Large4BitModelId),
+            "aufklarer/Qwen3-ASR-1.7B-MLX-4bit"
+        )
+        XCTAssertEqual(
+            ModelManager.qwen3ASRHuggingFaceModelId(for: AppMode.qwen3Small8BitModelId),
+            "aufklarer/Qwen3-ASR-0.6B-MLX-8bit"
+        )
+        XCTAssertEqual(
+            ModelManager.qwen3ASRHuggingFaceModelId(for: AppMode.qwen3Small4BitModelId),
+            "aufklarer/Qwen3-ASR-0.6B-MLX-4bit"
         )
         XCTAssertNil(ModelManager.qwen3ASRHuggingFaceModelId(for: "tiny"))
     }
@@ -83,7 +98,7 @@ final class ModelManagerTests: XCTestCase {
     func testMigrateLegacyUnavailableModelIds() {
         settings[.selectedModel] = "small"
         XCTAssertTrue(modelManager.migrateSelectedModelIfNeeded())
-        XCTAssertEqual(settings[.selectedModel], AppMode.qwen3ModelId)
+        XCTAssertEqual(settings[.selectedModel], AppMode.qwen3Small4BitModelId)
 
         settings[.selectedModel] = "large-v3"
         XCTAssertTrue(modelManager.migrateSelectedModelIfNeeded())
@@ -93,11 +108,11 @@ final class ModelManagerTests: XCTestCase {
     func testMigrateOldQwen3VariantIds() {
         settings[.selectedModel] = "base"
         XCTAssertTrue(modelManager.migrateSelectedModelIfNeeded())
-        XCTAssertEqual(settings[.selectedModel], AppMode.qwen3ModelId)
+        XCTAssertEqual(settings[.selectedModel], AppMode.qwen3Small4BitModelId)
 
         settings[.selectedModel] = "medium"
         XCTAssertTrue(modelManager.migrateSelectedModelIfNeeded())
-        XCTAssertEqual(settings[.selectedModel], AppMode.qwen3ModelId)
+        XCTAssertEqual(settings[.selectedModel], AppMode.qwen3Large4BitModelId)
 
         settings[.selectedModel] = "large"
         XCTAssertTrue(modelManager.migrateSelectedModelIfNeeded())
@@ -107,11 +122,15 @@ final class ModelManagerTests: XCTestCase {
     func testMigrateExperimentalQwenModelIds() {
         settings[.selectedModel] = "qwen3-asr-0.6b-mlx-4bit"
         XCTAssertTrue(modelManager.migrateSelectedModelIfNeeded())
-        XCTAssertEqual(settings[.selectedModel], AppMode.qwen3ModelId)
+        XCTAssertEqual(settings[.selectedModel], AppMode.qwen3Small4BitModelId)
+
+        settings[.selectedModel] = "qwen3-asr-0.6b-mlx-8bit"
+        XCTAssertTrue(modelManager.migrateSelectedModelIfNeeded())
+        XCTAssertEqual(settings[.selectedModel], AppMode.qwen3Small8BitModelId)
 
         settings[.selectedModel] = "qwen3-asr-1.7b-mlx-4bit"
         XCTAssertTrue(modelManager.migrateSelectedModelIfNeeded())
-        XCTAssertEqual(settings[.selectedModel], AppMode.qwen3ModelId)
+        XCTAssertEqual(settings[.selectedModel], AppMode.qwen3Large4BitModelId)
 
         settings[.selectedModel] = "qwen3-asr-1.7b-mlx-8bit"
         XCTAssertTrue(modelManager.migrateSelectedModelIfNeeded())
@@ -119,13 +138,19 @@ final class ModelManagerTests: XCTestCase {
     }
 
     func testValidAndUnknownSelectedModelMigration() {
-        settings[.selectedModel] = AppMode.parakeetModelId
+        let defaultModel = LanguageModelCatalog.recommendedModelId(for: Constants.defaultLanguage)
+
+        settings[.selectedModel] = AppMode.nemotronModelId
         XCTAssertFalse(modelManager.migrateSelectedModelIfNeeded())
-        XCTAssertEqual(settings[.selectedModel], AppMode.parakeetModelId)
+        XCTAssertEqual(settings[.selectedModel], AppMode.nemotronModelId)
+
+        settings[.selectedModel] = "parakeet"
+        XCTAssertTrue(modelManager.migrateSelectedModelIfNeeded())
+        XCTAssertEqual(settings[.selectedModel], defaultModel)
 
         settings[.selectedModel] = "totally-unknown-model"
         XCTAssertTrue(modelManager.migrateSelectedModelIfNeeded())
-        XCTAssertEqual(settings[.selectedModel], AppMode.parakeetModelId)
+        XCTAssertEqual(settings[.selectedModel], defaultModel)
     }
 
     func testModelPropertiesAreSet() {
@@ -134,7 +159,7 @@ final class ModelManagerTests: XCTestCase {
             return
         }
 
-        XCTAssertEqual(qwenModel.name, "Qwen3-ASR")
+        XCTAssertEqual(qwenModel.name, "Qwen3-ASR 1.7B 8-bit")
         XCTAssertEqual(qwenModel.description, "Qwen3-ASR 1.7B 8-bit — 52 languages, highest accuracy")
         XCTAssertEqual(qwenModel.sizeHint, "~2.5GB")
     }
@@ -255,7 +280,7 @@ final class ModelManagerTests: XCTestCase {
         )
 
         let state2 = ModelDownloadState(
-            modelId: "parakeet",
+            modelId: AppMode.nemotronModelId,
             progress: 0.5,
             status: "Downloading...",
             phase: .progress,

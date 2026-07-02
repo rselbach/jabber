@@ -24,14 +24,15 @@ final class ModelManager {
     static let shared = ModelManager()
     private let logger = Logger(subsystem: "com.rselbach.jabber", category: "ModelManager")
     private static let legacyModelIdMigration: [String: String] = [
-        "tiny": AppMode.qwen3ModelId,
-        "small": AppMode.qwen3ModelId,
+        "tiny": AppMode.qwen3Small4BitModelId,
+        "small": AppMode.qwen3Small4BitModelId,
         "large-v3": AppMode.qwen3ModelId,
-        "base": AppMode.qwen3ModelId,
-        "medium": AppMode.qwen3ModelId,
+        "base": AppMode.qwen3Small4BitModelId,
+        "medium": AppMode.qwen3Large4BitModelId,
         "large": AppMode.qwen3ModelId,
-        "qwen3-asr-0.6b-mlx-4bit": AppMode.qwen3ModelId,
-        "qwen3-asr-1.7b-mlx-4bit": AppMode.qwen3ModelId,
+        "qwen3-asr-0.6b-mlx-4bit": AppMode.qwen3Small4BitModelId,
+        "qwen3-asr-0.6b-mlx-8bit": AppMode.qwen3Small8BitModelId,
+        "qwen3-asr-1.7b-mlx-4bit": AppMode.qwen3Large4BitModelId,
         "qwen3-asr-1.7b-mlx-8bit": AppMode.qwen3ModelId
     ]
 
@@ -104,7 +105,7 @@ final class ModelManager {
 
         guard AppMode.modelDefinition(for: current) == nil else { return false }
 
-        let fallback = AppMode.parakeetModelId
+        let fallback = LanguageModelCatalog.recommendedModelId(for: Constants.defaultLanguage)
         logger.info("Migrating selected model from '\(current)' to '\(fallback)'")
         settings[.selectedModel] = fallback
         if notify {
@@ -333,7 +334,7 @@ final class ModelManager {
         let didSwitchSelection: Bool
         if currentModel == modelId {
             let fallback = downloadedModels.first(where: { $0.id != modelId })?.id
-                ?? AppMode.parakeetModelId
+                ?? LanguageModelCatalog.recommendedModelId(for: Constants.defaultLanguage)
             settings[.selectedModel] = fallback
             didSwitchSelection = true
         } else {
@@ -400,7 +401,7 @@ final class ModelManager {
         switch def.family {
         case .qwen3ASR:
             additionalFiles = ["vocab.json", "merges.txt", "tokenizer_config.json"]
-        case .parakeetASR, .nemotronASR:
+        case .nemotronASR:
             additionalFiles = [
                 "encoder.mlmodelc/**",
                 "decoder.mlmodelc/**",

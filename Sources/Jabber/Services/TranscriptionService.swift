@@ -138,7 +138,21 @@ actor TranscriptionService {
     func transcribeStreaming(samples: [Float]) async throws -> String {
         try Task.checkCancellation()
 
-        return try await transcribe(samples: samples)
+        try await ensureModelLoaded()
+
+        try Task.checkCancellation()
+
+        guard let provider else {
+            throw TranscriptionError.loadFailed
+        }
+
+        let lang = selectedLanguage == "auto" ? nil : selectedLanguage
+        let prompt = vocabularyPrompt.isEmpty ? nil : vocabularyPrompt
+        return try await provider.transcribeStreaming(samples: samples, language: lang, vocabularyPrompt: prompt)
+    }
+
+    func resetStreamingTranscription() {
+        provider?.resetStreamingTranscription()
     }
 
     private func resolveLoadedModel(desiredModelId: String) -> Bool {
@@ -167,8 +181,6 @@ actor TranscriptionService {
         switch def.family {
         case .qwen3ASR:
             return Qwen3ASRProvider(modelId: modelId, huggingFaceModelId: def.huggingFaceModelId)
-        case .parakeetASR:
-            return ParakeetASRProvider(modelId: modelId, huggingFaceModelId: def.huggingFaceModelId)
         case .nemotronASR:
             return NemotronASRProvider(modelId: modelId, huggingFaceModelId: def.huggingFaceModelId)
         case .appleSpeech:
@@ -203,7 +215,7 @@ actor TranscriptionService {
                 switch error {
                 case .modelNotFound:
                     logger.warning("Unknown model id '\(modelIdToLoad)', falling back to base")
-                    let fallbackModelId = AppMode.parakeetModelId
+                    let fallbackModelId = LanguageModelCatalog.recommendedModelId(for: Constants.defaultLanguage)
                     await MainActor.run {
                         TypedSettings[.selectedModel] = fallbackModelId
                     }

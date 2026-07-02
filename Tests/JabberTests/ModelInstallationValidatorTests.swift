@@ -67,14 +67,14 @@ final class ModelInstallationValidatorTests: XCTestCase {
         )
     }
 
-    func testCompleteParakeetFolderIsValid() throws {
+    func testCompleteCoreMLTransducerFolderIsValid() throws {
         try writeFile(named: "config.json")
         try writeFile(named: "vocab.json")
         try createDirectory(named: "encoder.mlmodelc")
         try createDirectory(named: "decoder.mlmodelc")
         try createDirectory(named: "joint.mlmodelc")
 
-        let validation = ModelInstallationValidator.validateParakeetModelFolder(at: tempDir)
+        let validation = ModelInstallationValidator.validateCoreMLTransducerModelFolder(at: tempDir)
 
         XCTAssertTrue(validation.isComplete)
         XCTAssertTrue(validation.hasWeights)
@@ -86,7 +86,7 @@ final class ModelInstallationValidatorTests: XCTestCase {
         try createDirectory(named: "encoder.mlmodelc")
         try createDirectory(named: "decoder.mlmodelc")
 
-        let validation = ModelInstallationValidator.validateParakeetModelFolder(at: tempDir)
+        let validation = ModelInstallationValidator.validateCoreMLTransducerModelFolder(at: tempDir)
 
         XCTAssertFalse(validation.isComplete)
         XCTAssertFalse(validation.hasWeights)

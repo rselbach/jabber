@@ -52,7 +52,7 @@ final class DictationHistoryStoreTests: XCTestCase {
         XCTAssertEqual(decodedEntry.id, entry.id)
         XCTAssertEqual(decodedEntry.transcript, "cool cool cool")
         XCTAssertEqual(decodedEntry.modelID, AppMode.qwen3ModelId)
-        XCTAssertEqual(decodedEntry.modelName, "Qwen3-ASR")
+        XCTAssertEqual(decodedEntry.modelName, "Qwen3-ASR 1.7B 8-bit")
         XCTAssertEqual(decodedEntry.language, "en")
         XCTAssertEqual(decodedEntry.duration, 4.0 / 16_000.0, accuracy: 0.000_001)
     }

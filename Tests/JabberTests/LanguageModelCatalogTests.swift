@@ -2,9 +2,9 @@ import XCTest
 @testable import Jabber
 
 final class LanguageModelCatalogTests: XCTestCase {
-    func testEuropeanLanguageRecommendsParakeet() {
+    func testNonEnglishLanguageRecommendsQwen3() {
         let route = LanguageModelCatalog.routes(for: "de")
-        XCTAssertEqual(route.first?.modelId, AppMode.parakeetModelId)
+        XCTAssertEqual(route.first?.modelId, AppMode.qwen3ModelId)
         XCTAssertTrue(route.first?.isRecommended == true)
     }
 
@@ -14,10 +14,12 @@ final class LanguageModelCatalogTests: XCTestCase {
         XCTAssertTrue(route.first?.isRecommended == true)
     }
 
-    func testEnglishRouteIncludesParakeetButNotAsRecommended() {
+    func testEnglishIncludesAllQwen3ModelsButDoesNotRecommendThem() {
         let route = LanguageModelCatalog.routes(for: "en")
-        XCTAssertTrue(route.contains { $0.modelId == AppMode.parakeetModelId })
-        XCTAssertFalse(route.first { $0.modelId == AppMode.parakeetModelId }?.isRecommended == true)
+        assertIncludesAllQwen3Models(route.map(\.modelId))
+        for modelId in AppMode.qwen3ModelIds {
+            XCTAssertFalse(route.first { $0.modelId == modelId }?.isRecommended == true)
+        }
     }
 
     func testNonEuropeanLanguageRecommendsQwen3() {
@@ -26,35 +28,33 @@ final class LanguageModelCatalogTests: XCTestCase {
         XCTAssertTrue(route.first?.isRecommended == true)
     }
 
-    func testAutoDetectRecommendsParakeet() {
+    func testAutoDetectRecommendsNemotron() {
         let route = LanguageModelCatalog.routes(for: "auto")
-        XCTAssertEqual(route.first?.modelId, AppMode.parakeetModelId)
+        XCTAssertEqual(route.first?.modelId, AppMode.nemotronModelId)
     }
 
-    func testEuropeanLanguageIncludesParakeet() {
+    func testEuropeanLanguageIncludesQwen3Models() {
         let ids = LanguageModelCatalog.compatibleModelIds(for: "fr")
-        XCTAssertTrue(ids.contains(AppMode.parakeetModelId))
-        XCTAssertTrue(ids.contains(AppMode.qwen3ModelId))
+        assertIncludesAllQwen3Models(ids)
     }
 
     func testEnglishIncludesNemotron() {
         let ids = LanguageModelCatalog.compatibleModelIds(for: "en")
         XCTAssertTrue(ids.contains(AppMode.nemotronModelId))
-        XCTAssertTrue(ids.contains(AppMode.parakeetModelId))
-        XCTAssertTrue(ids.contains(AppMode.qwen3ModelId))
+        assertIncludesAllQwen3Models(ids)
     }
 
-    func testNonEuropeanLanguageExcludesParakeet() {
+    func testNonEuropeanLanguageExcludesNemotron() {
         let ids = LanguageModelCatalog.compatibleModelIds(for: "zh")
-        XCTAssertFalse(ids.contains(AppMode.parakeetModelId))
-        XCTAssertTrue(ids.contains(AppMode.qwen3ModelId))
+        XCTAssertFalse(ids.contains(AppMode.nemotronModelId))
+        assertIncludesAllQwen3Models(ids)
     }
 
-    func testNonEuropeanLanguageOnlyHasQwen3AndAppleSpeech() {
+    func testNonEuropeanLanguageOnlyHasQwen3ModelsAndAppleSpeech() {
         let ids = LanguageModelCatalog.compatibleModelIds(for: "zh")
-        XCTAssertTrue(ids.contains(AppMode.qwen3ModelId))
+        assertIncludesAllQwen3Models(ids)
         XCTAssertTrue(ids.contains(AppMode.appleSpeechModelId))
-        XCTAssertFalse(ids.contains(AppMode.parakeetModelId))
+        XCTAssertFalse(ids.contains(AppMode.nemotronModelId))
     }
 
     func testAppleSpeechIsNeverRecommended() {
@@ -67,23 +67,23 @@ final class LanguageModelCatalogTests: XCTestCase {
     }
 
     func testSupportsLanguageReturnsTrueForMatchingModel() {
-        XCTAssertTrue(LanguageModelCatalog.supportsLanguage("de", modelId: AppMode.parakeetModelId))
         XCTAssertTrue(LanguageModelCatalog.supportsLanguage("ja", modelId: AppMode.qwen3ModelId))
         XCTAssertTrue(LanguageModelCatalog.supportsLanguage("en", modelId: AppMode.nemotronModelId))
         XCTAssertTrue(LanguageModelCatalog.supportsLanguage("zh", modelId: AppMode.appleSpeechModelId))
     }
 
     func testSupportsLanguageReturnsFalseForNonMatchingModel() {
-        XCTAssertFalse(LanguageModelCatalog.supportsLanguage("ja", modelId: AppMode.parakeetModelId))
-        XCTAssertFalse(LanguageModelCatalog.supportsLanguage("th", modelId: AppMode.parakeetModelId))
         XCTAssertFalse(LanguageModelCatalog.supportsLanguage("de", modelId: AppMode.nemotronModelId))
         XCTAssertFalse(LanguageModelCatalog.supportsLanguage("ja", modelId: AppMode.nemotronModelId))
+        XCTAssertFalse(LanguageModelCatalog.supportsLanguage("en", modelId: "parakeet"))
     }
 
     func testQwen3SupportsAllLanguages() {
-        for code in Constants.validLanguageCodes {
-            XCTAssertTrue(LanguageModelCatalog.supportsLanguage(code, modelId: AppMode.qwen3ModelId),
-                          "Qwen3 should support language '\(code)'")
+        for modelId in AppMode.qwen3ModelIds {
+            for code in Constants.validLanguageCodes {
+                XCTAssertTrue(LanguageModelCatalog.supportsLanguage(code, modelId: modelId),
+                              "\(modelId) should support language '\(code)'")
+            }
         }
     }
 
@@ -99,10 +99,10 @@ final class LanguageModelCatalogTests: XCTestCase {
         }
     }
 
-    func testRecommendedModelIdForAutoReturnsParakeet() {
+    func testRecommendedModelIdForAutoReturnsNemotron() {
         XCTAssertEqual(
             LanguageModelCatalog.recommendedModelId(for: "auto"),
-            AppMode.parakeetModelId
+            AppMode.nemotronModelId
         )
     }
 
@@ -113,19 +113,21 @@ final class LanguageModelCatalogTests: XCTestCase {
         )
     }
 
-    func testAllParakeetLanguagesAreSupported() {
-        for code in AppMode.parakeetLanguageCodes {
-            let routes = LanguageModelCatalog.routes(for: code)
-            XCTAssertTrue(routes.contains { $0.modelId == AppMode.parakeetModelId },
-                          "Parakeet should be in routes for language '\(code)'")
+    func testNemotronOnlySupportsEnglish() {
+        XCTAssertTrue(LanguageModelCatalog.supportsLanguage("en", modelId: AppMode.nemotronModelId))
+        for code in Constants.validLanguageCodes where code != "en" {
+            XCTAssertFalse(LanguageModelCatalog.supportsLanguage(code, modelId: AppMode.nemotronModelId),
+                           "Nemotron should not support language '\(code)'")
         }
     }
 
-    func testNemotronOnlySupportsEnglish() {
-        XCTAssertTrue(LanguageModelCatalog.supportsLanguage("en", modelId: AppMode.nemotronModelId))
-        for code in AppMode.parakeetLanguageCodes where code != "en" {
-            XCTAssertFalse(LanguageModelCatalog.supportsLanguage(code, modelId: AppMode.nemotronModelId),
-                           "Nemotron should not support language '\(code)'")
+    func testParakeetIsNotASelectableModel() {
+        XCTAssertFalse(AppMode.modelDefinitions.contains { $0.id == "parakeet" })
+    }
+
+    private func assertIncludesAllQwen3Models(_ ids: [String], file: StaticString = #filePath, line: UInt = #line) {
+        for modelId in AppMode.qwen3ModelIds {
+            XCTAssertTrue(ids.contains(modelId), "Missing \(modelId)", file: file, line: line)
         }
     }
 }

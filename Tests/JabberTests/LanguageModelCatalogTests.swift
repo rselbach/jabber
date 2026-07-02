@@ -28,9 +28,14 @@ final class LanguageModelCatalogTests: XCTestCase {
         XCTAssertTrue(route.first?.isRecommended == true)
     }
 
-    func testAutoDetectRecommendsNemotron() {
+    func testAutoDetectRecommendsQwen3AndKeepsNemotronAsOption() {
         let route = LanguageModelCatalog.routes(for: "auto")
-        XCTAssertEqual(route.first?.modelId, AppMode.nemotronModelId)
+        let recommended = route.first { $0.isRecommended }
+        XCTAssertEqual(recommended?.modelId, AppMode.qwen3ModelId)
+
+        let nemotron = route.first { $0.modelId == AppMode.nemotronModelId }
+        XCTAssertNotNil(nemotron, "Nemotron should remain selectable for auto")
+        XCTAssertFalse(nemotron?.isRecommended == true, "Nemotron should not be recommended for auto")
     }
 
     func testEuropeanLanguageIncludesQwen3Models() {
@@ -99,9 +104,16 @@ final class LanguageModelCatalogTests: XCTestCase {
         }
     }
 
-    func testRecommendedModelIdForAutoReturnsNemotron() {
+    func testRecommendedModelIdForAutoReturnsQwen3() {
         XCTAssertEqual(
             LanguageModelCatalog.recommendedModelId(for: "auto"),
+            AppMode.qwen3ModelId
+        )
+    }
+
+    func testRecommendedModelIdForEnglishStillReturnsNemotron() {
+        XCTAssertEqual(
+            LanguageModelCatalog.recommendedModelId(for: "en"),
             AppMode.nemotronModelId
         )
     }

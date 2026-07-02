@@ -17,9 +17,9 @@ enum LanguageModelCatalog {
     static func routes(for languageCode: String) -> [Route] {
         if languageCode == "auto" {
             return [
-                .init(modelId: AppMode.nemotronModelId, isRecommended: true),
+                .init(modelId: AppMode.nemotronModelId, isRecommended: false),
                 .init(modelId: AppMode.appleSpeechModelId, isRecommended: false)
-            ] + qwen3Routes()
+            ] + qwen3Routes(recommendedModelId: AppMode.qwen3ModelId)
         }
 
         if languageCode == "en" {

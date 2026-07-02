@@ -1,4 +1,5 @@
 import AVFoundation
+@preconcurrency import AVFAudio
 import Foundation
 import os
 import Speech
@@ -41,9 +42,14 @@ final class AppleSpeechProvider: TranscriptionProvider, @unchecked Sendable {
         if !installedIDs.contains(Self.normalized(locale)) {
             if let downloader = try await AssetInventory.assetInstallationRequest(supporting: [transcriber]) {
                 let progress = downloader.progress
+                // progressHandler's type comes from the TranscriptionProvider protocol as a
+                // non-Sendable closure, so it cannot cross a Task boundary by default. It is
+                // only invoked from this single monitor Task, preserving the pre-existing
+                // timing/behavior, so we opt out of the check here rather than add sync.
+                nonisolated(unsafe) let onProgress = progressHandler
                 let monitorTask = Task {
                     while !Task.isCancelled, !progress.isFinished, !progress.isCancelled {
-                        progressHandler?(progress.fractionCompleted, "Downloading speech model...")
+                        onProgress?(progress.fractionCompleted, "Downloading speech model...")
                         do {
                             try await Task.sleep(for: .milliseconds(100))
                         } catch {
@@ -91,15 +97,17 @@ final class AppleSpeechProvider: TranscriptionProvider, @unchecked Sendable {
             convertedBuffer = buffer
         }
 
-        var finalText = ""
+        let finalText = OSAllocatedUnfairLock(initialState: "")
         let resultsTask = Task {
             for try await result in transcriber.results {
                 let text = String(result.text.characters)
                 if result.isFinal {
-                    if !finalText.isEmpty, !text.isEmpty {
-                        finalText += " "
+                    finalText.withLock { accumulated in
+                        if !accumulated.isEmpty, !text.isEmpty {
+                            accumulated += " "
+                        }
+                        accumulated += text
                     }
-                    finalText += text
                 }
             }
         }
@@ -117,7 +125,7 @@ final class AppleSpeechProvider: TranscriptionProvider, @unchecked Sendable {
             throw TranscriptionError.transcriptionFailed
         }
 
-        return finalText.trimmingCharacters(in: .whitespacesAndNewlines)
+        return finalText.withLock { $0 }.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
     func unload() {
@@ -207,13 +215,17 @@ final class AppleSpeechProvider: TranscriptionProvider, @unchecked Sendable {
             throw TranscriptionError.transcriptionFailed
         }
 
-        var processed = false
+        let processed = OSAllocatedUnfairLock(initialState: false)
         let status = converter.convert(to: output, error: nil) { _, outStatus in
-            if processed {
+            let alreadyDone = processed.withLock { state -> Bool in
+                let wasProcessed = state
+                state = true
+                return wasProcessed
+            }
+            if alreadyDone {
                 outStatus.pointee = .noDataNow
                 return nil
             }
-            processed = true
             outStatus.pointee = .haveData
             return buffer
         }

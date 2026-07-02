@@ -185,6 +185,34 @@ final class TypedSettingsTests: XCTestCase {
         XCTAssertEqual(settings.hotkeyShortcut, .defaultShortcut)
     }
 
+    func testModifierOnlyHotkeyShortcutPersistsAndDisplays() {
+        let rightOption = HotkeyShortcut(
+            keyCode: UInt32(kVK_RightOption),
+            modifiers: 0
+        )
+
+        settings.hotkeyShortcut = rightOption
+
+        XCTAssertEqual(settings.hotkeyShortcut, rightOption)
+        XCTAssertEqual(settings[.hotkeyKeyCode], Int(kVK_RightOption))
+        XCTAssertEqual(settings[.hotkeyModifiers], 0)
+        XCTAssertTrue(settings.hotkeyShortcut.isModifierOnly)
+        XCTAssertEqual(settings.hotkeyShortcut.displayString, "Right Option")
+    }
+
+    func testStoredModifierOnlyShortcutDoesNotFallBackToDefault() {
+        // keyCode 0 with no modifiers is invalid (plain "A" with no required
+        // modifier) and falls back; a real modifier-only key code must not.
+        settings[.hotkeyKeyCode] = Int(kVK_RightOption)
+        settings[.hotkeyModifiers] = 0
+
+        XCTAssertEqual(
+            settings.hotkeyShortcut,
+            HotkeyShortcut(keyCode: UInt32(kVK_RightOption), modifiers: 0)
+        )
+        XCTAssertNotEqual(settings.hotkeyShortcut, .defaultShortcut)
+    }
+
     func testHotkeyActivationModePersists() {
         settings.hotkeyActivationMode = .automatic
 

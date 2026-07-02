@@ -10,7 +10,7 @@ struct HotkeyShortcut: Equatable, Sendable {
         var errorDescription: String? {
             switch self {
             case .missingRequiredModifier:
-                return "Shortcut must include Command, Control, or Option."
+                return "Shortcut must include Command, Control, or Option — or use a lone modifier like Right Option."
             case .escapeKey:
                 return "Escape is reserved for cancelling shortcut recording."
             }
@@ -33,12 +33,52 @@ struct HotkeyShortcut: Equatable, Sendable {
         Self.validationError(keyCode: keyCode, modifiers: modifiers)
     }
 
+    /// Key codes that represent a standalone modifier key. Carbon's
+    /// `RegisterEventHotKey` cannot register these on their own (a bare modifier
+    /// produces no key-down event, and Carbon modifier flags do not encode the
+    /// physical side), so modifier-only shortcuts take a separate runtime path.
+    static let modifierOnlyKeyCodes: Set<UInt32> = [
+        UInt32(kVK_Command), UInt32(kVK_RightCommand),
+        UInt32(kVK_Shift), UInt32(kVK_RightShift),
+        UInt32(kVK_Option), UInt32(kVK_RightOption),
+        UInt32(kVK_Control), UInt32(kVK_RightControl)
+    ]
+
+    /// `true` when the shortcut is a single modifier key pressed on its own
+    /// (e.g. Right Option), with no additional modifiers.
+    var isModifierOnly: Bool {
+        modifiers == 0 && Self.modifierOnlyKeyCodes.contains(keyCode)
+    }
+
+    /// Maps a modifier key code to its Carbon modifier flag, or `nil` when the
+    /// code is not a standalone modifier key.
+    static func carbonModifier(forKeyCode keyCode: UInt32) -> UInt32? {
+        switch keyCode {
+        case UInt32(kVK_Command), UInt32(kVK_RightCommand):
+            return UInt32(cmdKey)
+        case UInt32(kVK_Shift), UInt32(kVK_RightShift):
+            return UInt32(shiftKey)
+        case UInt32(kVK_Option), UInt32(kVK_RightOption):
+            return UInt32(optionKey)
+        case UInt32(kVK_Control), UInt32(kVK_RightControl):
+            return UInt32(controlKey)
+        default:
+            return nil
+        }
+    }
+
     static func validationError(
         keyCode: UInt32,
         modifiers: UInt32
     ) -> ValidationError? {
         if keyCode == UInt32(kVK_Escape) {
             return .escapeKey
+        }
+
+        // A bare modifier key (e.g. Right Option) is a valid shortcut on its own
+        // and needs no additional required modifier.
+        if modifiers == 0, modifierOnlyKeyCodes.contains(keyCode) {
+            return nil
         }
 
         let requiredModifiers = UInt32(cmdKey | controlKey | optionKey)

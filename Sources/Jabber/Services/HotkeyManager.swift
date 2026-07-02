@@ -1,4 +1,5 @@
 import Carbon
+import CoreGraphics
 import Foundation
 import os
 
@@ -8,6 +9,20 @@ final class HotkeyManager: @unchecked Sendable {
     private var isDeinitialized = false
     private let lock = NSLock()
     private let logger = Logger(subsystem: "com.rselbach.jabber", category: "HotkeyManager")
+
+    // Modifier-only shortcuts (e.g. Right Option on its own) cannot be
+    // registered with Carbon — a bare modifier produces no key-down event and
+    // Carbon modifier flags do not encode the physical side. We observe flag
+    // transitions (and key-downs, to detect Option+key typing) with a
+    // listen-only CGEventTap, using the event's key code + physical key state
+    // to distinguish left/right.
+    private var eventTap: CFMachPort?
+    private var runLoopSource: CFRunLoopSource?
+    private var modifierOnlyShortcut: HotkeyShortcut?
+    // Pure decision logic for the gesture (debounce/cancel rules). Held under
+    // `lock`; mutated only from the event tap callback and the debounce timer.
+    private var gesture = ModifierOnlyGestureReducer()
+    private var modifierOnlyDebounce: DispatchWorkItem?
 
     var onKeyDown: (@MainActor () -> Void)?
     var onKeyUp: (@MainActor () -> Void)?
@@ -22,6 +37,10 @@ final class HotkeyManager: @unchecked Sendable {
         isDeinitialized = true
         let ref = hotKeyRef
         let handler = eventHandlerRef
+        let tap = eventTap
+        let source = runLoopSource
+        let debounce = modifierOnlyDebounce
+        modifierOnlyDebounce = nil
         lock.unlock()
 
         if let ref {
@@ -36,17 +55,75 @@ final class HotkeyManager: @unchecked Sendable {
                 logger.error("Failed to remove hotkey event handler with status: \(status)")
             }
         }
+        if let tap {
+            CGEvent.tapEnable(tap: tap, enable: false)
+            if let source {
+                CFRunLoopRemoveSource(CFRunLoopGetMain(), source, .commonModes)
+            }
+        }
+        debounce?.cancel()
     }
 
     @discardableResult
     func register(_ shortcut: HotkeyShortcut) -> OSStatus {
-        register(keyCode: shortcut.keyCode, modifiers: shortcut.modifiers)
+        unregister()
+
+        if shortcut.isModifierOnly {
+            return registerModifierOnly(shortcut)
+        }
+        return registerCarbon(keyCode: shortcut.keyCode, modifiers: shortcut.modifiers)
     }
 
     @discardableResult
     func register(keyCode: UInt32, modifiers: UInt32) -> OSStatus {
-        unregister()
+        register(HotkeyShortcut(keyCode: keyCode, modifiers: modifiers))
+    }
 
+    func unregister() {
+        lock.lock()
+        let ref = hotKeyRef
+        hotKeyRef = nil
+        let tap = eventTap
+        eventTap = nil
+        let source = runLoopSource
+        runLoopSource = nil
+        modifierOnlyShortcut = nil
+        gesture.reset()
+        let debounce = modifierOnlyDebounce
+        modifierOnlyDebounce = nil
+        lock.unlock()
+
+        if let ref {
+            let status = UnregisterEventHotKey(ref)
+            if status != noErr {
+                logger.error("Failed to unregister hotkey with status: \(status)")
+            }
+        }
+        if let tap {
+            CGEvent.tapEnable(tap: tap, enable: false)
+            if let source {
+                CFRunLoopRemoveSource(CFRunLoopGetMain(), source, .commonModes)
+            }
+        }
+        debounce?.cancel()
+    }
+
+    private func dispatchRegistrationFailure(_ status: OSStatus) {
+        if let onRegistrationFailure {
+            Task { @MainActor in
+                onRegistrationFailure(status)
+            }
+        }
+    }
+
+    private func isDeinit() -> Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        return isDeinitialized
+    }
+
+    @discardableResult
+    private func registerCarbon(keyCode: UInt32, modifiers: UInt32) -> OSStatus {
         guard let signature = OSType(fourCharCode: "JBBR") else {
             let status = OSStatus(paramErr)
             logger.error("Failed to create hotkey signature with status: \(status)")
@@ -78,32 +155,171 @@ final class HotkeyManager: @unchecked Sendable {
         return status
     }
 
-    func unregister() {
+    @discardableResult
+    private func registerModifierOnly(_ shortcut: HotkeyShortcut) -> OSStatus {
+        guard HotkeyShortcut.carbonModifier(forKeyCode: shortcut.keyCode) != nil else {
+            let status = OSStatus(paramErr)
+            logger.error("Modifier-only shortcut has unmapped key code: \(shortcut.keyCode)")
+            dispatchRegistrationFailure(status)
+            return status
+        }
+
+        // We need key-down in addition to flags-changed so we can detect
+        // Option+key (and other combo) typing while the modifier is held and
+        // cancel the pending start before it fires. Listen-only: we never
+        // swallow or modify user input.
+        let eventMask = CGEventMask(
+            (1 << CGEventType.flagsChanged.rawValue)
+                | (1 << CGEventType.keyDown.rawValue)
+        )
+        let refcon = Unmanaged.passUnretained(self).toOpaque()
+
+        guard let tap = CGEvent.tapCreate(
+            tap: .cgSessionEventTap,
+            place: .headInsertEventTap,
+            options: .listenOnly,
+            eventsOfInterest: eventMask,
+            callback: HotkeyManager.eventTapCallback,
+            userInfo: refcon
+        ) else {
+            // Most common cause: Accessibility / Input Monitoring not granted.
+            // Observing key-down events specifically requires Input Monitoring.
+            let status = OSStatus(eventNotHandledErr)
+            logger.error("Failed to create event tap for modifier-only shortcut (check Accessibility / Input Monitoring permission)")
+            dispatchRegistrationFailure(status)
+            return status
+        }
+
         lock.lock()
-        let ref = hotKeyRef
-        hotKeyRef = nil
+        modifierOnlyShortcut = shortcut
+        gesture.reset()
+        modifierOnlyDebounce?.cancel()
+        modifierOnlyDebounce = nil
+        eventTap = tap
+        let source = CFMachPortCreateRunLoopSource(nil, tap, 0)
+        runLoopSource = source
         lock.unlock()
 
-        if let ref {
-            let status = UnregisterEventHotKey(ref)
-            if status != noErr {
-                logger.error("Failed to unregister hotkey with status: \(status)")
-            }
-        }
+        CFRunLoopAddSource(CFRunLoopGetMain(), source, .commonModes)
+        CGEvent.tapEnable(tap: tap, enable: true)
+        return noErr
     }
 
-    private func dispatchRegistrationFailure(_ status: OSStatus) {
-        if let onRegistrationFailure {
-            Task { @MainActor in
-                onRegistrationFailure(status)
-            }
-        }
-    }
-
-    private func isDeinit() -> Bool {
+    private func currentEventTap() -> CFMachPort? {
         lock.lock()
         defer { lock.unlock() }
-        return isDeinitialized
+        return eventTap
+    }
+
+    private func handleEventTapEvent(type: CGEventType, event: CGEvent) -> Unmanaged<CGEvent>? {
+        if type == .tapDisabledByTimeout || type == .tapDisabledByUserInput {
+            if let tap = currentEventTap() {
+                CGEvent.tapEnable(tap: tap, enable: true)
+            }
+            return Unmanaged.passUnretained(event)
+        }
+
+        lock.lock()
+        let shortcut = modifierOnlyShortcut
+        lock.unlock()
+
+        // Only the modifier-only path uses the event tap; if there is none
+        // configured the tap should already be torn down, but guard anyway.
+        guard let shortcut else {
+            return Unmanaged.passUnretained(event)
+        }
+
+        let keyCode = UInt32(event.getIntegerValueField(.keyboardEventKeycode))
+
+        switch type {
+        case .flagsChanged:
+            // Ignore flag changes for any modifier other than the configured
+            // physical key (e.g. Left Option when Right Option is configured).
+            guard keyCode == shortcut.keyCode else {
+                return Unmanaged.passUnretained(event)
+            }
+            // Physical key state — distinguishes left/right reliably, unlike
+            // the aggregate .option/.control/.shift/.command event flags.
+            let isDown = CGEventSource.keyState(
+                .combinedSessionState,
+                key: CGKeyCode(keyCode)
+            )
+            feed(isDown ? .modifierDown : .modifierUp)
+
+        case .keyDown:
+            // Modifier keys surface as flagsChanged, not keyDown; any other
+            // key-down while the modifier is held means the user is typing a
+            // combo (e.g. Option+E), so we cancel the pending start.
+            guard !HotkeyShortcut.modifierOnlyKeyCodes.contains(keyCode) else {
+                return Unmanaged.passUnretained(event)
+            }
+            feed(.otherKeyDown)
+
+        default:
+            break
+        }
+
+        return Unmanaged.passUnretained(event)
+    }
+
+    /// Feed a gesture input to the reducer and translate the resulting action
+    /// into debounce scheduling/cancellation and `onKeyDown`/`onKeyUp` delivery.
+    private func feed(_ input: ModifierOnlyGestureReducer.Input) {
+        var action: ModifierOnlyGestureReducer.Action = .none
+        lock.lock()
+        action = gesture.handle(input)
+        switch action {
+        case .scheduleStart:
+            // Cancel any stale timer first to be safe, then arm a fresh one.
+            modifierOnlyDebounce?.cancel()
+            let work = DispatchWorkItem { [weak self] in
+                self?.handleDebounceTick()
+            }
+            modifierOnlyDebounce = work
+            DispatchQueue.main.asyncAfter(
+                deadline: .now() + ModifierOnlyGestureReducer.debounceInterval,
+                execute: work
+            )
+        case .cancelStart:
+            modifierOnlyDebounce?.cancel()
+            modifierOnlyDebounce = nil
+        default:
+            break
+        }
+        lock.unlock()
+
+        dispatchGesture(action)
+    }
+
+    private func handleDebounceTick() {
+        var action: ModifierOnlyGestureReducer.Action = .none
+        lock.lock()
+        modifierOnlyDebounce = nil
+        action = gesture.handle(.debounceElapsed)
+        lock.unlock()
+        dispatchGesture(action)
+    }
+
+    private func dispatchGesture(_ action: ModifierOnlyGestureReducer.Action) {
+        switch action {
+        case .fireDown:
+            Task { @MainActor in
+                self.onKeyDown?()
+            }
+        case .fireUp:
+            Task { @MainActor in
+                self.onKeyUp?()
+            }
+        case .scheduleStart, .cancelStart, .none:
+            break
+        }
+    }
+
+    private static let eventTapCallback: CGEventTapCallBack = { _, type, event, refcon in
+        guard let refcon else { return Unmanaged.passUnretained(event) }
+        let manager = Unmanaged<HotkeyManager>.fromOpaque(refcon).takeUnretainedValue()
+        guard !manager.isDeinit() else { return Unmanaged.passUnretained(event) }
+        return manager.handleEventTapEvent(type: type, event: event)
     }
 
     private func installEventHandler() {
@@ -159,5 +375,132 @@ private extension OSType {
             result = (result << 8) + OSType(char)
         }
         self = result
+    }
+}
+
+/// Pure decision logic for the modifier-only (e.g. Right Option) gesture.
+///
+/// Extracted from `HotkeyManager` so the debounce/cancel rules are unit
+/// testable without simulating real OS input. The manager feeds it inputs from
+/// the CGEventTap and the debounce timer, and maps the returned `Action` to the
+/// existing `onKeyDown`/`onKeyUp` callbacks.
+///
+/// `state` reflects whether the configured modifier is physically held and
+/// tracked (`.pending`) and has fired (`active`); it does not flip back to idle
+/// just because a combo key was typed. `otherKeyPressedDuringModifier` records
+/// that interference and gates the debounce.
+///
+/// Behaviour:
+/// - Pressing the configured modifier enters `.pending` and asks the caller to
+///   schedule a debounce timer (`scheduleStart`); nothing fires yet.
+/// - If the timer elapses while still pending and no other key was pressed, the
+///   gesture goes `.active` and asks the caller to fire `onKeyDown` (`fireDown`).
+/// - If any non-modifier key is pressed while pending (combo typing, e.g.
+///   Option+E), the start is cancelled (`cancelStart`) and remembered; nothing
+///   fires. The modifier is still physically held, so the eventual release
+///   tears the gesture down.
+/// - If the modifier is released while pending, the start is cancelled
+///   (`cancelStart`, or `.none` if another key already cancelled it); nothing
+///   fires.
+/// - Once active, a non-modifier key press is ignored (no re-fire); releasing
+///   the modifier still asks the caller to fire `onKeyUp` (`fireUp`) so the
+///   existing activation modes (hold / automatic push-to-talk) keep working.
+struct ModifierOnlyGestureReducer: Sendable, Equatable {
+    enum State: Sendable, Equatable {
+        case idle
+        case pending
+        case active
+    }
+
+    enum Action: Sendable, Equatable {
+        case none
+        case scheduleStart
+        case cancelStart
+        case fireDown
+        case fireUp
+    }
+
+    enum Input: Sendable, Equatable {
+        case modifierDown
+        case modifierUp
+        case otherKeyDown
+        case debounceElapsed
+    }
+
+    /// Debounce applied before `onKeyDown` fires. Matches the FluidVoice
+    /// approach (~150ms): long enough to reject Option+key typing and chatter,
+    /// short enough to feel instantaneous for an intentional hold.
+    static let debounceInterval: TimeInterval = 0.15
+
+    private(set) var state: State = .idle
+    /// `true` once a non-modifier key was pressed during the current hold.
+    /// Guards the debounce tick so dictation can never start after the user
+    /// typed a combo (e.g. Option+E). Reset whenever the gesture returns to
+    /// idle.
+    private(set) var otherKeyPressedDuringModifier = false
+
+    mutating func reset() {
+        state = .idle
+        otherKeyPressedDuringModifier = false
+    }
+
+    mutating func handle(_ input: Input) -> Action {
+        switch input {
+        case .modifierDown:
+            switch state {
+            case .idle:
+                state = .pending
+                otherKeyPressedDuringModifier = false
+                return .scheduleStart
+            case .pending, .active:
+                // Repeat down event (chatter / already tracking); ignore.
+                return .none
+            }
+
+        case .modifierUp:
+            switch state {
+            case .idle:
+                otherKeyPressedDuringModifier = false
+                return .none
+            case .pending:
+                // Released before fire. If a combo key already cancelled the
+                // start (and the timer), there is nothing left to cancel.
+                let alreadyCancelled = otherKeyPressedDuringModifier
+                state = .idle
+                otherKeyPressedDuringModifier = false
+                return alreadyCancelled ? .none : .cancelStart
+            case .active:
+                // onKeyDown already fired; stop the hold so existing activation
+                // modes (hold / automatic push-to-talk) behave as expected.
+                state = .idle
+                otherKeyPressedDuringModifier = false
+                return .fireUp
+            }
+
+        case .otherKeyDown:
+            switch state {
+            case .pending:
+                // Combo typing (e.g. Option+E): remember it and cancel the
+                // pending start. The modifier is still physically held, so the
+                // release tears the gesture down; the flag guards any stray
+                // debounce tick.
+                otherKeyPressedDuringModifier = true
+                return .cancelStart
+            case .active:
+                // Already recording: ignore (no re-fire).
+                otherKeyPressedDuringModifier = true
+                return .none
+            case .idle:
+                return .none
+            }
+
+        case .debounceElapsed:
+            // Only start if still pending and no other key intervened.
+            guard state == .pending, !otherKeyPressedDuringModifier else {
+                return .none
+            }
+            state = .active
+            return .fireDown
+        }
     }
 }

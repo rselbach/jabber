@@ -273,10 +273,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         hotkeyManager.onRegistrationFailure = { [weak self] status in
             self?.logger.error("Hotkey registration failed with status: \(status)")
-            let display = TypedSettings.hotkeyShortcut.displayString
+            let shortcut = TypedSettings.hotkeyShortcut
+            let display = shortcut.displayString
+            let message: String
+            if shortcut.isModifierOnly {
+                message = "Could not register \(display) as a global hotkey. Lone modifier keys require Accessibility (and Input Monitoring) permission in System Settings. OSStatus: \(status)"
+            } else {
+                message = "Could not register the global hotkey (\(display)). It may be in use by another application. OSStatus: \(status)"
+            }
             NotificationService.shared.showError(
                 title: "Hotkey Registration Failed",
-                message: "Could not register the global hotkey (\(display)). It may be in use by another application. OSStatus: \(status)",
+                message: message,
                 critical: false
             )
         }

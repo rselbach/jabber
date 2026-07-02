@@ -230,7 +230,7 @@ struct SettingsView: View {
             } header: {
                 Text("Hotkey")
             } footer: {
-                Text("Shortcuts must include Command, Control, or Option so Jabber does not steal every innocent keystroke like a gremlin.")
+                Text("Shortcuts must include Command, Control, or Option — or use a single modifier key like Right Option on its own — so Jabber does not steal every innocent keystroke like a gremlin.")
             }
 
             Section {

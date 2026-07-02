@@ -133,6 +133,11 @@ struct SettingsView: View {
         )
     }
 
+    private var isAccessibilityTrusted: Bool {
+        _ = permissionRefreshTick
+        return PermissionService.shared.hasAccessibilityPermission()
+    }
+
     private var selectedOutputMode: TypingService.OutputMode {
         TypingService.OutputMode(rawValue: TypingService.migratedOutputModeRawValue(outputMode)) ?? .directTyping
     }
@@ -169,7 +174,6 @@ struct SettingsView: View {
                     }
                     .buttonStyle(.borderless)
 
-                    let isAccessibilityTrusted = PermissionService.shared.hasAccessibilityPermission()
                     if !isAccessibilityTrusted {
                         Text("Accessibility permission is currently disabled. Open Settings to enable it.")
                             .font(.caption)

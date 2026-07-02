@@ -5,7 +5,7 @@ final class AppReadinessGate {
     static let shared = AppReadinessGate()
 
     private var isUIReady = false
-    private var continuations: [CheckedContinuation<Void, Never>] = []
+    private var continuations: [UUID: CheckedContinuation<Void, Never>] = [:]
 
     func markUIReady() {
         guard !isUIReady else { return }
@@ -14,7 +14,7 @@ final class AppReadinessGate {
         let waiters = continuations
         continuations.removeAll()
 
-        for continuation in waiters {
+        for continuation in waiters.values {
             continuation.resume()
         }
     }
@@ -22,8 +22,20 @@ final class AppReadinessGate {
     func waitForUIReady() async {
         guard !isUIReady else { return }
 
-        await withCheckedContinuation { continuation in
-            continuations.append(continuation)
+        // Each waiter gets a unique id so its own cancellation handler can remove
+        // (and resume) exactly that continuation. Both markUIReady() and the
+        // cancellation hop below run on @MainActor, so removeValue(forKey:) gives
+        // us atomic check-and-remove: every continuation is resumed at most once.
+        let id = UUID()
+        await withTaskCancellationHandler {
+            await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+                self.continuations[id] = continuation
+            }
+        } onCancel: {
+            Task { @MainActor in
+                guard let continuation = self.continuations.removeValue(forKey: id) else { return }
+                continuation.resume()
+            }
         }
     }
 }

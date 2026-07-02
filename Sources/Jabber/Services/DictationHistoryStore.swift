@@ -265,6 +265,8 @@ actor DictationHistoryStore: DictationHistoryProtocol {
     }
 
     private func enforceRetentionLimit() throws {
+        try pruneOrphanEntryDirectories()
+
         var entries = try loadEntries().sorted { $0.timestamp > $1.timestamp }
         var totalByteCount = try totalHistoryByteCount()
 
@@ -274,6 +276,31 @@ actor DictationHistoryStore: DictationHistoryProtocol {
             let removedByteCount = try byteCount(at: entryURL)
             try fileManager.removeItem(at: entryURL)
             totalByteCount = max(0, totalByteCount - removedByteCount)
+        }
+    }
+
+    /// Removes entry directories that lack `metadata.json`. Such orphans are
+    /// invisible to `loadEntries()` (which skips them) but still counted by
+    /// `totalHistoryByteCount()`, so they would otherwise consume the retention
+    /// byte budget and starve valid history.
+    private func pruneOrphanEntryDirectories() throws {
+        guard fileManager.fileExists(atPath: directoryURL.path) else { return }
+
+        let entryDirectories = try fileManager.contentsOfDirectory(
+            at: directoryURL,
+            includingPropertiesForKeys: nil,
+            options: [.skipsHiddenFiles]
+        )
+
+        for entryDirectory in entryDirectories {
+            var isDirectory: ObjCBool = false
+            guard fileManager.fileExists(atPath: entryDirectory.path, isDirectory: &isDirectory),
+                  isDirectory.boolValue else { continue }
+
+            let metadataURL = entryDirectory.appendingPathComponent(Self.metadataFilename)
+            guard !fileManager.fileExists(atPath: metadataURL.path) else { continue }
+
+            try fileManager.removeItem(at: entryDirectory)
         }
     }
 

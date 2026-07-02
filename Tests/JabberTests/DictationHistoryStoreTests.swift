@@ -208,6 +208,51 @@ final class DictationHistoryStoreTests: XCTestCase {
         XCTAssertTrue(remaining.isEmpty, "a failed save must not leave an orphan entry directory behind")
     }
 
+    // MARK: - Bug 2: retention must sweep orphans before applying limits
+
+    func testRetentionPrunesOrphanEntryDirectories() async throws {
+        let store = makeStore()
+
+        // Plant an orphan: an entry directory with audio.wav but no metadata.json.
+        let orphanDir = historyDirectoryURL
+            .appendingPathComponent("2024-01-01T00-00-00Z-orphan", isDirectory: true)
+        try FileManager.default.createDirectory(at: orphanDir, withIntermediateDirectories: true)
+        try Data([0xDE, 0xAD, 0xBE, 0xEF]).write(to: orphanDir.appendingPathComponent("audio.wav"))
+
+        // Saving a real session triggers enforceRetentionLimit, which should
+        // sweep the orphan before applying count/byte limits.
+        _ = try await store.save(session(
+            transcript: "Troy and Abed in the morning",
+            timestamp: Date(timeIntervalSince1970: 100)
+        ))
+
+        XCTAssertFalse(FileManager.default.fileExists(atPath: orphanDir.path), "orphan entry directory should be pruned")
+        let entries = await store.entries()
+        XCTAssertEqual(entries.map(\.transcript), ["Troy and Abed in the morning"])
+    }
+
+    func testOrphanBytesDoNotEvictValidEntries() async throws {
+        // Tight byte budget that the orphan alone exceeds, but a single valid
+        // entry fits within. Before the fix the orphan's bytes counted against
+        // the budget and evicted the only valid entry; the sweep must prevent
+        // that starvation.
+        let store = makeStore(maxByteCount: 4096)
+
+        let orphanDir = historyDirectoryURL
+            .appendingPathComponent("2024-01-01T00-00-00Z-orphan", isDirectory: true)
+        try FileManager.default.createDirectory(at: orphanDir, withIntermediateDirectories: true)
+        try Data(repeating: 0xAA, count: 8192).write(to: orphanDir.appendingPathComponent("audio.wav"))
+
+        _ = try await store.save(session(
+            transcript: "Greendale Community College",
+            timestamp: Date(timeIntervalSince1970: 100)
+        ))
+
+        XCTAssertFalse(FileManager.default.fileExists(atPath: orphanDir.path), "orphan should be pruned first")
+        let entries = await store.entries()
+        XCTAssertEqual(entries.map(\.transcript), ["Greendale Community College"])
+    }
+
     private func makeStore(maxEntryCount: Int = 50, maxByteCount: Int64 = 500 * 1024 * 1024) -> DictationHistoryStore {
         DictationHistoryStore(
             directoryURL: historyDirectoryURL,

@@ -31,12 +31,38 @@ final class TypingServiceTests: XCTestCase {
     }
 
     func testUnicodeChunksDoNotSplitSurrogatePairsAtChunkBoundary() {
-        let text = String(repeating: "a", count: 199) + "🎤"
+        // 19 UTF-16 units of ASCII puts the emoji's surrogate pair exactly on the
+        // 20-unit chunk boundary, exercising the pull-back logic.
+        let text = String(repeating: "a", count: 19) + "🎤"
         let chunks = TypingService.unicodeChunks(for: text)
 
         XCTAssertEqual(chunks.count, 2)
-        XCTAssertEqual(chunks[0].count, 199)
+        XCTAssertEqual(chunks[0].count, 19)
         XCTAssertEqual(chunks[1], Array("🎤".utf16))
+    }
+
+    func testUnicodeChunksNeverExceedUTF16CapForMixedEmojiString() {
+        // Long string mixing ASCII, multi-code-unit emoji, and a ZWJ family
+        // sequence (Community-style: "Streets ahead"). No chunk may exceed the
+        // 20 UTF-16 unit CGEvent cap, and reassembling the chunks must reproduce
+        // the original UTF-16 exactly (i.e. no surrogate pair was split).
+        let unit = "Streets ahead 🎤🎬👨‍👩‍👧 "
+        let text = String(repeating: unit, count: 30)
+
+        let chunks = TypingService.unicodeChunks(for: text)
+        XCTAssertFalse(chunks.isEmpty)
+
+        let cap = 20
+        for chunk in chunks {
+            XCTAssertLessThanOrEqual(
+                chunk.count,
+                cap,
+                "Chunk of \(chunk.count) UTF-16 units exceeds the \(cap)-unit CGEvent cap"
+            )
+        }
+
+        let reassembled = chunks.flatMap { $0 }
+        XCTAssertEqual(reassembled, Array(text.utf16))
     }
 
     func testAppIconReturnsImageForValidProcessID() {

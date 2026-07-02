@@ -17,7 +17,12 @@ final class TypingService {
     private let logger = Logger(subsystem: "com.rselbach.jabber", category: "TypingService")
     private static let pasteDelay: TimeInterval = 0.05
     private static let clipboardRestoreDelay: TimeInterval = 0.5
-    private static let cgEventUnicodeChunkSize = 200
+    /// CGEvent.keyboardSetUnicodeString (CGEventKeyboardSetUnicodeString) silently
+    /// truncates payloads beyond 20 UTF-16 code units at runtime, garbling injected
+    /// text. CoreGraphics' CGEvent.h documents the manual override but not the cap;
+    /// the 20-UniChar limit is the long-standing OS behavior relied on by projects
+    /// such as Hammerspoon and Karabiner. See CGEvent.h (CGEventKeyboardSetUnicodeString).
+    private static let cgEventUnicodeChunkSize = 20
 
     var mode: OutputMode {
         let rawValue = TypedSettings[.outputMode]

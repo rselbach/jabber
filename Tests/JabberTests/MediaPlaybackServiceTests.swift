@@ -3,6 +3,17 @@ import XCTest
 
 @MainActor
 final class MediaPlaybackServiceTests: XCTestCase {
+    func testLoadedAdapterLibraryURLResolvesLoadedDylib() {
+        // The test process loads libMediaRemoteAdapter.dylib at launch (JabberTests → Jabber →
+        // MediaRemoteAdapter dynamic library), so the resolver must find it on the dyld image list.
+        let url = MediaRemoteClient.loadedAdapterLibraryURL()
+        XCTAssertNotNil(url, "libMediaRemoteAdapter.dylib should be loaded in the test process")
+        XCTAssertEqual(url?.lastPathComponent, "libMediaRemoteAdapter.dylib")
+        if let url {
+            XCTAssertTrue(FileManager.default.fileExists(atPath: url.path), "resolved dylib path should exist on disk")
+        }
+    }
+
     private var client: FakeMediaRemoteClient!
 
     override func setUp() async throws {

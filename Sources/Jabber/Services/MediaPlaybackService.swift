@@ -150,7 +150,7 @@ final class MediaRemoteClient: MediaRemoteControlling {
     }
 
     init() {
-        let libraryURL = Bundle(for: MediaController.self).executableURL
+        let libraryURL = Self.loadedAdapterLibraryURL()
         self.libraryURL = libraryURL
         scriptURL = Self.findScriptURL(libraryURL: libraryURL)
 
@@ -287,6 +287,25 @@ final class MediaRemoteClient: MediaRemoteControlling {
             errorOutput: errorOutput,
             terminationStatus: process.terminationStatus
         )
+    }
+
+    /// Locates the loaded `libMediaRemoteAdapter.dylib` by scanning the process's dyld image list.
+    ///
+    /// `Bundle(for: MediaController.self).executableURL` is unreliable here: `MediaController` is a
+    /// pure Swift class, so NSBundle resolves to the dylib's containing directory (executable == nil)
+    /// in the flat `.build` layout, and to the main app executable inside a packaged `.app`. Walking
+    /// the loaded images returns the real dylib path in both layouts.
+    nonisolated static func loadedAdapterLibraryURL() -> URL? {
+        let suffix = "/libMediaRemoteAdapter.dylib"
+        let count = _dyld_image_count()
+        for index in 0 ..< count {
+            guard let name = _dyld_get_image_name(index) else { continue }
+            let path = String(cString: name)
+            if path.hasSuffix(suffix) {
+                return URL(fileURLWithPath: path)
+            }
+        }
+        return nil
     }
 
     nonisolated private static func findScriptURL(libraryURL: URL?) -> URL? {

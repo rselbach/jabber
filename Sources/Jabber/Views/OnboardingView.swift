@@ -116,24 +116,26 @@ struct OnboardingView: View {
                 .foregroundStyle(.secondary)
 
             ScrollView {
-                LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible()), GridItem(.flexible())], spacing: 8) {
-                    ForEach(popularLanguages, id: \.code) { lang in
-                        languageCard(name: lang.name, code: lang.code)
-                    }
-                }
-
-                if showAllLanguages {
-                    Divider().padding(.vertical, 8)
-
-                    if !languageSearchText.isEmpty {
-                        ForEach(searchedLanguages, id: \.code) { lang in
+                if languageSearchText.isEmpty {
+                    LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible()), GridItem(.flexible())], spacing: 8) {
+                        ForEach(popularLanguages, id: \.code) { lang in
                             languageCard(name: lang.name, code: lang.code)
                         }
-                    } else {
+                    }
+
+                    if showAllLanguages {
+                        Divider().padding(.vertical, 8)
+
                         LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible()), GridItem(.flexible())], spacing: 8) {
                             ForEach(allLanguages, id: \.code) { lang in
                                 languageCard(name: lang.name, code: lang.code)
                             }
+                        }
+                    }
+                } else {
+                    LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible()), GridItem(.flexible())], spacing: 8) {
+                        ForEach(searchedLanguages, id: \.code) { lang in
+                            languageCard(name: lang.name, code: lang.code)
                         }
                     }
                 }

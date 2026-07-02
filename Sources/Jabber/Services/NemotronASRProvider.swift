@@ -19,6 +19,13 @@ final class NemotronASRProvider: TranscriptionProvider, @unchecked Sendable {
     }
 
     func load(from cacheDir: URL, progressHandler: ((Double, String) -> Void)?) async throws {
+        // NemotronStreamingASRModel.fromPretrained exposes no cacheDir/downloadBase parameter, so
+        // the protocol-supplied cacheDir is unused here. The dependency always resolves the storage
+        // location itself via HuggingFaceDownloader.getCacheDirectory(for:), landing under
+        // ~/Library/Caches/qwen3-speech/models/<org>/<model>/ (matching ModelManager.cacheBase()'s
+        // default). If cacheBase() is overridden (custom cacheBaseURL / QWEN3_CACHE_DIR / sandboxed
+        // container) Nemotron will NOT follow it and may duplicate the multi-GB download. Unlike
+        // Qwen3ASRProvider, this cannot be fixed without a change in the speech-swift dependency.
         let m = try await NemotronStreamingASRModel.fromPretrained(
             modelId: huggingFaceModelId,
             progressHandler: { progress, status in

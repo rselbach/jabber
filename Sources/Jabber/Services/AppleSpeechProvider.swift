@@ -1,9 +1,12 @@
 import AVFoundation
 import Foundation
+import os
 import Speech
 
 final class AppleSpeechProvider: TranscriptionProvider, @unchecked Sendable {
     let modelId: String
+
+    private let logger = Logger(subsystem: "com.rselbach.jabber", category: "AppleSpeechProvider")
 
     private var analyzerFormat: AVAudioFormat?
     private var converter: AVAudioConverter?
@@ -41,7 +44,11 @@ final class AppleSpeechProvider: TranscriptionProvider, @unchecked Sendable {
                 let monitorTask = Task {
                     while !Task.isCancelled, !progress.isFinished, !progress.isCancelled {
                         progressHandler?(progress.fractionCompleted, "Downloading speech model...")
-                        try? await Task.sleep(for: .milliseconds(100))
+                        do {
+                            try await Task.sleep(for: .milliseconds(100))
+                        } catch {
+                            break
+                        }
                     }
                 }
                 defer { monitorTask.cancel() }
@@ -100,8 +107,15 @@ final class AppleSpeechProvider: TranscriptionProvider, @unchecked Sendable {
         try await analyzer.start(inputSequence: inputStream)
         continuation.yield(AnalyzerInput(buffer: convertedBuffer))
         continuation.finish()
-        try? await analyzer.finalizeAndFinishThroughEndOfInput()
-        try? await resultsTask.value
+        do {
+            try await analyzer.finalizeAndFinishThroughEndOfInput()
+            try await resultsTask.value
+        } catch is CancellationError {
+            throw CancellationError()
+        } catch {
+            logger.error("Speech transcription finalization failed: \(error.localizedDescription)")
+            throw TranscriptionError.transcriptionFailed
+        }
 
         return finalText.trimmingCharacters(in: .whitespacesAndNewlines)
     }

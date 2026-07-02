@@ -278,6 +278,8 @@ final class ModelManager {
                 phase: .failed,
                 isCancelled: true
             )
+            // Preserve HuggingFace .incomplete resume data on user cancellation
+            // so a re-download picks up where it left off — do NOT clean up.
             throw CancellationError()
         } catch {
             postDownloadState(
@@ -287,6 +289,12 @@ final class ModelManager {
                 phase: .failed,
                 errorDescription: error.localizedDescription
             )
+            // Clean up the partial folder. HuggingFaceDownloader already retried
+            // 3x internally, so a failure here is genuine (network/hard-fault/
+            // incomplete validation); leftover config.json and partial .mlmodelc
+            // contents would linger as invisible junk since modelFolder(for:)
+            // returns nil for incomplete installs.
+            removeFailedDownloadFolder(for: modelId)
             throw error
         }
 
@@ -387,15 +395,66 @@ final class ModelManager {
         return nil
     }
 
+    /// Resolve the on-disk download folder for a model. Centralized so the
+    /// download path and failure cleanup always agree on the location.
+    private func downloadFolder(for modelId: String) throws -> URL {
+        guard let def = AppMode.modelDefinition(for: modelId) else {
+            throw ModelError.modelNotFound(modelId: modelId)
+        }
+        return try HuggingFaceDownloader.getCacheDirectory(
+            for: def.huggingFaceModelId,
+            basePath: cacheBase()
+        )
+    }
+
+    /// Remove a partially-downloaded model folder left behind by a failed
+    /// download (partial config.json, half-written .mlmodelc, stale index).
+    ///
+    /// HuggingFace keeps its `.incomplete` resume data INSIDE this folder
+    /// (at `<folder>/.cache/huggingface/download/*.incomplete`), so deleting
+    /// it also discards resume state. Call this only on genuine failures,
+    /// never on user cancellation — see `performDownload`.
+    ///
+    /// Logs cleanup and any removal error; never swallows failures silently.
+    func removeFailedDownloadFolder(for modelId: String) {
+        let folder: URL
+        do {
+            folder = try downloadFolder(for: modelId)
+        } catch {
+            logger.error("Could not resolve download folder for failed cleanup of \(modelId): \(error.localizedDescription)")
+            return
+        }
+
+        let fm = FileManager.default
+        guard fm.fileExists(atPath: folder.path) else { return }
+
+        // Defensive: only delete a strict descendant of the cache base — never
+        // the cache base itself, the shared `models` parent, or anything that
+        // escapes the cache via path traversal.
+        let cacheBasePath = cacheBase().standardizedFileURL.path
+        let folderPath = folder.standardizedFileURL.path
+        guard folderPath != cacheBasePath,
+              folderPath.hasPrefix(cacheBasePath + "/"),
+              folder.lastPathComponent != "models"
+        else {
+            logger.error("Refusing to delete unsafe path during cleanup of \(modelId): \(folderPath)")
+            return
+        }
+
+        do {
+            try fm.removeItem(at: folder)
+            logger.info("Removed partial download folder for \(modelId) at \(folder.path)")
+        } catch {
+            logger.error("Failed to remove partial download folder for \(modelId) at \(folder.path): \(error.localizedDescription)")
+        }
+    }
+
     private func downloadModelFiles(modelId: String, modelName: String) async throws -> URL {
         guard let def = AppMode.modelDefinition(for: modelId) else {
             throw ModelError.modelNotFound(modelId: modelId)
         }
 
-        let downloadFolder = try HuggingFaceDownloader.getCacheDirectory(
-            for: def.huggingFaceModelId,
-            basePath: cacheBase()
-        )
+        let downloadFolder = try downloadFolder(for: modelId)
 
         let additionalFiles: [String]
         switch def.family {

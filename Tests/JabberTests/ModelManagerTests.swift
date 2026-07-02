@@ -186,6 +186,58 @@ final class ModelManagerTests: XCTestCase {
         modelManager.cancelDownload("nonexistent")
     }
 
+    // MARK: - Failed-download folder cleanup
+
+    // The live download path can't be simulated without injecting a downloader
+    // seam (HuggingFaceDownloader is a concrete type from AudioCommon and its
+    // snapshot() does real network I/O with 20s+ retries). That would be
+    // invasive refactoring, explicitly out of scope. Instead these tests pin
+    // down the new destructive helper's path resolution + safety guards, which
+    // is where regressions (e.g. deleting the parent models dir) would bite.
+
+    func testRemoveFailedDownloadFolderDeletesOnlyTargetModel() throws {
+        let target = cacheBaseURL
+            .appendingPathComponent("models", isDirectory: true)
+            .appendingPathComponent("aufklarer", isDirectory: true)
+            .appendingPathComponent("Qwen3-ASR-1.7B-MLX-8bit", isDirectory: true)
+        try FileManager.default.createDirectory(at: target, withIntermediateDirectories: true)
+        try Data("partial".utf8).write(to: target.appendingPathComponent("config.json"))
+
+        // A sibling model folder that must be left untouched.
+        let sibling = cacheBaseURL
+            .appendingPathComponent("models", isDirectory: true)
+            .appendingPathComponent("aufklarer", isDirectory: true)
+            .appendingPathComponent("Qwen3-ASR-1.7B-MLX-4bit", isDirectory: true)
+        try FileManager.default.createDirectory(at: sibling, withIntermediateDirectories: true)
+        try Data("partial".utf8).write(to: sibling.appendingPathComponent("config.json"))
+
+        modelManager.removeFailedDownloadFolder(for: AppMode.qwen3ModelId)
+
+        XCTAssertFalse(
+            FileManager.default.fileExists(atPath: target.path),
+            "Target partial folder should be removed after failed cleanup"
+        )
+        XCTAssertTrue(
+            FileManager.default.fileExists(atPath: sibling.path),
+            "Sibling model folders must be preserved"
+        )
+        XCTAssertTrue(
+            FileManager.default.fileExists(atPath: cacheBaseURL.path),
+            "Cache base must be preserved"
+        )
+    }
+
+    func testRemoveFailedDownloadFolderSafeForUnknownModel() {
+        // Unknown model id -> downloadFolder(for:) throws -> helper logs and
+        // returns without touching the cache base.
+        modelManager.removeFailedDownloadFolder(for: "totally-unknown-model")
+
+        XCTAssertTrue(
+            FileManager.default.fileExists(atPath: cacheBaseURL.path),
+            "Cache base must be untouched when model id is unknown"
+        )
+    }
+
     func testEnsureModelDownloadedReturnsExistingFolder() async throws {
         let modelFolder = cacheBaseURL
             .appendingPathComponent("models", isDirectory: true)

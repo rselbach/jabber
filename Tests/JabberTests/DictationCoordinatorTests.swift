@@ -345,6 +345,43 @@ final class DictationCoordinatorTests: XCTestCase {
         XCTAssertTrue(typingService.outputs.isEmpty)
     }
 
+    func testCancelDuringPostProcessingDiscardsResult() async {
+        enablePostProcessing()
+        postProcessor.isAvailable = true
+        postProcessor.result = .success("Troy Barnes")
+        // Park process() on a continuation so cancel() lands mid-flight, the
+        // same way the real uncancellable FoundationModels call would.
+        postProcessor.holdUntilReleased = true
+
+        audioCapture.storedSamples = makeLoudSamples()
+        transcriptionService.transcribeResult = .success("troy barnes")
+
+        let processStarted = XCTestExpectation(description: "post-processing started")
+        postProcessor.onProcessStarted = { processStarted.fulfill() }
+
+        XCTAssertTrue(coordinator.start(targetProcessID: 12_345))
+        coordinator.stop()
+
+        // Wait for transcription to finish and post-processing to park.
+        await fulfillment(of: [processStarted], timeout: 1.0)
+
+        // Cancel while post-processing is in flight: this nils the target PID
+        // and the session id, mutating coordinator state under the stale task.
+        coordinator.cancel()
+        XCTAssertTrue(coordinator.isIdle)
+
+        // Release the parked (uncancellable) post-processing so the stale task
+        // races forward into the save/output section.
+        postProcessor.releaseProcess()
+
+        // Let the abandoned task finish.
+        try? await Task.sleep(for: .milliseconds(200))
+
+        // The stale task must NOT save history or type output after cancel().
+        XCTAssertTrue(typingService.outputs.isEmpty)
+        XCTAssertTrue(dictationHistoryStore.sessions.isEmpty)
+    }
+
     func testAudioConversionErrorIsForwarded() {
         let conversionError = AudioCaptureError.conversionFailed(NSError(domain: "test", code: 1))
 
@@ -799,6 +836,9 @@ final class FakePostProcessingProvider: PostProcessingProvider, @unchecked Senda
     private var _result: Result<String, Error> = .success("")
     private var _processCallCount = 0
     private var _lastProcessedInput: String?
+    private var _holdUntilReleased = false
+    private var _processRelease: CheckedContinuation<Void, Never>?
+    private var _onProcessStarted: (() -> Void)?
 
     var isAvailable: Bool {
         get { lock.withLock { _isAvailable } }
@@ -818,12 +858,49 @@ final class FakePostProcessingProvider: PostProcessingProvider, @unchecked Senda
         lock.withLock { _lastProcessedInput }
     }
 
+    var holdUntilReleased: Bool {
+        get { lock.withLock { _holdUntilReleased } }
+        set { lock.withLock { _holdUntilReleased = newValue } }
+    }
+
+    var onProcessStarted: (() -> Void)? {
+        get { lock.withLock { _onProcessStarted } }
+        set { lock.withLock { _onProcessStarted = newValue } }
+    }
+
+    /// Resumes a `process(_:)` call parked via `holdUntilReleased`.
+    func releaseProcess() {
+        let continuation = lock.withLock {
+            let continuation = _processRelease
+            _processRelease = nil
+            return continuation
+        }
+        continuation?.resume()
+    }
+
     func process(_ transcript: String) async throws -> String {
         let snapshot = lock.withLock {
             _processCallCount += 1
             _lastProcessedInput = transcript
-            return _result
+            return (
+                result: _result,
+                holdUntilReleased: _holdUntilReleased,
+                onProcessStarted: _onProcessStarted
+            )
         }
-        return try snapshot.get()
+
+        if snapshot.holdUntilReleased {
+            await withCheckedContinuation { continuation in
+                let onProcessStarted = lock.withLock {
+                    _processRelease = continuation
+                    return _onProcessStarted
+                }
+                onProcessStarted?()
+            }
+        } else {
+            snapshot.onProcessStarted?()
+        }
+
+        return try snapshot.result.get()
     }
 }

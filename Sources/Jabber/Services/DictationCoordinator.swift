@@ -312,10 +312,22 @@ final class DictationCoordinator {
                 throw CancellationError()
             }
 
+            // Capture the target PID before the awaits below. cancel() mutates
+            // currentTargetProcessID (and may start a new session), so reading it
+            // later would risk typing stale text into the wrong target.
+            let targetProcessID = currentTargetProcessID
+
             let modelID = await transcriptionService.currentModelId() ?? TypedSettings[.selectedModel]
             let language = TypedSettings[.selectedLanguage]
 
             let postProcessingOutcome = try await applyPostProcessing(to: text)
+
+            // Re-validate before saving/typing: the awaits above
+            // (currentModelId, post-processing) are uncancellable on device.
+            // If cancel() invalidated this session mid-flight, abandon output.
+            guard currentSessionID == sessionID else {
+                throw CancellationError()
+            }
 
             await dictationHistoryStore.saveSession(DictationHistorySession(
                 samples: samples,
@@ -329,7 +341,7 @@ final class DictationCoordinator {
 
             let trimmedText = postProcessingOutcome.outputText.trimmingCharacters(in: .whitespacesAndNewlines)
             if !trimmedText.isEmpty {
-                typingService.output(trimmedText, targetProcessID: currentTargetProcessID)
+                typingService.output(trimmedText, targetProcessID: targetProcessID)
             } else if postProcessingOutcome.wasPostProcessed {
                 // Post-processor returned empty on success (e.g. "scratch that",
                 // "cancel", "never mind"). This is a valid cancellation: type

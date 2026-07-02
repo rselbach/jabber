@@ -39,6 +39,17 @@ final class TypingServiceTests: XCTestCase {
         XCTAssertEqual(chunks[1], Array("🎤".utf16))
     }
 
+    func testAppIconReturnsImageForValidProcessID() {
+        let pid = ProcessInfo.processInfo.processIdentifier
+        let icon = TypingService.appIcon(forTargetProcessID: pid)
+        XCTAssertNotNil(icon)
+    }
+
+    func testAppIconForNilOrInvalidProcessIDDoesNotCrash() {
+        XCTAssertNoThrow(TypingService.appIcon(forTargetProcessID: nil))
+        XCTAssertNoThrow(TypingService.appIcon(forTargetProcessID: pid_t(999_999)))
+    }
+
     func testPasteboardSnapshotRestoresStringContents() {
         let pasteboard = NSPasteboard.withUniqueName()
         pasteboard.clearContents()

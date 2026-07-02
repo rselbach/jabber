@@ -84,6 +84,10 @@ final class OverlayWindow: OverlayWindowController {
         waveformView?.showProcessing()
     }
 
+    func setTargetAppIcon(_ icon: NSImage?) {
+        waveformView?.setTargetAppIcon(icon)
+    }
+
     @discardableResult
     override func createWindow() -> Bool {
         guard let screen = NSScreen.main ?? NSScreen.screens.first else { return false }
@@ -141,14 +145,35 @@ struct WaveformContainer: View {
             RoundedRectangle(cornerRadius: 12)
                 .fill(.ultraThinMaterial)
 
-            if waveformView.isProcessing {
-                processingContent
-            } else if waveformView.partialTranscription.isEmpty {
-                waveform
-            } else {
-                previewContent
+            HStack(spacing: 10) {
+                if let icon = waveformView.targetAppIcon {
+                    targetAppIconView(icon)
+                        .padding(.leading, 10)
+                }
+
+                content
             }
         }
+    }
+
+    @ViewBuilder
+    private var content: some View {
+        if waveformView.isProcessing {
+            processingContent
+        } else if waveformView.partialTranscription.isEmpty {
+            waveform
+        } else {
+            previewContent
+        }
+    }
+
+    private func targetAppIconView(_ icon: NSImage) -> some View {
+        Image(nsImage: icon)
+            .resizable()
+            .interpolation(.high)
+            .aspectRatio(contentMode: .fit)
+            .frame(width: 20, height: 20)
+            .clipShape(RoundedRectangle(cornerRadius: 5))
     }
 
     private var waveform: some View {

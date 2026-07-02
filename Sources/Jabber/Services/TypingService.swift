@@ -65,6 +65,26 @@ final class TypingService {
         return pid
     }
 
+    /// Resolves the app icon for the process Jabber will type into.
+    /// Falls back to the frontmost app when the PID is missing or unresolvable,
+    /// and never returns Jabber's own icon.
+    static func appIcon(forTargetProcessID pid: pid_t?) -> NSImage? {
+        let ownBundleID = Bundle.main.bundleIdentifier
+
+        if let pid, pid > 0,
+           let app = NSRunningApplication(processIdentifier: pid),
+           app.bundleIdentifier != ownBundleID {
+            return app.icon
+        }
+
+        if let frontmost = NSWorkspace.shared.frontmostApplication,
+           frontmost.bundleIdentifier != ownBundleID {
+            return frontmost.icon
+        }
+
+        return nil
+    }
+
     func output(_ text: String, targetProcessID: pid_t?) {
         switch mode {
         case .clipboard:

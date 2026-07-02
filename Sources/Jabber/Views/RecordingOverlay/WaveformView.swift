@@ -1,3 +1,4 @@
+import AppKit
 import Foundation
 import SwiftUI
 
@@ -6,6 +7,7 @@ final class WaveformView: ObservableObject {
     @Published private var circularBuffer: [Float] = []
     @Published private(set) var isProcessing = false
     @Published private(set) var partialTranscription = ""
+    @Published private(set) var targetAppIcon: NSImage?
 
     private let maxSamples = 60
     private var writeIndex = 0
@@ -36,6 +38,7 @@ final class WaveformView: ObservableObject {
         isFull = false
         isProcessing = false
         partialTranscription = ""
+        targetAppIcon = nil
     }
 
     func showProcessing() {
@@ -44,5 +47,9 @@ final class WaveformView: ObservableObject {
 
     func updatePartialTranscription(_ text: String) {
         partialTranscription = text
+    }
+
+    func setTargetAppIcon(_ icon: NSImage?) {
+        targetAppIcon = icon
     }
 }

@@ -50,6 +50,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private var modelState: TranscriptionService.State = .notReady
 
+    private var currentTargetProcessID: pid_t?
+
     private var downloadStatesByModelId: [String: ModelDownloadState] = [:]
     private var activeDownloadModelId: String?
 
@@ -458,6 +460,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
 
         let targetProcessID = TypingService.captureFocusedProcessID()
+        currentTargetProcessID = targetProcessID
         _ = dictationCoordinator.start(targetProcessID: targetProcessID)
     }
 
@@ -636,10 +639,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         switch state {
         case .idle:
             overlayWindow.hide()
+            overlayWindow.setTargetAppIcon(nil)
+            currentTargetProcessID = nil
             syncNonDictationUI()
         case .recording:
             downloadOverlay.hide()
             overlayWindow.show()
+            overlayWindow.setTargetAppIcon(
+                TypingService.appIcon(forTargetProcessID: currentTargetProcessID)
+            )
             updateStatusIcon(state: .recording)
         case .transcribing:
             overlayWindow.showProcessing()

@@ -14,6 +14,7 @@ enum TypedSetting<T>: Sendable {
     case outputMode
     case hotkeyActivationMode
     case vocabularyPrompt
+    case replacementEntries
     case postProcessingProviderKind
     case openRouterModel
     case lastModelMigrationNoticeKey
@@ -26,6 +27,7 @@ enum TypedSetting<T>: Sendable {
         case .outputMode: return AppSettingKey.outputMode
         case .hotkeyActivationMode: return AppSettingKey.hotkeyActivationMode
         case .vocabularyPrompt: return AppSettingKey.vocabularyPrompt
+        case .replacementEntries: return AppSettingKey.replacementEntries
         case .postProcessingProviderKind: return AppSettingKey.postProcessingProviderKind
         case .openRouterModel: return AppSettingKey.openRouterModel
         case .lastModelMigrationNoticeKey: return AppSettingKey.lastModelMigrationNoticeKey
@@ -103,6 +105,8 @@ extension TypedSetting where T == String {
             return HotkeyActivationMode.defaultMode.rawValue
         case .vocabularyPrompt:
             return ""
+        case .replacementEntries:
+            return ""
         case .postProcessingProviderKind:
             return PostProcessingProviderKind.defaultValue.rawValue
         case .openRouterModel:
@@ -138,7 +142,7 @@ struct SettingsStore: Sendable {
                 resolvedValue = PostProcessingProviderKind.resolve(rawValue: value).rawValue
             case .openRouterModel:
                 resolvedValue = OpenRouterModelCatalog.resolveModelId(value)
-            case .selectedModel, .selectedLanguage, .vocabularyPrompt, .lastModelMigrationNoticeKey:
+            case .selectedModel, .selectedLanguage, .vocabularyPrompt, .replacementEntries, .lastModelMigrationNoticeKey:
                 resolvedValue = value
             }
             if resolvedValue != value {
@@ -191,6 +195,18 @@ struct SettingsStore: Sendable {
 
     func isSet(_ setting: IntSetting) -> Bool {
         userDefaults.object(forKey: setting.key) != nil
+    }
+
+    /// Instant-replacement rules, JSON-encoded under `replacementEntries`.
+    /// Decode errors recover as an empty list (logged by the codec); they never
+    /// throw so dictation never breaks on a corrupted preference.
+    var replacementEntries: [ReplacementEntry] {
+        get {
+            ReplacementEntriesCodec.decode(userDefaults.string(forKey: AppSettingKey.replacementEntries) ?? "")
+        }
+        nonmutating set {
+            userDefaults.set(ReplacementEntriesCodec.encode(newValue), forKey: AppSettingKey.replacementEntries)
+        }
     }
 }
 
@@ -257,5 +273,12 @@ enum TypedSettings {
     /// Check if an integer setting has been explicitly set
     static func isSet(_ setting: IntSetting) -> Bool {
         store.isSet(setting)
+    }
+
+    /// Instant-replacement rules applied as a deterministic final pass after
+    /// transcription/post-processing.
+    static var replacementEntries: [ReplacementEntry] {
+        get { store.replacementEntries }
+        set { store.replacementEntries = newValue }
     }
 }

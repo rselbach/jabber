@@ -33,6 +33,8 @@ final class TypedSettingsTests: XCTestCase {
         XCTAssertEqual(settings[.outputMode], TypingService.OutputMode.directTyping.rawValue)
         XCTAssertEqual(settings[.hotkeyActivationMode], HotkeyActivationMode.defaultMode.rawValue)
         XCTAssertEqual(settings[.vocabularyPrompt], "", "Default vocabulary should be empty")
+        XCTAssertEqual(settings[.replacementEntries], "", "Default replacement entries should be empty JSON string")
+        XCTAssertEqual(settings.replacementEntries, [], "Default replacement entries array should be empty")
         XCTAssertEqual(settings[.postProcessingProviderKind], PostProcessingProviderKind.defaultValue.rawValue)
         XCTAssertEqual(settings[.openRouterModel], OpenRouterModelCatalog.defaultModelId)
     }
@@ -314,5 +316,34 @@ final class TypedSettingsTests: XCTestCase {
         // Cleanup
         userDefaults.removeObject(forKey: modelKey)
         userDefaults.removeObject(forKey: languageKey)
+    }
+
+    // MARK: - Replacement entries
+
+    func testReplacementEntriesRoundTripAndRemove() {
+        XCTAssertEqual(settings.replacementEntries, [])
+        XCTAssertFalse(settings.isSet(.replacementEntries))
+
+        let entries = [
+            ReplacementEntry(triggers: ["troy", "señor chang"], replacement: "Troy Barnes")
+        ]
+        settings.replacementEntries = entries
+
+        XCTAssertEqual(settings.replacementEntries, entries)
+        XCTAssertTrue(settings.isSet(.replacementEntries))
+        // The underlying storage is a JSON string under the typed setting key.
+        XCTAssertTrue(settings[.replacementEntries].contains("Troy Barnes"))
+
+        settings.remove(.replacementEntries)
+        XCTAssertEqual(settings.replacementEntries, [])
+        XCTAssertEqual(settings[.replacementEntries], "")
+        XCTAssertFalse(settings.isSet(.replacementEntries))
+    }
+
+    func testReplacementEntriesDecodesCorruptStoredJSONAsEmpty() {
+        userDefaults.set("{broken", forKey: AppSettingKey.replacementEntries)
+
+        // Corrupt JSON recovers to an empty list rather than throwing.
+        XCTAssertEqual(settings.replacementEntries, [])
     }
 }

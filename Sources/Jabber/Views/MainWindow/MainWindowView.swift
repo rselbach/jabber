@@ -82,6 +82,11 @@ struct MainWindowView: View {
         }
         .frame(minWidth: 760, minHeight: 540)
         .onAppear(perform: onAppearAction)
+        .onReceive(NotificationCenter.default.publisher(for: Constants.Notifications.mainWindowSectionDidRequest)) { notification in
+            if let section = notification.object as? Section {
+                selection = section
+            }
+        }
     }
 
     private var sidebar: some View {

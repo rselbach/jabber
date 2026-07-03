@@ -278,15 +278,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         let openItem = NSMenuItem(title: "Open Jabber", action: #selector(openJabber), keyEquivalent: "")
         let settingsItem = NSMenuItem(title: "Settings…", action: #selector(openSettings), keyEquivalent: ",")
+        let vocabularyItem = NSMenuItem(title: "Vocabulary", action: #selector(openVocabulary), keyEquivalent: "")
         let updatesItem = NSMenuItem(title: "Check for Updates…", action: #selector(checkForUpdates), keyEquivalent: "")
         let quitItem = NSMenuItem(title: "Quit Jabber", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
 
-        for item in [openItem, settingsItem, updatesItem] {
+        for item in [openItem, settingsItem, vocabularyItem, updatesItem] {
             item.target = self
         }
         // quitItem has no target → routes through the responder chain to NSApp.terminate.
 
-        menu.items = [openItem, settingsItem, .separator(), updatesItem, .separator(), quitItem]
+        menu.items = [openItem, settingsItem, vocabularyItem, .separator(), updatesItem, .separator(), quitItem]
         return menu
     }
 
@@ -296,6 +297,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     @objc private func openSettings() {
         showMainWindow(initialSection: .general)
+    }
+
+    @objc private func openVocabulary() {
+        showMainWindow(initialSection: .vocabulary)
+        // `showMainWindow` honors `initialSection` only when creating the
+        // window; when it is already open the selection is driven via this
+        // notification so the Vocabulary item always lands on the right page.
+        NotificationCenter.default.post(
+            name: Constants.Notifications.mainWindowSectionDidRequest,
+            object: MainWindowView.Section.vocabulary
+        )
     }
 
     @objc private func checkForUpdates() {

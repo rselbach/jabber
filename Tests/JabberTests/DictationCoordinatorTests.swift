@@ -20,6 +20,7 @@ final class DictationCoordinatorTests: XCTestCase {
         dictationHistoryStore = FakeDictationHistoryStore()
         postProcessor = FakePostProcessingProvider()
         UserDefaults.standard.removeObject(forKey: AppSettingKey.postProcessingEnabled)
+        UserDefaults.standard.removeObject(forKey: AppSettingKey.replacementEntries)
         coordinator = DictationCoordinator(
             audioCapture: audioCapture,
             transcriptionService: transcriptionService,
@@ -41,6 +42,7 @@ final class DictationCoordinatorTests: XCTestCase {
         dictationHistoryStore = nil
         postProcessor = nil
         UserDefaults.standard.removeObject(forKey: AppSettingKey.postProcessingEnabled)
+        UserDefaults.standard.removeObject(forKey: AppSettingKey.replacementEntries)
         try await super.tearDown()
     }
 
@@ -816,6 +818,69 @@ final class DictationCoordinatorTests: XCTestCase {
         XCTAssertTrue(localized.localizedCaseInsensitiveContains("raw transcript"))
         XCTAssertEqual(session.transcript, raw)
         XCTAssertFalse(session.wasPostProcessed)
+    }
+
+    // MARK: - Instant replacement (final pass)
+
+    private func enableReplacementEntries(_ entries: [ReplacementEntry]) {
+        UserDefaults.standard.set(
+            ReplacementEntriesCodec.encode(entries),
+            forKey: AppSettingKey.replacementEntries
+        )
+    }
+
+    func testInstantReplacementAppliedToRawTranscript() async {
+        enableReplacementEntries([
+            ReplacementEntry(triggers: ["troy barnes"], replacement: "Troy Barnes")
+        ])
+        audioCapture.storedSamples = makeLoudSamples()
+        transcriptionService.transcribeResult = .success("i saw troy barnes at greendale")
+
+        let idleExpectation = expectationForIdle()
+        XCTAssertTrue(coordinator.start())
+        coordinator.stop()
+        await fulfillment(of: [idleExpectation], timeout: 1.0)
+
+        XCTAssertEqual(typingService.outputs, ["i saw Troy Barnes at greendale"])
+        XCTAssertEqual(dictationHistoryStore.sessions[0].transcript, "i saw Troy Barnes at greendale")
+    }
+
+    func testInstantReplacementAppliedAfterPostProcessing() async {
+        enableReplacementEntries([
+            ReplacementEntry(triggers: ["troy barnes"], replacement: "Troy Barnes")
+        ])
+        enablePostProcessing()
+        postProcessor.isAvailable = true
+        // Post-processing output still contains the literal trigger; the
+        // replacement must run AFTER post-processing to catch it.
+        postProcessor.result = .success("hello troy barnes")
+        audioCapture.storedSamples = makeLoudSamples()
+        transcriptionService.transcribeResult = .success("hello troy barnes")
+
+        let idleExpectation = expectationForIdle()
+        XCTAssertTrue(coordinator.start())
+        coordinator.stop()
+        await fulfillment(of: [idleExpectation], timeout: 1.0)
+
+        XCTAssertEqual(typingService.outputs, ["hello Troy Barnes"])
+        let session = dictationHistoryStore.sessions[0]
+        XCTAssertEqual(session.transcript, "hello Troy Barnes")
+        // rawTranscript is the pre-replacement raw input, unchanged.
+        XCTAssertEqual(session.rawTranscript, "hello troy barnes")
+        XCTAssertTrue(session.wasPostProcessed)
+    }
+
+    func testInstantReplacementNoOpWithoutEntries() async {
+        // No entries configured: transcript passes through untouched.
+        audioCapture.storedSamples = makeLoudSamples()
+        transcriptionService.transcribeResult = .success("troy and abed")
+
+        let idleExpectation = expectationForIdle()
+        XCTAssertTrue(coordinator.start())
+        coordinator.stop()
+        await fulfillment(of: [idleExpectation], timeout: 1.0)
+
+        XCTAssertEqual(typingService.outputs, ["troy and abed"])
     }
 
     private func expectationForIdle() -> XCTestExpectation {

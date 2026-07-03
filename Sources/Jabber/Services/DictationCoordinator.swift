@@ -375,20 +375,38 @@ final class DictationCoordinator {
                 throw CancellationError()
             }
 
+            // Instant Replacement: a deterministic final pass applied AFTER
+            // post-processing/refinement and BEFORE output. Literal trigger
+            // phrases (case-insensitive, word-bounded) are replaced with the
+            // user's chosen text so what gets typed matches what gets stored
+            // in history. Skipped (no-op) when no rules are configured.
+            var resolvedOutcome = postProcessingOutcome
+            let replacementEntries = TypedSettings.replacementEntries
+            if !replacementEntries.isEmpty {
+                resolvedOutcome.finalText = ReplacementWordsResolver.resolve(
+                    transcript: postProcessingOutcome.finalText,
+                    entries: replacementEntries
+                )
+                resolvedOutcome.outputText = ReplacementWordsResolver.resolve(
+                    transcript: postProcessingOutcome.outputText,
+                    entries: replacementEntries
+                )
+            }
+
             await dictationHistoryStore.saveSession(DictationHistorySession(
                 samples: samples,
-                transcript: postProcessingOutcome.finalText,
+                transcript: resolvedOutcome.finalText,
                 modelID: modelID,
                 language: language,
-                rawTranscript: postProcessingOutcome.rawTranscript,
-                wasPostProcessed: postProcessingOutcome.wasPostProcessed,
-                postProcessingErrorDescription: postProcessingOutcome.errorDescription
+                rawTranscript: resolvedOutcome.rawTranscript,
+                wasPostProcessed: resolvedOutcome.wasPostProcessed,
+                postProcessingErrorDescription: resolvedOutcome.errorDescription
             ))
 
-            let trimmedText = postProcessingOutcome.outputText.trimmingCharacters(in: .whitespacesAndNewlines)
+            let trimmedText = resolvedOutcome.outputText.trimmingCharacters(in: .whitespacesAndNewlines)
             if !trimmedText.isEmpty {
                 typingService.output(trimmedText, targetProcessID: targetProcessID)
-            } else if postProcessingOutcome.wasPostProcessed {
+            } else if resolvedOutcome.wasPostProcessed {
                 // Post-processor returned empty on success (e.g. "scratch that",
                 // "cancel", "never mind"). This is a valid cancellation: type
                 // nothing and show no no-speech warning, since speech *was*

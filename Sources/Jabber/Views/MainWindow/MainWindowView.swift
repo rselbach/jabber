@@ -24,7 +24,7 @@ struct MainWindowView: View {
         case general
         case hotkey
         case speech
-        case refinement
+        case postProcessing
         case vocabulary
         case history
         case about
@@ -39,7 +39,7 @@ struct MainWindowView: View {
             case .general: return "General"
             case .hotkey: return "Hotkey"
             case .speech: return "Speech"
-            case .refinement: return "Refinement"
+            case .postProcessing: return "Post-Processing"
             case .vocabulary: return "Vocabulary"
             case .history: return "History"
             case .about: return "About"
@@ -52,7 +52,7 @@ struct MainWindowView: View {
             case .general: return "gearshape.fill"
             case .hotkey: return "keyboard.fill"
             case .speech: return "waveform"
-            case .refinement: return "wand.and.stars"
+            case .postProcessing: return "wand.and.stars"
             case .vocabulary: return "text.book.closed.fill"
             case .history: return "clock.arrow.circlepath"
             case .about: return "info"
@@ -65,7 +65,7 @@ struct MainWindowView: View {
             case .general: return .gray
             case .hotkey: return .indigo
             case .speech: return .blue
-            case .refinement: return .purple
+            case .postProcessing: return .purple
             case .vocabulary: return .orange
             case .history: return .teal
             case .about: return .secondary
@@ -94,7 +94,7 @@ struct MainWindowView: View {
                 sidebarRow(.general)
                 sidebarRow(.hotkey)
                 sidebarRow(.speech)
-                sidebarRow(.refinement)
+                sidebarRow(.postProcessing)
                 sidebarRow(.vocabulary)
             }
 
@@ -137,8 +137,8 @@ struct MainWindowView: View {
             HotkeyPage()
         case .speech:
             SpeechPage()
-        case .refinement:
-            RefinementPage()
+        case .postProcessing:
+            PostProcessingPage()
         case .vocabulary:
             VocabularyPage()
         case .history:

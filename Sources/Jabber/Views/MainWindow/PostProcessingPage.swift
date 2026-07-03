@@ -1,7 +1,7 @@
 import SwiftUI
 
-/// Transcript refinement (post-processing) configuration.
-struct RefinementPage: View {
+/// Transcript post-processing configuration.
+struct PostProcessingPage: View {
     @AppStorage(AppSettingKey.postProcessingEnabled) private var postProcessingEnabled = false
     @AppStorage(AppSettingKey.postProcessingProviderKind) private var postProcessingProviderKindRaw = PostProcessingProviderKind.defaultValue.rawValue
     @AppStorage(AppSettingKey.openRouterModel) private var openRouterModel = OpenRouterModelCatalog.defaultModelId
@@ -12,10 +12,10 @@ struct RefinementPage: View {
     var body: some View {
         Form {
             Section {
-                Toggle("Refine transcripts", isOn: $postProcessingEnabled)
+                Toggle("Post-process transcripts", isOn: $postProcessingEnabled)
 
                 if postProcessingEnabled {
-                    Picker("Refinement provider", selection: $postProcessingProviderKindRaw) {
+                    Picker("Post-processing provider", selection: $postProcessingProviderKindRaw) {
                         ForEach(PostProcessingProviderKind.allCases) { kind in
                             Text(kind.displayName).tag(kind.rawValue)
                         }
@@ -45,18 +45,22 @@ struct RefinementPage: View {
                                 .foregroundStyle(.red)
                         }
 
-                        Text("Cloud refinement sends your transcript to OpenRouter and the selected model provider for processing. The API key is stored in your macOS Keychain, not in preferences. Falls back to the raw transcript if the request fails.")
+                        Text("Cloud post-processing sends your transcript to OpenRouter and the selected model provider for processing. The API key is stored in your macOS Keychain, not in preferences. Falls back to the raw transcript if the request fails.")
                             .font(.caption)
                             .foregroundStyle(.secondary)
                     }
                 }
             } header: {
-                Text("Transcript Refinement")
+                Text("Post-Processing")
             }
         }
         .formStyle(.grouped)
         .onAppear {
             loadOpenRouterAPIKey()
+            // Reading the keychain can surface an auth prompt that deactivates
+            // Jabber; bring it back to the front once the prompt resolves so
+            // the main window doesn't end up stranded behind other apps.
+            NSApp.activate()
         }
         .onDisappear {
             saveOpenRouterAPIKey()

@@ -365,7 +365,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         dictationCoordinator.onPostProcessingFallback = { [weak self] in
             guard let self else { return }
             self.logger.notice("Post-processing fell back to raw transcript after guardrail rejection")
-            self.overlayWindow.showFallbackNotice("Refinement looked wrong — used raw transcript")
+            self.overlayWindow.showFallbackNotice("Post-processing looked wrong — used raw transcript")
         }
     }
 

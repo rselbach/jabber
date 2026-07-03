@@ -455,7 +455,7 @@ final class DictationCoordinator {
         }
 
         guard provider.isAvailable else {
-            // Refinement provider not ready / not enabled / unsupported.
+            // Post-processing provider not ready / not enabled / unsupported.
             // Logged but not surfaced as a user notification — it is a steady
             // OS state (or a missing API key) that would spam every dictation
             // otherwise. The metadata is still recorded so users can see why

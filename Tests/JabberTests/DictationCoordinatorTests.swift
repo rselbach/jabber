@@ -476,6 +476,8 @@ final class DictationCoordinatorTests: XCTestCase {
 
         var surfacedError: Error?
         coordinator.onPostProcessingError = { error in surfacedError = error }
+        var fallbackCalled = false
+        coordinator.onPostProcessingFallback = { fallbackCalled = true }
 
         let idleExpectation = expectationForIdle()
         audioCapture.storedSamples = makeLoudSamples()
@@ -484,9 +486,12 @@ final class DictationCoordinatorTests: XCTestCase {
         coordinator.stop()
         await fulfillment(of: [idleExpectation], timeout: 1.0)
 
+        // Provider throws are NOT retried (retries are for guardrail rejection).
         XCTAssertEqual(postProcessor.processCallCount, 1)
         XCTAssertEqual(typingService.outputs, ["cool cool cool"])
         XCTAssertNotNil(surfacedError)
+        // A true provider failure must not trigger the guardrail-fallback path.
+        XCTAssertFalse(fallbackCalled)
         let session = dictationHistoryStore.sessions[0]
         XCTAssertEqual(session.transcript, "cool cool cool")
         XCTAssertFalse(session.wasPostProcessed)
@@ -504,6 +509,8 @@ final class DictationCoordinatorTests: XCTestCase {
 
         var surfacedError: Error?
         coordinator.onPostProcessingError = { error in surfacedError = error }
+        var fallbackCalled = false
+        coordinator.onPostProcessingFallback = { fallbackCalled = true }
 
         var didShowNoSpeech = false
         coordinator.onNoSpeechDetected = { didShowNoSpeech = true }
@@ -519,6 +526,7 @@ final class DictationCoordinatorTests: XCTestCase {
         // No fallback to raw, nothing typed, no error surfaced.
         XCTAssertTrue(typingService.outputs.isEmpty)
         XCTAssertNil(surfacedError)
+        XCTAssertFalse(fallbackCalled)
         // No-speech warning must NOT fire: speech was detected and processed,
         // the user just cancelled via a self-correction.
         XCTAssertFalse(didShowNoSpeech)
@@ -594,11 +602,14 @@ final class DictationCoordinatorTests: XCTestCase {
         postProcessor.isAvailable = true
         // 25-word Greendale transcript with no correction triggers.
         let raw = "Troy and Abed are studying at Greendale Community College for their Spanish exam with Señor Chang and they hope to pass the class this semester."
-        // Suspiciously summarized to 3 words (~12% of raw), no markdown.
+        // Suspiciously summarized to 3 words (~12% of raw), no markdown. Both
+        // the first pass and the retry return this, so both are rejected.
         postProcessor.result = .success("Studying at Greendale.")
 
-        var surfacedError: Error?
-        coordinator.onPostProcessingError = { error in surfacedError = error }
+        var fallbackCalled = false
+        coordinator.onPostProcessingFallback = { fallbackCalled = true }
+        var providerError: Error?
+        coordinator.onPostProcessingError = { error in providerError = error }
 
         let idleExpectation = expectationForIdle()
         audioCapture.storedSamples = makeLoudSamples()
@@ -607,15 +618,25 @@ final class DictationCoordinatorTests: XCTestCase {
         coordinator.stop()
         await fulfillment(of: [idleExpectation], timeout: 1.0)
 
-        XCTAssertEqual(postProcessor.processCallCount, 1)
+        // Guardrail rejection triggers exactly one retry; both passes rejected.
+        XCTAssertEqual(postProcessor.processCallCount, 2)
         // Corrupted summary must not be typed; the raw transcript is used.
         XCTAssertEqual(typingService.outputs, [raw])
-        XCTAssertTrue(surfacedError is PostProcessingValidationError)
+        // Validation fallback is non-disruptive: the provider-error path (which
+        // drives a click-to-dismiss alert) must NOT fire.
+        XCTAssertTrue(fallbackCalled)
+        XCTAssertNil(providerError)
         let session = dictationHistoryStore.sessions[0]
+        // The user-facing localizedDescription must not leak the Swift type
+        // name ("Jabber.PostProcessingValidationError error 1.") and must
+        // explain the fallback in plain English. History mirrors it.
+        let localized = session.postProcessingErrorDescription ?? ""
+        XCTAssertFalse(localized.contains("PostProcessingValidationError error"))
+        XCTAssertTrue(localized.contains("looked too different"))
+        XCTAssertTrue(localized.localizedCaseInsensitiveContains("raw transcript"))
         XCTAssertEqual(session.transcript, raw)
         XCTAssertFalse(session.wasPostProcessed)
         XCTAssertNil(session.rawTranscript)
-        XCTAssertNotNil(session.postProcessingErrorDescription)
     }
 
     func testPostProcessingRogueMarkdownHeadingFallsBackToRaw() async {
@@ -624,11 +645,14 @@ final class DictationCoordinatorTests: XCTestCase {
         // 7-word raw (< shrinkageMinimumRawWords, so shrinkage is skipped) and
         // free of any formatting command words.
         let raw = "the trojan horse is a great plan"
-        // Provider injected a markdown heading the user never asked for.
+        // Provider injected a markdown heading the user never asked for. Both
+        // the first pass and the retry return this, so both are rejected.
         postProcessor.result = .success("# The Trojan Horse Is A Great Plan")
 
-        var surfacedError: Error?
-        coordinator.onPostProcessingError = { error in surfacedError = error }
+        var fallbackCalled = false
+        coordinator.onPostProcessingFallback = { fallbackCalled = true }
+        var providerError: Error?
+        coordinator.onPostProcessingError = { error in providerError = error }
 
         let idleExpectation = expectationForIdle()
         audioCapture.storedSamples = makeLoudSamples()
@@ -637,13 +661,17 @@ final class DictationCoordinatorTests: XCTestCase {
         coordinator.stop()
         await fulfillment(of: [idleExpectation], timeout: 1.0)
 
-        XCTAssertEqual(postProcessor.processCallCount, 1)
+        XCTAssertEqual(postProcessor.processCallCount, 2)
         XCTAssertEqual(typingService.outputs, [raw])
-        XCTAssertTrue(surfacedError is PostProcessingValidationError)
+        XCTAssertTrue(fallbackCalled)
+        XCTAssertNil(providerError)
         let session = dictationHistoryStore.sessions[0]
+        let localized = session.postProcessingErrorDescription ?? ""
+        XCTAssertFalse(localized.contains("PostProcessingValidationError error"))
+        XCTAssertTrue(localized.contains("Markdown formatting"))
+        XCTAssertTrue(localized.localizedCaseInsensitiveContains("raw transcript"))
         XCTAssertEqual(session.transcript, raw)
         XCTAssertFalse(session.wasPostProcessed)
-        XCTAssertNotNil(session.postProcessingErrorDescription)
     }
 
     func testPostProcessingExplicitHeaderCommandAllowsMarkdown() async {
@@ -654,6 +682,8 @@ final class DictationCoordinatorTests: XCTestCase {
         let raw = "header shopping list"
         postProcessor.result = .success("# Shopping List")
 
+        var fallbackCalled = false
+        coordinator.onPostProcessingFallback = { fallbackCalled = true }
         var surfacedError: Error?
         coordinator.onPostProcessingError = { error in surfacedError = error }
 
@@ -664,9 +694,11 @@ final class DictationCoordinatorTests: XCTestCase {
         coordinator.stop()
         await fulfillment(of: [idleExpectation], timeout: 1.0)
 
+        // First pass passes validation, so no retry and no fallback.
         XCTAssertEqual(postProcessor.processCallCount, 1)
         // Processed markdown output is kept because the user requested it.
         XCTAssertEqual(typingService.outputs, ["# Shopping List"])
+        XCTAssertFalse(fallbackCalled)
         XCTAssertNil(surfacedError)
         let session = dictationHistoryStore.sessions[0]
         XCTAssertEqual(session.transcript, "# Shopping List")
@@ -675,16 +707,23 @@ final class DictationCoordinatorTests: XCTestCase {
         XCTAssertNil(session.postProcessingErrorDescription)
     }
 
-    func testPostProcessingSampleOverTransformationFallsBackToRaw() async {
+    func testPostProcessingRetrySucceedsOnSecondAttempt() async {
         enablePostProcessing()
         postProcessor.isAvailable = true
-        let raw = "This is a test of the transcribing capabilities. I am going to say some things and we will see what the result is. Newline. Now I want to see if the commands are working."
-        // Observed Apple Intelligence over-transformation: a markdown heading
-        // plus heavy summarization of a 34-word transcript down to 7 words.
-        postProcessor.result = .success("# Testing Transcription Capabilities\nSee results. Commands: working.")
+        // 25-word Greendale transcript with no correction triggers.
+        let raw = "Troy and Abed are studying at Greendale Community College for their Spanish exam with Señor Chang and they hope to pass the class this semester."
+        // First pass: suspiciously summarized (rejected). Retry: clean output
+        // that preserves content, so it passes validation and is typed.
+        let cleaned = "Troy and Abed are studying at Greendale Community College for their Spanish exam with Señor Chang, and they hope to pass the class this semester."
+        postProcessor.sequentialResults = [
+            .success("Studying at Greendale."),
+            .success(cleaned)
+        ]
 
-        var surfacedError: Error?
-        coordinator.onPostProcessingError = { error in surfacedError = error }
+        var fallbackCalled = false
+        coordinator.onPostProcessingFallback = { fallbackCalled = true }
+        var providerError: Error?
+        coordinator.onPostProcessingError = { error in providerError = error }
 
         let idleExpectation = expectationForIdle()
         audioCapture.storedSamples = makeLoudSamples()
@@ -693,13 +732,90 @@ final class DictationCoordinatorTests: XCTestCase {
         coordinator.stop()
         await fulfillment(of: [idleExpectation], timeout: 1.0)
 
-        XCTAssertEqual(postProcessor.processCallCount, 1)
+        // One rejected pass plus one retry.
+        XCTAssertEqual(postProcessor.processCallCount, 2)
+        // The retry output is used as the successful post-processed result.
+        XCTAssertEqual(typingService.outputs, [cleaned])
+        XCTAssertFalse(fallbackCalled)
+        XCTAssertNil(providerError)
+        let session = dictationHistoryStore.sessions[0]
+        XCTAssertEqual(session.transcript, cleaned)
+        XCTAssertEqual(session.rawTranscript, raw)
+        XCTAssertTrue(session.wasPostProcessed)
+        XCTAssertNil(session.postProcessingErrorDescription)
+    }
+
+    func testPostProcessingRetryThrowFallsBackWithoutDisruptiveAlert() async {
+        enablePostProcessing()
+        postProcessor.isAvailable = true
+        // 25-word Greendale transcript with no correction triggers.
+        let raw = "Troy and Abed are studying at Greendale Community College for their Spanish exam with Señor Chang and they hope to pass the class this semester."
+        struct GreendaleError: Error {}
+        // First pass: rejected by guardrails. Retry: provider throws. We were
+        // already in a guardrail-fallback scenario, so feedback stays
+        // non-disruptive (no provider-error alert).
+        postProcessor.sequentialResults = [
+            .success("Studying at Greendale."),
+            .failure(GreendaleError())
+        ]
+
+        var fallbackCalled = false
+        coordinator.onPostProcessingFallback = { fallbackCalled = true }
+        var providerError: Error?
+        coordinator.onPostProcessingError = { error in providerError = error }
+
+        let idleExpectation = expectationForIdle()
+        audioCapture.storedSamples = makeLoudSamples()
+        transcriptionService.transcribeResult = .success(raw)
+        XCTAssertTrue(coordinator.start())
+        coordinator.stop()
+        await fulfillment(of: [idleExpectation], timeout: 1.0)
+
+        XCTAssertEqual(postProcessor.processCallCount, 2)
         XCTAssertEqual(typingService.outputs, [raw])
-        XCTAssertTrue(surfacedError is PostProcessingValidationError)
+        // Validation scenario stays non-disruptive even when the retry throws.
+        XCTAssertTrue(fallbackCalled)
+        XCTAssertNil(providerError)
         let session = dictationHistoryStore.sessions[0]
         XCTAssertEqual(session.transcript, raw)
         XCTAssertFalse(session.wasPostProcessed)
         XCTAssertNotNil(session.postProcessingErrorDescription)
+    }
+
+    func testPostProcessingSampleOverTransformationFallsBackToRaw() async {
+        enablePostProcessing()
+        postProcessor.isAvailable = true
+        let raw = "This is a test of the transcribing capabilities. I am going to say some things and we will see what the result is. Newline. Now I want to see if the commands are working."
+        // Observed Apple Intelligence over-transformation: a markdown heading
+        // plus heavy summarization of a 34-word transcript down to 7 words.
+        // Both passes return this, so both are rejected (shrinkage first).
+        postProcessor.result = .success("# Testing Transcription Capabilities\nSee results. Commands: working.")
+
+        var fallbackCalled = false
+        coordinator.onPostProcessingFallback = { fallbackCalled = true }
+        var providerError: Error?
+        coordinator.onPostProcessingError = { error in providerError = error }
+
+        let idleExpectation = expectationForIdle()
+        audioCapture.storedSamples = makeLoudSamples()
+        transcriptionService.transcribeResult = .success(raw)
+        XCTAssertTrue(coordinator.start())
+        coordinator.stop()
+        await fulfillment(of: [idleExpectation], timeout: 1.0)
+
+        XCTAssertEqual(postProcessor.processCallCount, 2)
+        XCTAssertEqual(typingService.outputs, [raw])
+        XCTAssertTrue(fallbackCalled)
+        XCTAssertNil(providerError)
+        let session = dictationHistoryStore.sessions[0]
+        // Shrinkage is checked before markdown, so the over-transformation
+        // case surfaces as suspicious shrinkage.
+        let localized = session.postProcessingErrorDescription ?? ""
+        XCTAssertFalse(localized.contains("PostProcessingValidationError error"))
+        XCTAssertTrue(localized.contains("looked too different"))
+        XCTAssertTrue(localized.localizedCaseInsensitiveContains("raw transcript"))
+        XCTAssertEqual(session.transcript, raw)
+        XCTAssertFalse(session.wasPostProcessed)
     }
 
     private func expectationForIdle() -> XCTestExpectation {
@@ -949,6 +1065,8 @@ final class FakePostProcessingProvider: PostProcessingProvider, @unchecked Senda
     private let lock = NSLock()
     private var _isAvailable = true
     private var _result: Result<String, Error> = .success("")
+    private var _sequentialResults: [Result<String, Error>] = []
+    private var _sequentialIndex = 0
     private var _processCallCount = 0
     private var _lastProcessedInput: String?
     private var _holdUntilReleased = false
@@ -963,6 +1081,15 @@ final class FakePostProcessingProvider: PostProcessingProvider, @unchecked Senda
     var result: Result<String, Error> {
         get { lock.withLock { _result } }
         set { lock.withLock { _result = newValue } }
+    }
+
+    /// Per-call results returned in order. When non-empty, each `process(_:)`
+    /// call returns the next entry (the last entry is reused past the end) and
+    /// `result` is ignored. Used to simulate a first pass that fails
+    /// validation followed by a retry that succeeds (or fails again).
+    var sequentialResults: [Result<String, Error>] {
+        get { lock.withLock { _sequentialResults } }
+        set { lock.withLock { _sequentialResults = newValue; _sequentialIndex = 0 } }
     }
 
     var processCallCount: Int {
@@ -997,8 +1124,16 @@ final class FakePostProcessingProvider: PostProcessingProvider, @unchecked Senda
         let snapshot = lock.withLock {
             _processCallCount += 1
             _lastProcessedInput = transcript
+            let result: Result<String, Error>
+            if !_sequentialResults.isEmpty {
+                let index = min(_sequentialIndex, _sequentialResults.count - 1)
+                result = _sequentialResults[index]
+                _sequentialIndex += 1
+            } else {
+                result = _result
+            }
             return (
-                result: _result,
+                result: result,
                 holdUntilReleased: _holdUntilReleased,
                 onProcessStarted: _onProcessStarted
             )

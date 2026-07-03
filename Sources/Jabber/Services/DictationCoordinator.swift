@@ -46,13 +46,38 @@ protocol MediaPlaybackProtocol: AnyObject {
 
 /// Apple Intelligence returned a post-processed transcript that failed
 /// runtime validation (e.g. it summarized the input or injected markdown
-/// structure the user never asked for). The coordinator falls back to the raw
-/// transcript instead of typing the corrupted result and surfaces this via
-/// `onPostProcessingError`, exactly as it does when the provider throws.
-struct PostProcessingValidationError: Error, CustomStringConvertible {
-    let reason: String
+/// structure the user never asked for). The coordinator retries once, then
+/// falls back to the raw transcript instead of typing the corrupted result and
+/// surfaces the fallback via `onPostProcessingFallback` (non-disruptive overlay
+/// feedback), distinct from true provider failures surfaced via
+/// `onPostProcessingError`.
+///
+/// Conforms to `LocalizedError` so `localizedDescription` renders a clean,
+/// user-facing reason. Without it, Swift's default NSError bridging produces
+/// "Jabber.PostProcessingValidationError error 1." `description` still carries
+/// the technical detail for logs/history diagnostics.
+struct PostProcessingValidationError: Error, CustomStringConvertible, LocalizedError {
+    enum Kind {
+        case suspiciousShrinkage
+        case rogueMarkdown
+    }
+
+    /// Which guardrail fired. Drives the user-facing `errorDescription`.
+    let kind: Kind
+    /// Technical detail for logs; not shown to the user.
+    let detail: String
+
     var description: String {
-        "Post-processing rejected: \(reason)"
+        "Post-processing rejected: \(detail)"
+    }
+
+    var errorDescription: String? {
+        switch kind {
+        case .suspiciousShrinkage:
+            return "Post-processing output looked too different from the transcript, so Jabber used the raw transcript."
+        case .rogueMarkdown:
+            return "Post-processing produced unexpected Markdown formatting, so Jabber used the raw transcript."
+        }
     }
 }
 
@@ -96,10 +121,19 @@ final class DictationCoordinator {
     /// Invoked when post-processing begins, so the overlay can switch to a
     /// "Refining..." label. Not invoked when post-processing is disabled.
     var onRefining: (() -> Void)?
-    /// Invoked when post-processing fails (provider throws or returns empty).
-    /// Distinct from `onTranscriptionError` so the raw transcript still types
-    /// out without a blocking "Transcription Failed" message.
+    /// Invoked when the post-processing provider throws on its first (and
+    /// only) attempt. Distinct from `onTranscriptionError` so the raw
+    /// transcript still types out without a blocking "Transcription Failed"
+    /// message. The UI surfaces this as a disruptive notice so the user knows
+    /// Apple Intelligence itself failed.
     var onPostProcessingError: ((Error) -> Void)?
+
+    /// Invoked when post-processing output is rejected by our guardrails
+    /// (suspicious shrinkage or rogue markdown) and the raw transcript is used
+    /// after exhausting the single retry. Distinct from `onPostProcessingError`
+    /// so the UI can show brief, non-disruptive overlay feedback instead of a
+    /// click-to-dismiss alert. Not invoked for true provider failures.
+    var onPostProcessingFallback: (() -> Void)?
 
     private let audioCapture: any AudioCaptureProtocol
     private let transcriptionService: any TranscriptionProtocol
@@ -390,11 +424,19 @@ final class DictationCoordinator {
     }
 
     /// Runs the Apple Intelligence post-processor over `rawText` when enabled
-    /// and available. On any provider *failure* (the provider throws) it falls
-    /// back to the raw transcript and surfaces the error via
-    /// `onPostProcessingError`. A provider *success* that returns empty/
-    /// whitespace (e.g. the user said "scratch that" / "cancel") is a valid
-    /// cancelled result: nothing is typed and no error is surfaced.
+    /// and available. Behavior:
+    /// - A provider *success* that returns empty/whitespace (e.g. the user said
+    ///   "scratch that" / "cancel") is a valid cancelled result: nothing is
+    ///   typed and no error is surfaced.
+    /// - A provider *failure* (the provider throws on the first attempt) falls
+    ///   back to the raw transcript and surfaces the error via
+    ///   `onPostProcessingError` for a disruptive notice. Provider throws are
+    ///   NOT retried.
+    /// - A non-empty result that fails our guardrails (suspicious shrinkage or
+    ///   rogue markdown) is retried exactly once — Apple Intelligence sometimes
+    ///   gets it right on a second pass. If the retry also fails validation (or
+    ///   throws), the coordinator falls back to the raw transcript and surfaces
+    ///   a non-disruptive `onPostProcessingFallback` (no alert).
     /// Cancellation is rethrown so the surrounding task unwinds without saving
     /// history or typing output.
     private func applyPostProcessing(to rawText: String) async throws -> PostProcessingOutcome {
@@ -435,25 +477,27 @@ final class DictationCoordinator {
             // A post-processed empty/whitespace result is a VALID outcome, not a
             // failure: the model may produce it by honoring a full self-correction
             // ("scratch that", "cancel", "never mind"). Normalize whitespace-only
-            // to "" and report a successful (cancelled) result. Only a thrown
-            // error falls back to the raw transcript.
+            // to "" and report a successful (cancelled) result.
             let normalized = processed.trimmingCharacters(in: .whitespacesAndNewlines)
-            // Defense-in-depth: a *non-empty* result that looks suspiciously
-            // summarized or that introduces markdown structure the user never
-            // dictated is rejected. Fall back to the raw transcript rather
-            // than typing corrupted content. An empty result stays a valid
-            // (cancelled) outcome — it is handled by the success branch below.
-            if !normalized.isEmpty,
-               let rejectionReason = Self.suspiciousPostProcessingReason(raw: rawTrimmed, processed: normalized) {
-                let error = PostProcessingValidationError(reason: rejectionReason)
-                logger.notice("Post-processing output rejected, using raw transcript: \(error.description)")
-                onPostProcessingError?(error)
+            if normalized.isEmpty {
                 return PostProcessingOutcome(
-                    finalText: rawText,
-                    outputText: rawText,
-                    rawTranscript: nil,
-                    wasPostProcessed: false,
-                    errorDescription: error.description
+                    finalText: normalized,
+                    outputText: normalized,
+                    rawTranscript: rawText,
+                    wasPostProcessed: true,
+                    errorDescription: nil
+                )
+            }
+            // Defense-in-depth: a non-empty result that looks suspiciously
+            // summarized or that introduces markdown structure the user never
+            // dictated is rejected. Give Apple Intelligence one more chance —
+            // it sometimes gets it right on a second pass — then fall back.
+            if let firstError = Self.suspiciousPostProcessingError(raw: rawTrimmed, processed: normalized) {
+                logger.notice("Post-processing rejected on first pass, retrying once: \(firstError.description)")
+                return try await retryPostProcessing(
+                    rawText: rawText,
+                    rawTrimmed: rawTrimmed,
+                    provider: provider
                 )
             }
             return PostProcessingOutcome(
@@ -467,8 +511,72 @@ final class DictationCoordinator {
             // Re-throw cancellation so the caller's catch unwinds the task.
             throw CancellationError()
         } catch {
+            // True provider failure on the first (and only) attempt: do NOT
+            // retry (retries are for guardrail rejection only). Fall back to
+            // the raw transcript and surface the error for a disruptive notice.
             logger.error("Post-processing failed, falling back to raw transcript: \(error.localizedDescription)")
             onPostProcessingError?(error)
+            return PostProcessingOutcome(
+                finalText: rawText,
+                outputText: rawText,
+                rawTranscript: nil,
+                wasPostProcessed: false,
+                errorDescription: error.localizedDescription
+            )
+        }
+    }
+
+    /// Second and final post-processing attempt after the first pass failed
+    /// validation. If the retry passes validation it becomes the successful
+    /// post-processed output. If the retry also fails validation, or the
+    /// provider throws, the coordinator falls back to the raw transcript and
+    /// surfaces a non-disruptive `onPostProcessingFallback` (no alert): the
+    /// user explicitly asked that guardrail-fallback scenarios never show a
+    /// click-to-dismiss dialog. Cancellation is rethrown so the surrounding
+    /// task unwinds without saving history or typing output.
+    private func retryPostProcessing(
+        rawText: String,
+        rawTrimmed: String,
+        provider: any PostProcessingProvider
+    ) async throws -> PostProcessingOutcome {
+        do {
+            try Task.checkCancellation()
+            let processed = try await provider.process(rawText)
+            let normalized = processed.trimmingCharacters(in: .whitespacesAndNewlines)
+            // An empty retry is ambiguous (the first pass was non-empty-but-
+            // bad), so treat it as another validation failure and fall back.
+            if !normalized.isEmpty,
+               Self.suspiciousPostProcessingError(raw: rawTrimmed, processed: normalized) == nil {
+                return PostProcessingOutcome(
+                    finalText: normalized,
+                    outputText: normalized,
+                    rawTranscript: rawText,
+                    wasPostProcessed: true,
+                    errorDescription: nil
+                )
+            }
+            let retryError = Self.suspiciousPostProcessingError(raw: rawTrimmed, processed: normalized)
+                ?? PostProcessingValidationError(
+                    kind: .suspiciousShrinkage,
+                    detail: "retry returned an empty result after a rejected first pass"
+                )
+            logger.notice("Post-processing retry also rejected, using raw transcript: \(retryError.description)")
+            onPostProcessingFallback?()
+            return PostProcessingOutcome(
+                finalText: rawText,
+                outputText: rawText,
+                rawTranscript: nil,
+                wasPostProcessed: false,
+                errorDescription: retryError.localizedDescription
+            )
+        } catch is CancellationError {
+            throw CancellationError()
+        } catch {
+            // The retry threw. We were already in a guardrail-fallback scenario
+            // (that is why we retried), so keep the feedback non-disruptive and
+            // fall back to the raw transcript. The thrown error is logged.
+            logger.error("Post-processing retry threw, using raw transcript: \(error.localizedDescription)")
+            onPostProcessingFallback?()
             return PostProcessingOutcome(
                 finalText: rawText,
                 outputText: rawText,
@@ -514,21 +622,21 @@ final class DictationCoordinator {
     /// transcript. Tuned to ~50% per the observed over-transformation.
     private static let shrinkageMinimumRatio = 0.5
 
-    /// Returns a human-readable rejection reason when the processed output
-    /// looks suspicious, otherwise `nil`. Checks aggressive shrinkage first,
-    /// then rogue markdown. Kept conservative to avoid false positives on
-    /// legitimate corrections and explicit formatting commands.
-    private static func suspiciousPostProcessingReason(raw: String, processed: String) -> String? {
-        if let reason = suspiciousShrinkageReason(raw: raw, processed: processed) {
-            return reason
+    /// Returns a validation error when the processed output looks suspicious,
+    /// otherwise `nil`. Checks aggressive shrinkage first, then rogue markdown.
+    /// Kept conservative to avoid false positives on legitimate corrections and
+    /// explicit formatting commands.
+    private static func suspiciousPostProcessingError(raw: String, processed: String) -> PostProcessingValidationError? {
+        if let error = suspiciousShrinkageError(raw: raw, processed: processed) {
+            return error
         }
-        if let reason = rogueMarkdownReason(raw: raw, processed: processed) {
-            return reason
+        if let error = rogueMarkdownError(raw: raw, processed: processed) {
+            return error
         }
         return nil
     }
 
-    private static func suspiciousShrinkageReason(raw: String, processed: String) -> String? {
+    private static func suspiciousShrinkageError(raw: String, processed: String) -> PostProcessingValidationError? {
         let rawWords = wordCount(raw)
         guard rawWords >= shrinkageMinimumRawWords else { return nil }
         // Explicit self-corrections legitimately shrink the output; don't
@@ -536,15 +644,21 @@ final class DictationCoordinator {
         guard !containsCorrectionTrigger(raw) else { return nil }
         let processedWords = wordCount(processed)
         guard Double(processedWords) / Double(rawWords) >= shrinkageMinimumRatio else {
-            return "output has \(processedWords) words vs \(rawWords) in the raw transcript"
+            return PostProcessingValidationError(
+                kind: .suspiciousShrinkage,
+                detail: "output has \(processedWords) words vs \(rawWords) in the raw transcript"
+            )
         }
         return nil
     }
 
-    private static func rogueMarkdownReason(raw: String, processed: String) -> String? {
+    private static func rogueMarkdownError(raw: String, processed: String) -> PostProcessingValidationError? {
         guard beginsWithMarkdownStructure(processed) else { return nil }
         guard !containsFormattingCommand(raw) else { return nil }
-        return "output introduces markdown formatting that was not dictated"
+        return PostProcessingValidationError(
+            kind: .rogueMarkdown,
+            detail: "output introduces markdown formatting that was not dictated"
+        )
     }
 
     private static func wordCount(_ text: String) -> Int {

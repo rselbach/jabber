@@ -5,7 +5,6 @@ import os
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
     private var statusItem: NSStatusItem?
-    private var popover: NSPopover?
     private var onboardingWindow: NSWindow?
     private var onboardingCoordinator: OnboardingCoordinator?
     private var mainWindow: NSWindow?
@@ -267,19 +266,40 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         if let button = statusItem?.button {
             button.image = NSImage(systemSymbolName: "waveform", accessibilityDescription: "Jabber")
-            button.action = #selector(togglePopover)
-            button.target = self
         }
 
-        popover = NSPopover()
-        popover?.contentSize = NSSize(width: 320, height: 420)
-        popover?.behavior = .transient
-        popover?.contentViewController = NSHostingController(rootView: MenuBarView(
-            updaterController: updaterController,
-            onAppearAction: { [weak self] in
-                self?.markUIReadyFromView()
-            }
-        ))
+        let menu = buildMenu()
+        menu.delegate = self
+        statusItem?.menu = menu
+    }
+
+    private func buildMenu() -> NSMenu {
+        let menu = NSMenu()
+
+        let openItem = NSMenuItem(title: "Open Jabber", action: #selector(openJabber), keyEquivalent: "")
+        let settingsItem = NSMenuItem(title: "Settings…", action: #selector(openSettings), keyEquivalent: ",")
+        let updatesItem = NSMenuItem(title: "Check for Updates…", action: #selector(checkForUpdates), keyEquivalent: "")
+        let quitItem = NSMenuItem(title: "Quit Jabber", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
+
+        for item in [openItem, settingsItem, updatesItem] {
+            item.target = self
+        }
+        // quitItem has no target → routes through the responder chain to NSApp.terminate.
+
+        menu.items = [openItem, settingsItem, .separator(), updatesItem, .separator(), quitItem]
+        return menu
+    }
+
+    @objc private func openJabber() {
+        showMainWindow(initialSection: .gettingStarted)
+    }
+
+    @objc private func openSettings() {
+        showMainWindow(initialSection: .general)
+    }
+
+    @objc private func checkForUpdates() {
+        updaterController.checkForUpdates()
     }
 
     private func setupHotkey() {
@@ -542,16 +562,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         _ = permissionService.requestAccessibilityPermission()
     }
 
-    @objc private func togglePopover() {
-        guard let button = statusItem?.button, let popover else { return }
-
-        if popover.isShown {
-            popover.performClose(nil)
-        } else {
-            showPopover(relativeTo: button, activateApp: true)
-        }
-    }
-
     private func scheduleFirstRunSetupPrompt() {
         firstRunSetupTask = Task { [weak self] in
             do {
@@ -594,7 +604,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             return
         }
 
-        popover?.performClose(nil)
         NSApp.setActivationPolicy(.regular)
 
         let coordinator = OnboardingCoordinator()
@@ -683,7 +692,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func showModelMigrationNotice(_ notice: ModelMigrationNotice) {
-        popover?.performClose(nil)
         NSApp.setActivationPolicy(.regular)
 
         let newModelName = AppMode.modelDefinition(for: notice.migration.to)?.name ?? notice.migration.to
@@ -736,7 +744,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// when the window is first created; if it is already open the request
     /// just brings it forward.
     private func showMainWindow(initialSection: MainWindowView.Section = .gettingStarted) {
-        popover?.performClose(nil)
         NSApp.setActivationPolicy(.regular)
 
         if let mainWindow {
@@ -803,35 +810,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             return
         }
 
-        showSetupPopoverIfNeeded()
-    }
-
-    private func showSetupPopoverIfNeeded() {
         guard !currentSetupReadiness().isComplete else { return }
-        showSetupPopover()
-    }
-
-    private func showSetupPopover() {
-        guard let button = statusItem?.button else {
-            logger.error("Status item button unavailable when trying to show setup popover")
-            return
-        }
-
-        showPopover(relativeTo: button, activateApp: false)
-    }
-
-    private func showPopover(relativeTo button: NSStatusBarButton, activateApp: Bool) {
-        guard let popover else {
-            logger.error("Popover unavailable when trying to show setup guidance")
-            return
-        }
-        guard !popover.isShown else { return }
-
-        if activateApp {
-            NSApp.activate(ignoringOtherApps: true)
-        }
-        popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
-        popover.contentViewController?.view.window?.makeKey()
+        showMainWindow(initialSection: .gettingStarted)
     }
 
     private func handleDictationStateChange(_ state: DictationCoordinator.State) {
@@ -990,5 +970,11 @@ extension AppDelegate: NSWindowDelegate {
         // state survive re-opening.
 
         refreshActivationPolicy(closing: window)
+    }
+}
+
+extension AppDelegate: NSMenuDelegate {
+    func menuNeedsUpdate(_ menu: NSMenu) {
+        menu.item(withTitle: "Check for Updates…")?.isEnabled = updaterController.canCheckForUpdates
     }
 }

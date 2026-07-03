@@ -587,6 +587,121 @@ final class DictationCoordinatorTests: XCTestCase {
         XCTAssertTrue(typingService.outputs.isEmpty)
     }
 
+    // MARK: - Post-processing validation (defense-in-depth)
+
+    func testPostProcessingAggressiveShrinkageFallsBackToRaw() async {
+        enablePostProcessing()
+        postProcessor.isAvailable = true
+        // 25-word Greendale transcript with no correction triggers.
+        let raw = "Troy and Abed are studying at Greendale Community College for their Spanish exam with Señor Chang and they hope to pass the class this semester."
+        // Suspiciously summarized to 3 words (~12% of raw), no markdown.
+        postProcessor.result = .success("Studying at Greendale.")
+
+        var surfacedError: Error?
+        coordinator.onPostProcessingError = { error in surfacedError = error }
+
+        let idleExpectation = expectationForIdle()
+        audioCapture.storedSamples = makeLoudSamples()
+        transcriptionService.transcribeResult = .success(raw)
+        XCTAssertTrue(coordinator.start())
+        coordinator.stop()
+        await fulfillment(of: [idleExpectation], timeout: 1.0)
+
+        XCTAssertEqual(postProcessor.processCallCount, 1)
+        // Corrupted summary must not be typed; the raw transcript is used.
+        XCTAssertEqual(typingService.outputs, [raw])
+        XCTAssertTrue(surfacedError is PostProcessingValidationError)
+        let session = dictationHistoryStore.sessions[0]
+        XCTAssertEqual(session.transcript, raw)
+        XCTAssertFalse(session.wasPostProcessed)
+        XCTAssertNil(session.rawTranscript)
+        XCTAssertNotNil(session.postProcessingErrorDescription)
+    }
+
+    func testPostProcessingRogueMarkdownHeadingFallsBackToRaw() async {
+        enablePostProcessing()
+        postProcessor.isAvailable = true
+        // 7-word raw (< shrinkageMinimumRawWords, so shrinkage is skipped) and
+        // free of any formatting command words.
+        let raw = "the trojan horse is a great plan"
+        // Provider injected a markdown heading the user never asked for.
+        postProcessor.result = .success("# The Trojan Horse Is A Great Plan")
+
+        var surfacedError: Error?
+        coordinator.onPostProcessingError = { error in surfacedError = error }
+
+        let idleExpectation = expectationForIdle()
+        audioCapture.storedSamples = makeLoudSamples()
+        transcriptionService.transcribeResult = .success(raw)
+        XCTAssertTrue(coordinator.start())
+        coordinator.stop()
+        await fulfillment(of: [idleExpectation], timeout: 1.0)
+
+        XCTAssertEqual(postProcessor.processCallCount, 1)
+        XCTAssertEqual(typingService.outputs, [raw])
+        XCTAssertTrue(surfacedError is PostProcessingValidationError)
+        let session = dictationHistoryStore.sessions[0]
+        XCTAssertEqual(session.transcript, raw)
+        XCTAssertFalse(session.wasPostProcessed)
+        XCTAssertNotNil(session.postProcessingErrorDescription)
+    }
+
+    func testPostProcessingExplicitHeaderCommandAllowsMarkdown() async {
+        enablePostProcessing()
+        postProcessor.isAvailable = true
+        // The user explicitly dictated "header", so a leading "#" is
+        // intentional and must NOT be treated as rogue markdown.
+        let raw = "header shopping list"
+        postProcessor.result = .success("# Shopping List")
+
+        var surfacedError: Error?
+        coordinator.onPostProcessingError = { error in surfacedError = error }
+
+        let idleExpectation = expectationForIdle()
+        audioCapture.storedSamples = makeLoudSamples()
+        transcriptionService.transcribeResult = .success(raw)
+        XCTAssertTrue(coordinator.start())
+        coordinator.stop()
+        await fulfillment(of: [idleExpectation], timeout: 1.0)
+
+        XCTAssertEqual(postProcessor.processCallCount, 1)
+        // Processed markdown output is kept because the user requested it.
+        XCTAssertEqual(typingService.outputs, ["# Shopping List"])
+        XCTAssertNil(surfacedError)
+        let session = dictationHistoryStore.sessions[0]
+        XCTAssertEqual(session.transcript, "# Shopping List")
+        XCTAssertEqual(session.rawTranscript, raw)
+        XCTAssertTrue(session.wasPostProcessed)
+        XCTAssertNil(session.postProcessingErrorDescription)
+    }
+
+    func testPostProcessingSampleOverTransformationFallsBackToRaw() async {
+        enablePostProcessing()
+        postProcessor.isAvailable = true
+        let raw = "This is a test of the transcribing capabilities. I am going to say some things and we will see what the result is. Newline. Now I want to see if the commands are working."
+        // Observed Apple Intelligence over-transformation: a markdown heading
+        // plus heavy summarization of a 34-word transcript down to 7 words.
+        postProcessor.result = .success("# Testing Transcription Capabilities\nSee results. Commands: working.")
+
+        var surfacedError: Error?
+        coordinator.onPostProcessingError = { error in surfacedError = error }
+
+        let idleExpectation = expectationForIdle()
+        audioCapture.storedSamples = makeLoudSamples()
+        transcriptionService.transcribeResult = .success(raw)
+        XCTAssertTrue(coordinator.start())
+        coordinator.stop()
+        await fulfillment(of: [idleExpectation], timeout: 1.0)
+
+        XCTAssertEqual(postProcessor.processCallCount, 1)
+        XCTAssertEqual(typingService.outputs, [raw])
+        XCTAssertTrue(surfacedError is PostProcessingValidationError)
+        let session = dictationHistoryStore.sessions[0]
+        XCTAssertEqual(session.transcript, raw)
+        XCTAssertFalse(session.wasPostProcessed)
+        XCTAssertNotNil(session.postProcessingErrorDescription)
+    }
+
     private func expectationForIdle() -> XCTestExpectation {
         let expectation = XCTestExpectation(description: "coordinator returns to idle")
         coordinator.onStateChange = { state in

@@ -44,6 +44,18 @@ protocol MediaPlaybackProtocol: AnyObject {
     func resumeAfterDictationIfNeeded()
 }
 
+/// Apple Intelligence returned a post-processed transcript that failed
+/// runtime validation (e.g. it summarized the input or injected markdown
+/// structure the user never asked for). The coordinator falls back to the raw
+/// transcript instead of typing the corrupted result and surfaces this via
+/// `onPostProcessingError`, exactly as it does when the provider throws.
+struct PostProcessingValidationError: Error, CustomStringConvertible {
+    let reason: String
+    var description: String {
+        "Post-processing rejected: \(reason)"
+    }
+}
+
 /// Owns the entire dictation lifecycle: recording, speech detection,
 /// transcription, and output. All state changes are serialized on the main
 /// actor and announced through `onStateChange`.
@@ -426,6 +438,24 @@ final class DictationCoordinator {
             // to "" and report a successful (cancelled) result. Only a thrown
             // error falls back to the raw transcript.
             let normalized = processed.trimmingCharacters(in: .whitespacesAndNewlines)
+            // Defense-in-depth: a *non-empty* result that looks suspiciously
+            // summarized or that introduces markdown structure the user never
+            // dictated is rejected. Fall back to the raw transcript rather
+            // than typing corrupted content. An empty result stays a valid
+            // (cancelled) outcome — it is handled by the success branch below.
+            if !normalized.isEmpty,
+               let rejectionReason = Self.suspiciousPostProcessingReason(raw: rawTrimmed, processed: normalized) {
+                let error = PostProcessingValidationError(reason: rejectionReason)
+                logger.notice("Post-processing output rejected, using raw transcript: \(error.description)")
+                onPostProcessingError?(error)
+                return PostProcessingOutcome(
+                    finalText: rawText,
+                    outputText: rawText,
+                    rawTranscript: nil,
+                    wasPostProcessed: false,
+                    errorDescription: error.description
+                )
+            }
             return PostProcessingOutcome(
                 finalText: normalized,
                 outputText: normalized,
@@ -447,6 +477,114 @@ final class DictationCoordinator {
                 errorDescription: error.localizedDescription
             )
         }
+    }
+
+    // MARK: - Post-processing validation
+
+    /// Words the user can speak to explicitly request markdown/formatting in
+    /// the output. When any of these appear in the raw transcript, markdown in
+    /// the processed result is treated as intentional and is NOT rejected.
+    private static let formattingCommandWords: Set<String> = [
+        "header", "heading", "headings",
+        "bullet", "bullets",
+        "list", "lists",
+        "bold",
+        "italics", "italic",
+        "underline", "underlines",
+        "title", "titles",
+        "numbered"
+    ]
+
+    /// Self-correction phrases that legitimately shrink the output (everything
+    /// before the trigger is discarded). When any of these appear in the raw
+    /// transcript the aggressive-shrinkage heuristic is skipped.
+    private static let correctionTriggerPhrases: [String] = [
+        "scratch that", "delete that", "never mind",
+        "cancel", "actually", "no wait", "wait wait",
+        "oops", "sorry"
+    ]
+
+    /// Only apply the shrinkage heuristic once the raw transcript has at least
+    /// this many words; below it, filler removal can easily halve a short
+    /// transcript and would cause false positives.
+    private static let shrinkageMinimumRawWords = 8
+
+    /// Processed word count must stay at or above this fraction of the raw
+    /// word count. Anything lower looks like the provider summarized the
+    /// transcript. Tuned to ~50% per the observed over-transformation.
+    private static let shrinkageMinimumRatio = 0.5
+
+    /// Returns a human-readable rejection reason when the processed output
+    /// looks suspicious, otherwise `nil`. Checks aggressive shrinkage first,
+    /// then rogue markdown. Kept conservative to avoid false positives on
+    /// legitimate corrections and explicit formatting commands.
+    private static func suspiciousPostProcessingReason(raw: String, processed: String) -> String? {
+        if let reason = suspiciousShrinkageReason(raw: raw, processed: processed) {
+            return reason
+        }
+        if let reason = rogueMarkdownReason(raw: raw, processed: processed) {
+            return reason
+        }
+        return nil
+    }
+
+    private static func suspiciousShrinkageReason(raw: String, processed: String) -> String? {
+        let rawWords = wordCount(raw)
+        guard rawWords >= shrinkageMinimumRawWords else { return nil }
+        // Explicit self-corrections legitimately shrink the output; don't
+        // second-guess them.
+        guard !containsCorrectionTrigger(raw) else { return nil }
+        let processedWords = wordCount(processed)
+        guard Double(processedWords) / Double(rawWords) >= shrinkageMinimumRatio else {
+            return "output has \(processedWords) words vs \(rawWords) in the raw transcript"
+        }
+        return nil
+    }
+
+    private static func rogueMarkdownReason(raw: String, processed: String) -> String? {
+        guard beginsWithMarkdownStructure(processed) else { return nil }
+        guard !containsFormattingCommand(raw) else { return nil }
+        return "output introduces markdown formatting that was not dictated"
+    }
+
+    private static func wordCount(_ text: String) -> Int {
+        text.split(whereSeparator: { $0.isWhitespace }).count
+    }
+
+    private static func containsFormattingCommand(_ text: String) -> Bool {
+        let words = text.lowercased().split(whereSeparator: { $0.isWhitespace || $0.isPunctuation })
+        return words.contains(where: { formattingCommandWords.contains(String($0)) })
+    }
+
+    private static func containsCorrectionTrigger(_ text: String) -> Bool {
+        let lower = text.lowercased()
+        return correctionTriggerPhrases.contains(where: { lower.contains($0) })
+    }
+
+    /// True when the processed output opens with a markdown structural marker
+    /// (ATX heading, bullet list, or ordered list) on its first non-empty line.
+    private static func beginsWithMarkdownStructure(_ processed: String) -> Bool {
+        guard let firstLine = processed.split(separator: "\n", omittingEmptySubsequences: true).first else {
+            return false
+        }
+        let trimmed = String(firstLine).trimmingCharacters(in: .whitespaces)
+        guard !trimmed.isEmpty else { return false }
+
+        if trimmed.hasPrefix("#") { return true } // ATX heading
+        if trimmed.hasPrefix("- ") || trimmed.hasPrefix("* ") || trimmed.hasPrefix("+ ") {
+            return true // bullet list
+        }
+        // Ordered list: one or more digits immediately followed by ".".
+        var index = trimmed.startIndex
+        var sawDigit = false
+        while index < trimmed.endIndex, trimmed[index].isNumber {
+            sawDigit = true
+            index = trimmed.index(after: index)
+        }
+        if sawDigit, index < trimmed.endIndex, trimmed[index] == "." {
+            return true
+        }
+        return false
     }
 
     private func finish(sessionID: UUID) {

@@ -7,24 +7,21 @@ import os
 final class OnboardingCoordinator {
     enum Step: Int, CaseIterable {
         case welcome
-        case microphone
         case language
+        case permissions
         case modelDownload
-        case accessibility
         case ready
 
         var title: String {
             switch self {
             case .welcome:
                 return "Welcome"
-            case .microphone:
-                return "Microphone"
             case .language:
                 return "Language"
+            case .permissions:
+                return "Permissions"
             case .modelDownload:
                 return "Speech Model"
-            case .accessibility:
-                return "Accessibility"
             case .ready:
                 return "Ready"
             }
@@ -32,11 +29,13 @@ final class OnboardingCoordinator {
     }
 
     private(set) var step: Step = .welcome
+    private(set) var isNavigatingForward = true
     private(set) var microphoneStatus: AVAuthorizationStatus = .notDetermined
     private(set) var isAccessibilityTrusted = false
     private(set) var didSkipAccessibility = false
     private(set) var downloadErrorMessage: String?
     private(set) var onboardingSelectedLanguage: String
+    private(set) var selectedModelId: String
 
     private let permissionService: PermissionService
     private let modelManager: ModelManager
@@ -50,22 +49,47 @@ final class OnboardingCoordinator {
         self.permissionService = permissionService
         self.modelManager = modelManager
         onboardingSelectedLanguage = TypedSettings[.selectedLanguage]
+        selectedModelId = TypedSettings[.selectedModel]
     }
 
     var canContinue: Bool {
         switch step {
-        case .welcome:
+        case .welcome, .ready:
             return true
-        case .microphone:
-            return microphoneStatus == .authorized
         case .language:
             return !onboardingSelectedLanguage.isEmpty
+        case .permissions:
+            return microphoneStatus == .authorized
+                && (isAccessibilityTrusted || didSkipAccessibility)
         case .modelDownload:
-            return modelManager.hasAnyDownloadedModel
-        case .accessibility:
-            return isAccessibilityTrusted || didSkipAccessibility
-        case .ready:
-            return true
+            return isSelectedModelReady
+        }
+    }
+
+    var canGoBack: Bool {
+        step != .welcome
+    }
+
+    /// Explains why Continue is disabled so the footer never leaves the user
+    /// staring at a dead button.
+    var continueHint: String? {
+        guard !canContinue else { return nil }
+
+        switch step {
+        case .welcome, .ready:
+            return nil
+        case .language:
+            return "Select a language to continue"
+        case .permissions:
+            if microphoneStatus != .authorized {
+                return "Microphone access is required for dictation"
+            }
+            return "Enable Accessibility or choose clipboard output"
+        case .modelDownload:
+            if let model = selectedModel, model.isDownloading {
+                return "Downloading \(model.name) — \(Int(model.downloadProgress * 100))%"
+            }
+            return "Download or choose a speech model to continue"
         }
     }
 
@@ -74,10 +98,14 @@ final class OnboardingCoordinator {
         case .welcome:
             return "Get Started"
         case .ready:
-            return "Done"
+            return "Start Dictating"
         default:
             return "Continue"
         }
+    }
+
+    var selectedModel: ModelManager.Model? {
+        modelManager.models.first { $0.id == selectedModelId }
     }
 
     func selectLanguage(_ languageCode: String) {
@@ -85,9 +113,19 @@ final class OnboardingCoordinator {
         TypedSettings[.selectedLanguage] = languageCode
 
         let recommended = LanguageModelCatalog.recommendedModelId(for: languageCode)
+        selectedModelId = recommended
         TypedSettings[.selectedModel] = recommended
 
         modelManager.refreshModels()
+    }
+
+    func selectModel(_ modelId: String) {
+        selectedModelId = modelId
+        if !modelManager.selectModel(modelId) {
+            // selectModel is a no-op when the model is not downloaded yet or
+            // already selected; persist the choice directly in that case.
+            TypedSettings[.selectedModel] = modelId
+        }
     }
 
     func recommendedModelIdForSelectedLanguage() -> String {
@@ -109,24 +147,30 @@ final class OnboardingCoordinator {
     }
 
     func continueFromCurrentStep(onComplete: () -> Void) {
+        guard canContinue else { return }
+
         switch step {
         case .welcome:
-            move(to: .microphone)
-        case .microphone:
-            guard canContinue else { return }
             move(to: .language)
         case .language:
-            guard canContinue else { return }
+            // Kick off the recommended download now so it runs in the
+            // background while the user deals with permission prompts.
+            startRecommendedModelDownloadIfNeeded()
+            move(to: .permissions)
+        case .permissions:
             move(to: .modelDownload)
         case .modelDownload:
-            guard canContinue else { return }
-            move(to: .accessibility)
-        case .accessibility:
-            guard canContinue else { return }
             move(to: .ready)
         case .ready:
             onComplete()
         }
+    }
+
+    func goBack() {
+        guard let previous = Step(rawValue: step.rawValue - 1) else { return }
+        isNavigatingForward = false
+        step = previous
+        refreshState()
     }
 
     func requestMicrophoneAccess() {
@@ -169,37 +213,27 @@ final class OnboardingCoordinator {
         }
     }
 
+    private var isSelectedModelReady: Bool {
+        selectedModel?.isDownloaded ?? false
+    }
+
     private func move(to nextStep: Step) {
+        isNavigatingForward = true
         step = nextStep
         refreshState()
-
-        if nextStep == .modelDownload {
-            startRecommendedModelDownloadIfNeeded()
-        }
     }
 
     private func refreshState() {
         microphoneStatus = permissionService.microphoneAuthorizationStatus()
         isAccessibilityTrusted = permissionService.refreshAccessibilityPermissionStatus()
         modelManager.refreshModels()
-        autoAdvanceForGrantedPermission()
-    }
-
-    private func autoAdvanceForGrantedPermission() {
-        switch step {
-        case .microphone where microphoneStatus == .authorized:
-            move(to: .language)
-        case .accessibility where isAccessibilityTrusted:
-            move(to: .ready)
-        default:
-            return
-        }
     }
 
     private func startRecommendedModelDownloadIfNeeded() {
-        guard !modelManager.hasAnyDownloadedModel else { return }
-
         let recommended = recommendedModelIdForSelectedLanguage()
+        guard let model = modelManager.models.first(where: { $0.id == recommended }) else { return }
+        guard !model.isDownloaded, !model.isDownloading else { return }
+
         if !modelManager.startDownload(recommended) {
             modelManager.refreshModels()
         }

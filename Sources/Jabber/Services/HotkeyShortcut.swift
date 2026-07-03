@@ -29,6 +29,13 @@ struct HotkeyShortcut: Equatable, Sendable {
         Self.displayString(keyCode: keyCode, modifiers: modifiers)
     }
 
+    /// Individual labels for rendering the shortcut as separate keycaps:
+    /// ⌃⌥ Space → ["⌃", "⌥", "Space"], Right Option → ["Right Option"].
+    var keycapLabels: [String] {
+        let modifierGlyphs = Self.modifierDisplayString(modifiers).map(String.init)
+        return modifierGlyphs + [Self.keyDisplayString(keyCode: keyCode)]
+    }
+
     var validationError: ValidationError? {
         Self.validationError(keyCode: keyCode, modifiers: modifiers)
     }

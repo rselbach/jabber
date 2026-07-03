@@ -586,12 +586,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         )
 
         let window = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 520, height: 420),
-            styleMask: [.titled, .closable],
+            contentRect: NSRect(x: 0, y: 0, width: 720, height: 560),
+            styleMask: [.titled, .closable, .fullSizeContentView],
             backing: .buffered,
             defer: false
         )
         window.title = "Set Up Jabber"
+        window.titleVisibility = .hidden
+        window.titlebarAppearsTransparent = true
+        window.isMovableByWindowBackground = true
         window.identifier = NSUserInterfaceItemIdentifier("com.rselbach.jabber.onboarding")
         window.contentViewController = NSHostingController(rootView: rootView)
         window.isReleasedWhenClosed = false

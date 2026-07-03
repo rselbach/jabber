@@ -27,6 +27,30 @@ final class HotkeyShortcutTests: XCTestCase {
         XCTAssertEqual(shortcut.displayString, "⌃⌥⇧⌘ A")
     }
 
+    func testKeycapLabelsSplitModifiersAndKeepKeyNameWhole() {
+        let tests: [String: (shortcut: HotkeyShortcut, want: [String])] = [
+            "modifiers plus key": (
+                HotkeyShortcut(
+                    keyCode: UInt32(kVK_Space),
+                    modifiers: UInt32(controlKey | optionKey)
+                ),
+                ["⌃", "⌥", "Space"]
+            ),
+            "modifier-only key keeps multi-word name intact": (
+                HotkeyShortcut(keyCode: UInt32(kVK_RightOption), modifiers: 0),
+                ["Right Option"]
+            ),
+            "plain key": (
+                HotkeyShortcut(keyCode: UInt32(kVK_ANSI_A), modifiers: 0),
+                ["A"]
+            )
+        ]
+
+        for (name, tc) in tests {
+            XCTAssertEqual(tc.shortcut.keycapLabels, tc.want, name)
+        }
+    }
+
     func testValidationRejectsShortcutWithoutRequiredModifier() {
         let noModifier = HotkeyShortcut(
             keyCode: UInt32(kVK_ANSI_A),

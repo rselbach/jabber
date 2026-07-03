@@ -19,6 +19,9 @@ enum Constants {
 
         /// Posted when the user asks to run onboarding from Settings
         static let onboardingDidRequest = Notification.Name("com.rselbach.jabber.onboardingDidRequest")
+
+        /// Posted when the user asks to open the main app window
+        static let mainWindowDidRequest = Notification.Name("com.rselbach.jabber.mainWindowDidRequest")
     }
 
     /// Languages supported by Qwen3-ASR (per the model card).

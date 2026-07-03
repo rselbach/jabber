@@ -8,6 +8,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var popover: NSPopover?
     private var onboardingWindow: NSWindow?
     private var onboardingCoordinator: OnboardingCoordinator?
+    private var mainWindow: NSWindow?
 
     private let hotkeyManager = HotkeyManager()
     private let audioCapture = AudioCaptureService()
@@ -121,6 +122,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             self,
             selector: #selector(handleOnboardingRequest),
             name: Constants.Notifications.onboardingDidRequest,
+            object: nil
+        )
+
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(handleMainWindowRequest),
+            name: Constants.Notifications.mainWindowDidRequest,
             object: nil
         )
     }
@@ -611,8 +619,66 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func completeOnboarding() {
         TypedSettings[.onboardingCompleted] = true
         TypedSettings[.didShowFirstRunSetup] = true
+        // windowWillClose refreshes the activation policy.
         onboardingWindow?.close()
-        NSApp.setActivationPolicy(.accessory)
+    }
+
+    @objc private func handleMainWindowRequest() {
+        showMainWindow()
+    }
+
+    /// Shows the main app window (sidebar navigation with all configuration
+    /// pages). While it is open the app behaves like a regular application:
+    /// dock icon, Cmd-Tab entry, main menu.
+    private func showMainWindow() {
+        popover?.performClose(nil)
+        NSApp.setActivationPolicy(.regular)
+
+        if let mainWindow {
+            NSApp.activate(ignoringOtherApps: true)
+            mainWindow.makeKeyAndOrderFront(nil)
+            return
+        }
+
+        let hosting = NSHostingController(rootView: MainWindowView(
+            updaterController: updaterController,
+            onAppearAction: { [weak self] in
+                self?.markUIReadyFromView()
+            }
+        ))
+        // Let SwiftUI drive the window toolbar and title so the
+        // NavigationSplitView sidebar gets the standard unified look.
+        hosting.sceneBridgingOptions = [.toolbars, .title]
+
+        let window = NSWindow(contentViewController: hosting)
+        window.styleMask = [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView]
+        window.toolbarStyle = .unified
+        window.title = "Jabber"
+        window.identifier = NSUserInterfaceItemIdentifier("com.rselbach.jabber.main")
+        window.isReleasedWhenClosed = false
+        window.delegate = self
+        window.setContentSize(NSSize(width: 880, height: 620))
+        if !window.setFrameUsingName(Self.mainWindowFrameName) {
+            window.center()
+        }
+        window.setFrameAutosaveName(Self.mainWindowFrameName)
+
+        mainWindow = window
+
+        NSApp.activate(ignoringOtherApps: true)
+        window.makeKeyAndOrderFront(nil)
+    }
+
+    private static let mainWindowFrameName = "com.rselbach.jabber.main"
+
+    /// Drops back to accessory mode (menu bar only) once no user-facing
+    /// window remains visible. `closingWindow` is excluded because
+    /// `windowWillClose` fires while the window still reports visible.
+    private func refreshActivationPolicy(closing closingWindow: NSWindow? = nil) {
+        let hasVisibleUserWindow = [mainWindow, onboardingWindow]
+            .compactMap { $0 }
+            .contains { $0 !== closingWindow && $0.isVisible }
+        NSApp.setActivationPolicy(hasVisibleUserWindow ? .regular : .accessory)
     }
 
     private func currentSetupReadiness() -> SetupReadiness {
@@ -803,12 +869,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
 extension AppDelegate: NSWindowDelegate {
     func windowWillClose(_ notification: Notification) {
-        guard let window = notification.object as? NSWindow,
-              window === onboardingWindow else { return }
+        guard let window = notification.object as? NSWindow else { return }
 
-        onboardingCoordinator?.stop()
-        onboardingCoordinator = nil
-        onboardingWindow = nil
-        NSApp.setActivationPolicy(.accessory)
+        if window === onboardingWindow {
+            onboardingCoordinator?.stop()
+            onboardingCoordinator = nil
+            onboardingWindow = nil
+        } else if window !== mainWindow {
+            return
+        }
+        // The main window instance is kept so sidebar selection and view
+        // state survive re-opening.
+
+        refreshActivationPolicy(closing: window)
     }
 }

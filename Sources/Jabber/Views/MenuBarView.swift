@@ -82,8 +82,11 @@ struct MenuBarView: View {
             .disabled(!updaterController.canCheckForUpdates)
 
             HStack {
-                SettingsLink {
-                    Text("Settings...")
+                Button("Open Jabber...") {
+                    NotificationCenter.default.post(
+                        name: Constants.Notifications.mainWindowDidRequest,
+                        object: nil
+                    )
                 }
                 .buttonStyle(.plain)
                 .foregroundStyle(.primary)

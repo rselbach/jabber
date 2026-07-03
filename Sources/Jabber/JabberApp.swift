@@ -5,22 +5,22 @@ struct JabberApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
 
     var body: some Scene {
+        // The app has no SwiftUI-managed windows: the menu bar item, the main
+        // window, and the onboarding window are all AppDelegate-managed. This
+        // empty Settings scene only satisfies the Scene requirement; its menu
+        // item is replaced below so Cmd-, opens the real main window.
         Settings {
-            SettingsView(
-                updaterController: appDelegate.updaterController,
-                onAppearAction: {
-                    appDelegate.markUIReadyFromView()
+            EmptyView()
+        }
+        .commands {
+            CommandGroup(replacing: .appSettings) {
+                Button("Settings…") {
+                    NotificationCenter.default.post(
+                        name: Constants.Notifications.mainWindowDidRequest,
+                        object: nil
+                    )
                 }
-            )
-            .onAppear {
-                NSApp.setActivationPolicy(.regular)
-                NSApp.activate(ignoringOtherApps: true)
-            }
-            .onReceive(NotificationCenter.default.publisher(for: NSWindow.willCloseNotification)) { notification in
-                if let window = notification.object as? NSWindow,
-                   window.title.contains("Settings") || window.identifier?.rawValue == "com_apple_SwiftUI_Settings_window" {
-                    NSApp.setActivationPolicy(.accessory)
-                }
+                .keyboardShortcut(",", modifiers: .command)
             }
         }
     }

@@ -7,7 +7,17 @@ struct MainWindowView: View {
     @ObservedObject var updaterController: UpdaterController
     let onAppearAction: () -> Void
 
-    @State private var selection: Section = .gettingStarted
+    @State private var selection: Section
+
+    init(
+        updaterController: UpdaterController,
+        initialSelection: Section = .gettingStarted,
+        onAppearAction: @escaping () -> Void
+    ) {
+        self.updaterController = updaterController
+        self.onAppearAction = onAppearAction
+        _selection = State(initialValue: initialSelection)
+    }
 
     enum Section: String, CaseIterable, Identifiable {
         case gettingStarted

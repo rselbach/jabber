@@ -97,43 +97,51 @@ final class ModelManagerTests: XCTestCase {
 
     func testMigrateLegacyUnavailableModelIds() {
         settings[.selectedModel] = "small"
-        XCTAssertTrue(modelManager.migrateSelectedModelIfNeeded())
+        let migration = modelManager.migrateSelectedModelIfNeeded()
+        XCTAssertNotNil(migration)
+        XCTAssertEqual(migration?.from, "small")
+        XCTAssertEqual(migration?.to, AppMode.qwen3Small4BitModelId)
         XCTAssertEqual(settings[.selectedModel], AppMode.qwen3Small4BitModelId)
+        XCTAssertEqual(modelManager.lastMigration?.from, "small")
 
         settings[.selectedModel] = "large-v3"
-        XCTAssertTrue(modelManager.migrateSelectedModelIfNeeded())
+        let migration2 = modelManager.migrateSelectedModelIfNeeded()
+        XCTAssertNotNil(migration2)
+        XCTAssertEqual(migration2?.from, "large-v3")
+        XCTAssertEqual(migration2?.to, AppMode.qwen3ModelId)
         XCTAssertEqual(settings[.selectedModel], AppMode.qwen3ModelId)
+        XCTAssertEqual(modelManager.lastMigration?.from, "large-v3")
     }
 
     func testMigrateOldQwen3VariantIds() {
         settings[.selectedModel] = "base"
-        XCTAssertTrue(modelManager.migrateSelectedModelIfNeeded())
+        XCTAssertNotNil(modelManager.migrateSelectedModelIfNeeded())
         XCTAssertEqual(settings[.selectedModel], AppMode.qwen3Small4BitModelId)
 
         settings[.selectedModel] = "medium"
-        XCTAssertTrue(modelManager.migrateSelectedModelIfNeeded())
+        XCTAssertNotNil(modelManager.migrateSelectedModelIfNeeded())
         XCTAssertEqual(settings[.selectedModel], AppMode.qwen3Large4BitModelId)
 
         settings[.selectedModel] = "large"
-        XCTAssertTrue(modelManager.migrateSelectedModelIfNeeded())
+        XCTAssertNotNil(modelManager.migrateSelectedModelIfNeeded())
         XCTAssertEqual(settings[.selectedModel], AppMode.qwen3ModelId)
     }
 
     func testMigrateExperimentalQwenModelIds() {
         settings[.selectedModel] = "qwen3-asr-0.6b-mlx-4bit"
-        XCTAssertTrue(modelManager.migrateSelectedModelIfNeeded())
+        XCTAssertNotNil(modelManager.migrateSelectedModelIfNeeded())
         XCTAssertEqual(settings[.selectedModel], AppMode.qwen3Small4BitModelId)
 
         settings[.selectedModel] = "qwen3-asr-0.6b-mlx-8bit"
-        XCTAssertTrue(modelManager.migrateSelectedModelIfNeeded())
+        XCTAssertNotNil(modelManager.migrateSelectedModelIfNeeded())
         XCTAssertEqual(settings[.selectedModel], AppMode.qwen3Small8BitModelId)
 
         settings[.selectedModel] = "qwen3-asr-1.7b-mlx-4bit"
-        XCTAssertTrue(modelManager.migrateSelectedModelIfNeeded())
+        XCTAssertNotNil(modelManager.migrateSelectedModelIfNeeded())
         XCTAssertEqual(settings[.selectedModel], AppMode.qwen3Large4BitModelId)
 
         settings[.selectedModel] = "qwen3-asr-1.7b-mlx-8bit"
-        XCTAssertTrue(modelManager.migrateSelectedModelIfNeeded())
+        XCTAssertNotNil(modelManager.migrateSelectedModelIfNeeded())
         XCTAssertEqual(settings[.selectedModel], AppMode.qwen3ModelId)
     }
 
@@ -141,16 +149,33 @@ final class ModelManagerTests: XCTestCase {
         let defaultModel = LanguageModelCatalog.recommendedModelId(for: Constants.defaultLanguage)
 
         settings[.selectedModel] = AppMode.nemotronModelId
-        XCTAssertFalse(modelManager.migrateSelectedModelIfNeeded())
+        XCTAssertNil(modelManager.migrateSelectedModelIfNeeded())
         XCTAssertEqual(settings[.selectedModel], AppMode.nemotronModelId)
 
         settings[.selectedModel] = "parakeet"
-        XCTAssertTrue(modelManager.migrateSelectedModelIfNeeded())
+        XCTAssertNotNil(modelManager.migrateSelectedModelIfNeeded())
         XCTAssertEqual(settings[.selectedModel], defaultModel)
 
         settings[.selectedModel] = "totally-unknown-model"
-        XCTAssertTrue(modelManager.migrateSelectedModelIfNeeded())
+        XCTAssertNotNil(modelManager.migrateSelectedModelIfNeeded())
         XCTAssertEqual(settings[.selectedModel], defaultModel)
+    }
+
+    func testLastMigrationNilWhenNoMigrationHappened() {
+        settings[.selectedModel] = AppMode.nemotronModelId
+        XCTAssertNil(modelManager.migrateSelectedModelIfNeeded())
+        XCTAssertNil(modelManager.lastMigration)
+    }
+
+    func testLastMigrationNotClearedBySubsequentNoOp() {
+        settings[.selectedModel] = "small"
+        XCTAssertNotNil(modelManager.migrateSelectedModelIfNeeded())
+        XCTAssertEqual(modelManager.lastMigration?.from, "small")
+
+        // After migration the selected id is now valid; a follow-up call is a
+        // no-op and must not erase the launch-time migration signal.
+        XCTAssertNil(modelManager.migrateSelectedModelIfNeeded())
+        XCTAssertEqual(modelManager.lastMigration?.from, "small")
     }
 
     func testModelPropertiesAreSet() {

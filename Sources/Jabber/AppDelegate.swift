@@ -9,6 +9,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var onboardingWindow: NSWindow?
     private var onboardingCoordinator: OnboardingCoordinator?
     private var mainWindow: NSWindow?
+    private var modelMigrationNoticeWindow: NSWindow?
 
     private let hotkeyManager = HotkeyManager()
     private let audioCapture = AudioCaptureService()
@@ -23,6 +24,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private var modelLoadTask: Task<Void, Never>?
     private var firstRunSetupTask: Task<Void, Never>?
+    private var modelMigrationNoticeTask: Task<Void, Never>?
     private var isModelLoadInProgress = false
     private var modelLoadID = UUID()
 
@@ -69,14 +71,27 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         updaterController.checkForUpdatesOnLaunchIfNeeded()
 
-        startModelLoadingTask()
+        // Resolve the model-migration notice synchronously: a user whose
+        // selected model was removed in an update should NOT have the
+        // replacement auto-downloaded out from under the prompt that's about
+        // to ask them what to do. Skip the load task when a notice is
+        // pending; presentation is still delayed for politeness.
+        let pendingNotice = pendingModelMigrationNotice()
+
+        if pendingNotice == nil {
+            startModelLoadingTask()
+        }
         scheduleUIReadyFallbackIfNeeded()
         scheduleFirstRunSetupPrompt()
+        if let pendingNotice {
+            scheduleModelMigrationNoticePresentation(pendingNotice)
+        }
     }
 
     func applicationWillTerminate(_ notification: Notification) {
         modelLoadTask?.cancel()
         firstRunSetupTask?.cancel()
+        modelMigrationNoticeTask?.cancel()
         onboardingCoordinator?.stop()
         dictationCoordinator.cancel()
         NotificationCenter.default.removeObserver(self)
@@ -627,10 +642,100 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         showMainWindow()
     }
 
+    // MARK: - Model Migration Notice
+
+    /// After an update, a user may be sitting on a selected model id that no
+    /// longer exists. `ModelManager` silently rewrites it on launch; this
+    /// surfaces the change so they can download the replacement (or pick
+    /// another) instead of discovering it mid-dictation. Called synchronously
+    /// at launch so the load task can be skipped when a prompt is pending.
+    private func pendingModelMigrationNotice() -> ModelMigrationNotice? {
+        // Onboarding owns the new-user / pre-onboarding upgrade flow; don't
+        // compete with it.
+        guard !shouldShowAutomaticOnboarding() else { return nil }
+        guard let migration = ModelManager.shared.lastMigration else { return nil }
+
+        return ModelMigrationNoticeResolver.resolve(
+            migration: migration,
+            newModelDownloaded: ModelManager.shared.downloadedModels.contains { $0.id == migration.to },
+            newModelIsBuiltIn: AppMode.modelDefinition(for: migration.to)?.isBuiltIn ?? false,
+            lastShownKey: TypedSettings[.lastModelMigrationNoticeKey]
+        )
+    }
+
+    private func scheduleModelMigrationNoticePresentation(_ notice: ModelMigrationNotice) {
+        modelMigrationNoticeTask = Task { [weak self] in
+            do {
+                try await Task.sleep(for: .milliseconds(750))
+            } catch is CancellationError {
+                return
+            } catch {
+                self?.logger.error("Failed while waiting to present model migration: \(error.localizedDescription)")
+                return
+            }
+            self?.presentModelMigrationNotice(notice)
+        }
+    }
+
+    private func presentModelMigrationNotice(_ notice: ModelMigrationNotice) {
+        guard onboardingWindow == nil, modelMigrationNoticeWindow == nil else { return }
+        showModelMigrationNotice(notice)
+    }
+
+    private func showModelMigrationNotice(_ notice: ModelMigrationNotice) {
+        popover?.performClose(nil)
+        NSApp.setActivationPolicy(.regular)
+
+        let newModelName = AppMode.modelDefinition(for: notice.migration.to)?.name ?? notice.migration.to
+        let rootView = ModelMigrationNoticeView(
+            newModelName: newModelName,
+            onDownload: { [weak self] in
+                TypedSettings[.lastModelMigrationNoticeKey] = notice.noticeKey
+                ModelManager.shared.startDownload(notice.migration.to)
+                self?.closeModelMigrationNotice()
+            },
+            onChooseAnother: { [weak self] in
+                TypedSettings[.lastModelMigrationNoticeKey] = notice.noticeKey
+                // Open the main window first so the activation policy stays
+                // regular; closing the notice then drops back only if the
+                // main window is also closed.
+                self?.showMainWindow(initialSection: .speech)
+                self?.closeModelMigrationNotice()
+            },
+            onNotNow: { [weak self] in
+                TypedSettings[.lastModelMigrationNoticeKey] = notice.noticeKey
+                self?.closeModelMigrationNotice()
+            }
+        )
+
+        let window = NSWindow(contentViewController: NSHostingController(rootView: rootView))
+        window.styleMask = [.titled, .closable, .fullSizeContentView]
+        window.title = "Jabber Was Updated"
+        window.titleVisibility = .hidden
+        window.titlebarAppearsTransparent = true
+        window.isMovableByWindowBackground = true
+        window.identifier = NSUserInterfaceItemIdentifier("com.rselbach.jabber.model-migration-notice")
+        window.isReleasedWhenClosed = false
+        window.delegate = self
+        window.center()
+
+        modelMigrationNoticeWindow = window
+
+        NSApp.activate(ignoringOtherApps: true)
+        window.makeKeyAndOrderFront(nil)
+    }
+
+    private func closeModelMigrationNotice() {
+        // windowWillClose clears the property and refreshes activation policy.
+        modelMigrationNoticeWindow?.close()
+    }
+
     /// Shows the main app window (sidebar navigation with all configuration
     /// pages). While it is open the app behaves like a regular application:
-    /// dock icon, Cmd-Tab entry, main menu.
-    private func showMainWindow() {
+    /// dock icon, Cmd-Tab entry, main menu. `initialSection` is honored only
+    /// when the window is first created; if it is already open the request
+    /// just brings it forward.
+    private func showMainWindow(initialSection: MainWindowView.Section = .gettingStarted) {
         popover?.performClose(nil)
         NSApp.setActivationPolicy(.regular)
 
@@ -642,6 +747,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         let hosting = NSHostingController(rootView: MainWindowView(
             updaterController: updaterController,
+            initialSelection: initialSection,
             onAppearAction: { [weak self] in
                 self?.markUIReadyFromView()
             }
@@ -675,7 +781,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// window remains visible. `closingWindow` is excluded because
     /// `windowWillClose` fires while the window still reports visible.
     private func refreshActivationPolicy(closing closingWindow: NSWindow? = nil) {
-        let hasVisibleUserWindow = [mainWindow, onboardingWindow]
+        let hasVisibleUserWindow = [mainWindow, onboardingWindow, modelMigrationNoticeWindow]
             .compactMap { $0 }
             .contains { $0 !== closingWindow && $0.isVisible }
         NSApp.setActivationPolicy(hasVisibleUserWindow ? .regular : .accessory)
@@ -875,6 +981,8 @@ extension AppDelegate: NSWindowDelegate {
             onboardingCoordinator?.stop()
             onboardingCoordinator = nil
             onboardingWindow = nil
+        } else if window === modelMigrationNoticeWindow {
+            modelMigrationNoticeWindow = nil
         } else if window !== mainWindow {
             return
         }

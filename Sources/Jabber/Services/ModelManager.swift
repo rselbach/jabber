@@ -47,7 +47,17 @@ final class ModelManager {
         var downloadProgress: Double
     }
 
+    /// A model migration that actually rewrote the selected model id.
+    struct Migration: Equatable, Sendable {
+        let from: String
+        let to: String
+    }
+
     private(set) var models: [Model] = []
+    /// The most recent real migration observed this launch, if any. Only
+    /// set when a migration actually rewrites the selected model id, so a
+    /// later no-op call cannot clear a launch-time migration signal.
+    private(set) var lastMigration: Migration?
     private var lastDownloadProgressReport: [String: CFAbsoluteTime] = [:]
     private var activeDownloads: [String: ActiveDownload] = [:]
     private let downloadProgressReportInterval: TimeInterval = 0.1
@@ -90,28 +100,29 @@ final class ModelManager {
     }
 
     @discardableResult
-    func migrateSelectedModelIfNeeded(notify: Bool = false) -> Bool {
+    func migrateSelectedModelIfNeeded(notify: Bool = false) -> Migration? {
         let current = settings[.selectedModel]
 
         if let legacyReplacement = Self.legacyModelIdMigration[current] {
-            guard legacyReplacement != current else { return false }
-            logger.info("Migrating selected model from '\(current)' to '\(legacyReplacement)'")
-            settings[.selectedModel] = legacyReplacement
-            if notify {
-                NotificationCenter.default.post(name: Constants.Notifications.modelDidChange, object: nil)
-            }
-            return true
+            guard legacyReplacement != current else { return nil }
+            return applyMigration(from: current, to: legacyReplacement, notify: notify)
         }
 
-        guard AppMode.modelDefinition(for: current) == nil else { return false }
+        guard AppMode.modelDefinition(for: current) == nil else { return nil }
 
         let fallback = LanguageModelCatalog.recommendedModelId(for: Constants.defaultLanguage)
-        logger.info("Migrating selected model from '\(current)' to '\(fallback)'")
-        settings[.selectedModel] = fallback
+        return applyMigration(from: current, to: fallback, notify: notify)
+    }
+
+    private func applyMigration(from: String, to: String, notify: Bool) -> Migration {
+        logger.info("Migrating selected model from '\(from)' to '\(to)'")
+        settings[.selectedModel] = to
+        let migration = Migration(from: from, to: to)
+        lastMigration = migration
         if notify {
             NotificationCenter.default.post(name: Constants.Notifications.modelDidChange, object: nil)
         }
-        return true
+        return migration
     }
 
     func refreshModels() {

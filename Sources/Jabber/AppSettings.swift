@@ -15,4 +15,5 @@ enum AppSettingKey {
     static let openRouterModel = "openRouterModel"
     static let didShowFirstRunSetup = "didShowFirstRunSetup"
     static let onboardingCompleted = "onboardingCompleted"
+    static let lastModelMigrationNoticeKey = "lastModelMigrationNoticeKey"
 }

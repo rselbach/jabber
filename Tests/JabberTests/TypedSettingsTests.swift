@@ -33,6 +33,52 @@ final class TypedSettingsTests: XCTestCase {
         XCTAssertEqual(settings[.outputMode], TypingService.OutputMode.directTyping.rawValue)
         XCTAssertEqual(settings[.hotkeyActivationMode], HotkeyActivationMode.defaultMode.rawValue)
         XCTAssertEqual(settings[.vocabularyPrompt], "", "Default vocabulary should be empty")
+        XCTAssertEqual(settings[.postProcessingProviderKind], PostProcessingProviderKind.defaultValue.rawValue)
+        XCTAssertEqual(settings[.openRouterModel], OpenRouterModelCatalog.defaultModelId)
+    }
+
+    func testPostProcessingProviderKindDefaultsAndPersistence() {
+        XCTAssertEqual(settings[.postProcessingProviderKind], "appleIntelligence")
+        XCTAssertFalse(settings.isSet(.postProcessingProviderKind))
+
+        settings[.postProcessingProviderKind] = PostProcessingProviderKind.openRouter.rawValue
+        XCTAssertEqual(settings[.postProcessingProviderKind], "openRouter")
+        XCTAssertTrue(settings.isSet(.postProcessingProviderKind))
+
+        settings.remove(.postProcessingProviderKind)
+        XCTAssertEqual(settings[.postProcessingProviderKind], PostProcessingProviderKind.defaultValue.rawValue)
+        XCTAssertFalse(settings.isSet(.postProcessingProviderKind))
+    }
+
+    func testInvalidStoredProviderKindMigratesToDefault() {
+        userDefaults.set("changnesia", forKey: AppSettingKey.postProcessingProviderKind)
+
+        XCTAssertEqual(settings[.postProcessingProviderKind], PostProcessingProviderKind.defaultValue.rawValue)
+        XCTAssertEqual(
+            userDefaults.string(forKey: AppSettingKey.postProcessingProviderKind),
+            PostProcessingProviderKind.defaultValue.rawValue
+        )
+    }
+
+    func testOpenRouterModelDefaultsAndPersistence() {
+        XCTAssertEqual(settings[.openRouterModel], OpenRouterModelCatalog.defaultModelId)
+        XCTAssertFalse(settings.isSet(.openRouterModel))
+
+        let slug = "~anthropic/claude-haiku-latest"
+        settings[.openRouterModel] = slug
+        XCTAssertEqual(settings[.openRouterModel], slug)
+        XCTAssertTrue(settings.isSet(.openRouterModel))
+
+        settings.remove(.openRouterModel)
+        XCTAssertEqual(settings[.openRouterModel], OpenRouterModelCatalog.defaultModelId)
+        XCTAssertFalse(settings.isSet(.openRouterModel))
+    }
+
+    func testInvalidStoredOpenRouterModelMigratesToDefault() {
+        userDefaults.set("openai/gpt-4o", forKey: AppSettingKey.openRouterModel)
+
+        XCTAssertEqual(settings[.openRouterModel], OpenRouterModelCatalog.defaultModelId)
+        XCTAssertEqual(userDefaults.string(forKey: AppSettingKey.openRouterModel), OpenRouterModelCatalog.defaultModelId)
     }
 
     func testLegacyPasteOutputModeMigratesToDirectTyping() {

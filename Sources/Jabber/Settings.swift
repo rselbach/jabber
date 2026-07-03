@@ -14,6 +14,8 @@ enum TypedSetting<T>: Sendable {
     case outputMode
     case hotkeyActivationMode
     case vocabularyPrompt
+    case postProcessingProviderKind
+    case openRouterModel
 
     /// The UserDefaults key for this setting
     var key: String {
@@ -23,6 +25,8 @@ enum TypedSetting<T>: Sendable {
         case .outputMode: return AppSettingKey.outputMode
         case .hotkeyActivationMode: return AppSettingKey.hotkeyActivationMode
         case .vocabularyPrompt: return AppSettingKey.vocabularyPrompt
+        case .postProcessingProviderKind: return AppSettingKey.postProcessingProviderKind
+        case .openRouterModel: return AppSettingKey.openRouterModel
         }
     }
 }
@@ -97,6 +101,10 @@ extension TypedSetting where T == String {
             return HotkeyActivationMode.defaultMode.rawValue
         case .vocabularyPrompt:
             return ""
+        case .postProcessingProviderKind:
+            return PostProcessingProviderKind.defaultValue.rawValue
+        case .openRouterModel:
+            return OpenRouterModelCatalog.defaultModelId
         }
     }
 }
@@ -122,6 +130,10 @@ struct SettingsStore: Sendable {
                 resolvedValue = TypingService.migratedOutputModeRawValue(value)
             case .hotkeyActivationMode:
                 resolvedValue = HotkeyActivationMode(rawValue: value)?.rawValue ?? setting.default
+            case .postProcessingProviderKind:
+                resolvedValue = PostProcessingProviderKind.resolve(rawValue: value).rawValue
+            case .openRouterModel:
+                resolvedValue = OpenRouterModelCatalog.resolveModelId(value)
             case .selectedModel, .selectedLanguage, .vocabularyPrompt:
                 resolvedValue = value
             }

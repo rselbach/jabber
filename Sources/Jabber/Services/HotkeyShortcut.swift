@@ -331,4 +331,26 @@ extension TypedSettings {
             SettingsStore.standard.hotkeyActivationMode = newValue
         }
     }
+
+    /// Currently selected refinement provider. Read at call time by the router;
+    /// changing this does NOT rebuild the DictationCoordinator.
+    static var postProcessingProviderKind: PostProcessingProviderKind {
+        get {
+            PostProcessingProviderKind(rawValue: SettingsStore.standard[.postProcessingProviderKind]) ?? .defaultValue
+        }
+        set {
+            SettingsStore.standard[.postProcessingProviderKind] = newValue.rawValue
+        }
+    }
+
+    /// Currently selected OpenRouter model slug (always validated against the
+    /// static catalog on read).
+    static var openRouterModel: String {
+        get {
+            SettingsStore.standard[.openRouterModel]
+        }
+        set {
+            SettingsStore.standard[.openRouterModel] = newValue
+        }
+    }
 }

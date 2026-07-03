@@ -11,6 +11,8 @@ enum AppSettingKey {
     static let saveHistoryEnabled = "saveHistoryEnabled"
     static let vocabularyPrompt = "vocabularyPrompt"
     static let postProcessingEnabled = "postProcessingEnabled"
+    static let postProcessingProviderKind = "postProcessingProviderKind"
+    static let openRouterModel = "openRouterModel"
     static let didShowFirstRunSetup = "didShowFirstRunSetup"
     static let onboardingCompleted = "onboardingCompleted"
 }

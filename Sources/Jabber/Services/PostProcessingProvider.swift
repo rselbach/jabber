@@ -11,6 +11,12 @@ protocol PostProcessingProvider: Sendable {
     /// `true` when the backing model is ready to answer right now.
     var isAvailable: Bool { get }
 
+    /// Human-readable name for user-facing messages (e.g. "\(displayName)
+    /// unavailable"). Defaults to `"Apple Intelligence"` for backward
+    /// compatibility with the original on-device provider; conformers backed
+    /// by another service should override.
+    var displayName: String { get }
+
     /// Returns a cleaned-up version of `transcript`.
     ///
     /// - Throws on failure (model error, unavailability at call time, etc.). The
@@ -20,6 +26,15 @@ protocol PostProcessingProvider: Sendable {
     ///   "scratch that", "cancel", or "never mind". The caller treats that as a
     ///   successful (cancelled) result and types nothing.
     func process(_ transcript: String) async throws -> String
+}
+
+/// Default `displayName` for conformers that don't override it. Kept as
+/// `"Apple Intelligence"` so the pre-existing on-device provider and any test
+/// fakes that stand in for it keep producing the same user-facing strings.
+extension PostProcessingProvider {
+    var displayName: String {
+        "Apple Intelligence"
+    }
 }
 
 /// Apple Intelligence-backed post-processor using the on-device FoundationModels
@@ -97,6 +112,11 @@ struct AppleIntelligencePostProcessor: PostProcessingProvider {
 
     /// Combined system instructions for the on-device model.
     static let instructions = baseInstructions + "\n\n" + bodyInstructions
+
+    /// User-facing name for provider-aware messages.
+    var displayName: String {
+        "Apple Intelligence"
+    }
 
     var isAvailable: Bool {
         if case .available = SystemLanguageModel.default.availability {

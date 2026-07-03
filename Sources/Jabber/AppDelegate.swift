@@ -696,19 +696,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         )
     }
 
-    /// Non-blocking notice that Apple Intelligence refinement failed and the
-    /// raw transcript was typed instead. Rate-limited so a flaky model does
-    /// not spam a notification on every dictation. Only true provider failures
+    /// Non-blocking notice that transcript refinement failed and the raw
+    /// transcript was typed instead. Rate-limited so a flaky provider does not
+    /// spam a notification on every dictation. Only true provider failures
     /// reach this path; guardrail rejections are surfaced non-disruptively via
-    /// `overlayWindow.showFallbackNotice` instead.
+    /// `overlayWindow.showFallbackNotice` instead. The message names the
+    /// currently selected provider so it never blames Apple Intelligence when
+    /// OpenRouter is the one that failed.
     private func showPostProcessingFailureNotice(_ error: Error) {
         let now = CFAbsoluteTimeGetCurrent()
         guard now - lastPostProcessingFailureNotice > 1.5 else { return }
         lastPostProcessingFailureNotice = now
 
+        let providerName = TypedSettings.postProcessingProviderKind.displayName
         NotificationService.shared.showWarning(
             title: "Couldn't Refine Transcript",
-            message: "Apple Intelligence cleanup failed (\(error.localizedDescription)). Typed the raw transcript instead."
+            message: "\(providerName) cleanup failed (\(error.localizedDescription)). Typed the raw transcript instead."
         )
     }
 

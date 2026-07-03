@@ -2,7 +2,7 @@
 
 A macOS menu bar app for local speech-to-text transcription using on-device ASR models.
 
-All audio is processed entirely on-device — nothing leaves your Mac.
+All audio is processed entirely on-device — nothing leaves your Mac. (Optional transcript refinement via OpenRouter sends the transcript text to a cloud provider you choose; this is off by default.)
 
 > **⚠️ Personal Project Notice**
 >

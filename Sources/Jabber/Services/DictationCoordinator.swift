@@ -158,7 +158,7 @@ final class DictationCoordinator {
         typingService: any OutputProtocol,
         mediaPlaybackService: any MediaPlaybackProtocol = MediaPlaybackService.shared,
         dictationHistoryStore: any DictationHistoryProtocol = DictationHistoryStore.shared,
-        postProcessingProvider: (any PostProcessingProvider)? = AppleIntelligencePostProcessor(),
+        postProcessingProvider: (any PostProcessingProvider)? = RoutedPostProcessor(),
         streamingPreviewInterval: Duration = .milliseconds(500),
         minimumStreamingPreviewSampleCount: Int = 16_000
     ) {
@@ -455,17 +455,18 @@ final class DictationCoordinator {
         }
 
         guard provider.isAvailable else {
-            // Apple Intelligence not ready / not enabled / unsupported device.
+            // Refinement provider not ready / not enabled / unsupported.
             // Logged but not surfaced as a user notification — it is a steady
-            // OS state that would spam every dictation otherwise. The metadata
-            // is still recorded so users can see why nothing was refined.
+            // OS state (or a missing API key) that would spam every dictation
+            // otherwise. The metadata is still recorded so users can see why
+            // nothing was refined.
             logger.info("Post-processing enabled but provider unavailable; using raw transcript")
             return PostProcessingOutcome(
                 finalText: rawText,
                 outputText: rawText,
                 rawTranscript: nil,
                 wasPostProcessed: false,
-                errorDescription: "Apple Intelligence unavailable"
+                errorDescription: "\(provider.displayName) unavailable"
             )
         }
 

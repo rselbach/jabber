@@ -14,6 +14,8 @@ struct SettingsView: View {
     @AppStorage(AppSettingKey.saveHistoryEnabled) private var saveHistoryEnabled = false
     @AppStorage(AppSettingKey.vocabularyPrompt) private var vocabularyPrompt = ""
     @AppStorage(AppSettingKey.postProcessingEnabled) private var postProcessingEnabled = false
+    @AppStorage(AppSettingKey.postProcessingProviderKind) private var postProcessingProviderKindRaw = PostProcessingProviderKind.defaultValue.rawValue
+    @AppStorage(AppSettingKey.openRouterModel) private var openRouterModel = OpenRouterModelCatalog.defaultModelId
     @AppStorage(AppSettingKey.selectedLanguage) private var selectedLanguage = Constants.defaultLanguage
     @AppStorage(AppSettingKey.onboardingCompleted) private var onboardingCompleted = false
 
@@ -24,6 +26,8 @@ struct SettingsView: View {
     @State private var pendingDeleteModelId: String?
     @State private var pendingDeleteModelName: String?
     @State private var historyEntries: [DictationHistoryEntry] = []
+    @State private var openRouterApiKey: String = ""
+    @State private var keychainError: String?
 
     @State private var selectedTab = "general"
 
@@ -68,6 +72,10 @@ struct SettingsView: View {
             _ = modelManager.migrateSelectedModelIfNeeded()
             modelManager.refreshModels()
             refreshHistoryEntries()
+            loadOpenRouterAPIKey()
+        }
+        .onDisappear {
+            saveOpenRouterAPIKey()
         }
         .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
             permissionRefreshTick.toggle()
@@ -155,6 +163,39 @@ struct SettingsView: View {
 
     private var selectedHotkeyActivationMode: HotkeyActivationMode {
         HotkeyActivationMode(rawValue: hotkeyActivationMode) ?? .defaultMode
+    }
+
+    private var selectedPostProcessingProviderKind: PostProcessingProviderKind {
+        PostProcessingProviderKind(rawValue: postProcessingProviderKindRaw) ?? .defaultValue
+    }
+
+    /// Loads the OpenRouter API key from the Keychain into the SecureField.
+    /// Keychain errors are surfaced as inline red text, not a modal alert.
+    private func loadOpenRouterAPIKey() {
+        do {
+            openRouterApiKey = try OpenRouterKeychain.readKey() ?? ""
+            keychainError = nil
+        } catch {
+            openRouterApiKey = ""
+            keychainError = error.localizedDescription
+        }
+    }
+
+    /// Persists the SecureField's API key to the Keychain. An empty/whitespace
+    /// value deletes the stored key. Errors are surfaced as inline red text.
+    private func saveOpenRouterAPIKey() {
+        let trimmed = openRouterApiKey.trimmingCharacters(in: .whitespacesAndNewlines)
+        do {
+            if trimmed.isEmpty {
+                try OpenRouterKeychain.deleteKey()
+            } else {
+                try OpenRouterKeychain.saveKey(trimmed)
+            }
+            openRouterApiKey = trimmed
+            keychainError = nil
+        } catch {
+            keychainError = error.localizedDescription
+        }
     }
 
     private var generalTab: some View {
@@ -249,13 +290,46 @@ struct SettingsView: View {
             }
 
             Section {
-                Toggle("Refine transcripts with Apple Intelligence", isOn: $postProcessingEnabled)
+                Toggle("Refine transcripts", isOn: $postProcessingEnabled)
 
-                Text("When enabled, Jabber asks the on-device Apple Intelligence model to clean up the final transcript — fixing punctuation, removing filler words and self-corrections — before typing it. Requires an Apple Intelligence-capable Mac with Apple Intelligence turned on. Falls back to the raw transcript if unavailable.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+                if postProcessingEnabled {
+                    Picker("Refinement provider", selection: $postProcessingProviderKindRaw) {
+                        ForEach(PostProcessingProviderKind.allCases) { kind in
+                            Text(kind.displayName).tag(kind.rawValue)
+                        }
+                    }
+
+                    switch selectedPostProcessingProviderKind {
+                    case .appleIntelligence:
+                        Text("Uses the on-device Apple Intelligence model to clean up the final transcript — fixing punctuation, removing filler words and self-corrections — before typing it. Requires an Apple Intelligence-capable Mac with Apple Intelligence turned on. Falls back to the raw transcript if unavailable.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    case .openRouter:
+                        SecureField("OpenRouter API key", text: $openRouterApiKey)
+                            .textContentType(.password)
+                            .onSubmit {
+                                saveOpenRouterAPIKey()
+                            }
+
+                        Picker("Model", selection: $openRouterModel) {
+                            ForEach(OpenRouterModelCatalog.models) { model in
+                                Text(model.displayName).tag(model.id)
+                            }
+                        }
+
+                        if let keychainError {
+                            Text(keychainError)
+                                .font(.caption)
+                                .foregroundStyle(.red)
+                        }
+
+                        Text("Cloud refinement sends your transcript to OpenRouter and the selected model provider for processing. The API key is stored in your macOS Keychain, not in preferences. Falls back to the raw transcript if the request fails.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
             } header: {
-                Text("Apple Intelligence")
+                Text("Transcript Refinement")
             }
 
             Section {
@@ -471,7 +545,7 @@ struct SettingsView: View {
             Section {
                 Text("Jabber")
                     .font(.headline)
-                Text("Local speech-to-text for macOS. All processing happens on-device.")
+                Text("Local speech-to-text for macOS. Audio is processed on-device; optional transcript refinement can use a cloud provider.")
                     .foregroundStyle(.secondary)
             } header: {
                 Text("About")

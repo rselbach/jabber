@@ -110,7 +110,12 @@ struct AppleIntelligencePostProcessor: PostProcessingProvider {
             model: SystemLanguageModel.default,
             instructions: Self.instructions
         )
-        let response = try await session.respond(to: transcript)
+        // Greedy sampling makes cleanup deterministic: no creative drift,
+        // so the model faithfully preserves dictated content.
+        let response = try await session.respond(
+            to: transcript,
+            options: GenerationOptions(sampling: .greedy)
+        )
         return response.content
     }
 }

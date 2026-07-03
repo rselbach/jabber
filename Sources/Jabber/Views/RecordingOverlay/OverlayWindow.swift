@@ -60,6 +60,10 @@ final class OverlayWindow: OverlayWindowController {
     private var hostingView: NSHostingView<WaveformContainer>?
     private let logger = Logger(subsystem: "com.rselbach.jabber", category: "OverlayWindow")
 
+    /// When `hide()` is called while a fallback notice is on screen, the hide
+    /// is deferred until the notice auto-clears so the user has time to read it.
+    private var pendingHide = false
+
     init() {
         super.init(animationDuration: 0.2)
     }
@@ -88,6 +92,31 @@ final class OverlayWindow: OverlayWindowController {
         waveformView?.showRefining()
     }
 
+    /// Shows a brief, non-disruptive red notice on the overlay when
+    /// post-processing fell back to the raw transcript. The overlay is already
+    /// on screen (we are mid-transcription/refining), so this only updates the
+    /// waveform view; it does not reset existing state.
+    func showFallbackNotice(_ text: String) {
+        waveformView?.showFallbackNotice(text)
+    }
+
+    override func hide() {
+        // Defer the hide while a fallback notice is visible so it can be read;
+        // the notice's auto-clear reissues the hide via the cleared callback.
+        if waveformView?.hasActiveFallbackNotice == true {
+            pendingHide = true
+            return
+        }
+        pendingHide = false
+        super.hide()
+    }
+
+    private func fallbackNoticeCleared() {
+        guard pendingHide else { return }
+        pendingHide = false
+        super.hide()
+    }
+
     func setTargetAppIcon(_ icon: NSImage?) {
         waveformView?.setTargetAppIcon(icon)
     }
@@ -109,6 +138,9 @@ final class OverlayWindow: OverlayWindowController {
         let panel = OverlayPanelFactory.makePanel(frame: frame)
 
         let waveform = WaveformView()
+        waveform.onFallbackNoticeCleared = { [weak self] in
+            self?.fallbackNoticeCleared()
+        }
         let container = WaveformContainer(waveformView: waveform)
         let hostingView = NSHostingView(rootView: container)
         hostingView.frame = NSRect(x: 0, y: 0, width: windowWidth, height: windowHeight)
@@ -162,13 +194,31 @@ struct WaveformContainer: View {
 
     @ViewBuilder
     private var content: some View {
-        if waveformView.isProcessing {
+        if let notice = waveformView.fallbackNotice {
+            fallbackNoticeView(notice)
+        } else if waveformView.isProcessing {
             processingContent
         } else if waveformView.partialTranscription.isEmpty {
             waveform
         } else {
             previewContent
         }
+    }
+
+    /// Brief, non-disruptive red indicator shown when post-processing fell
+    /// back to the raw transcript. Auto-clears (no click-to-dismiss UI).
+    private func fallbackNoticeView(_ text: String) -> some View {
+        HStack(spacing: 8) {
+            Image(systemName: "exclamationmark.triangle.fill")
+                .foregroundStyle(.red)
+            Text(text)
+                .font(.subheadline)
+                .foregroundStyle(.red)
+                .lineLimit(2)
+                .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .padding(.horizontal, 18)
+        .padding(.vertical, 12)
     }
 
     private func targetAppIconView(_ icon: NSImage) -> some View {

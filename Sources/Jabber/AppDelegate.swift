@@ -338,6 +338,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             self.logger.error("Post-processing failed: \(error.localizedDescription)")
             self.showPostProcessingFailureNotice(error)
         }
+
+        dictationCoordinator.onPostProcessingFallback = { [weak self] in
+            guard let self else { return }
+            self.logger.notice("Post-processing fell back to raw transcript after guardrail rejection")
+            self.overlayWindow.showFallbackNotice("Refinement looked wrong — used raw transcript")
+        }
     }
 
     private func setupModelStateCallback() {
@@ -692,11 +698,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     /// Non-blocking notice that Apple Intelligence refinement failed and the
     /// raw transcript was typed instead. Rate-limited so a flaky model does
-    /// not spam a notification on every dictation.
+    /// not spam a notification on every dictation. Only true provider failures
+    /// reach this path; guardrail rejections are surfaced non-disruptively via
+    /// `overlayWindow.showFallbackNotice` instead.
     private func showPostProcessingFailureNotice(_ error: Error) {
         let now = CFAbsoluteTimeGetCurrent()
         guard now - lastPostProcessingFailureNotice > 1.5 else { return }
         lastPostProcessingFailureNotice = now
+
         NotificationService.shared.showWarning(
             title: "Couldn't Refine Transcript",
             message: "Apple Intelligence cleanup failed (\(error.localizedDescription)). Typed the raw transcript instead."

@@ -69,7 +69,7 @@ struct HotkeyPage: View {
         hotkeyKeyCode = Int(shortcut.keyCode)
         hotkeyModifiers = Int(shortcut.modifiers)
         NotificationCenter.default.post(
-            name: Constants.Notifications.hotkeyDidChange,
+            name: Constants.Notifications.hotkeyShortcutDidChange,
             object: shortcut
         )
     }
@@ -80,7 +80,7 @@ struct HotkeyPage: View {
             hotkeyActivationMode = mode.rawValue
         }
         NotificationCenter.default.post(
-            name: Constants.Notifications.hotkeyDidChange,
+            name: Constants.Notifications.hotkeyActivationModeDidChange,
             object: mode
         )
     }

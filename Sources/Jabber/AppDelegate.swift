@@ -122,7 +122,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         NotificationCenter.default.addObserver(
             self,
             selector: #selector(handleHotkeyChange),
-            name: Constants.Notifications.hotkeyDidChange,
+            name: Constants.Notifications.hotkeyShortcutDidChange,
             object: nil
         )
 

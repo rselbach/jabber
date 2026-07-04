@@ -10,8 +10,16 @@ enum Constants {
         /// Posted when a model download starts/progresses/finishes
         static let modelDownloadStateDidChange = Notification.Name("com.rselbach.jabber.modelDownloadStateDidChange")
 
-        /// Posted when the global dictation hotkey changes
-        static let hotkeyDidChange = Notification.Name("com.rselbach.jabber.hotkeyDidChange")
+        /// Posted when the configured hotkey shortcut changes. `object` is the
+        /// new `HotkeyShortcut`. Observed by AppDelegate to re-register the
+        /// global hotkey.
+        static let hotkeyShortcutDidChange = Notification.Name("com.rselbach.jabber.hotkeyShortcutDidChange")
+
+        /// Posted when the hotkey activation mode changes. `object` is the new
+        /// `HotkeyActivationMode`. Read at key-down time, so no re-registration
+        /// is needed — kept distinct from `hotkeyShortcutDidChange` so observers
+        /// don't have to type-sniff the payload.
+        static let hotkeyActivationModeDidChange = Notification.Name("com.rselbach.jabber.hotkeyActivationModeDidChange")
 
         /// Posted while the Settings UI is recording a new hotkey
         static let hotkeyCaptureDidBegin = Notification.Name("com.rselbach.jabber.hotkeyCaptureDidBegin")

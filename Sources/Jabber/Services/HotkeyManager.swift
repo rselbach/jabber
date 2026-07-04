@@ -73,6 +73,13 @@ final class HotkeyManager: @unchecked Sendable {
         }
         if let tap {
             CGEvent.tapEnable(tap: tap, enable: false)
+            // Invalidate synchronously so an in-flight callback can no longer
+            // re-enter this (already-deinit) object. Disabling the tap alone
+            // does not synchronize with a callback already on the stack; the
+            // `isDeinit()` guard in the callback dereferences `self` to read
+            // the flag, which is itself a use-after-free. Invalidation is the
+            // authoritative teardown that prevents further dispatch.
+            CFMachPortInvalidate(tap)
             if let source {
                 CFRunLoopRemoveSource(CFRunLoopGetMain(), source, .commonModes)
             }
@@ -119,6 +126,9 @@ final class HotkeyManager: @unchecked Sendable {
         }
         if let tap {
             CGEvent.tapEnable(tap: tap, enable: false)
+            // Invalidate synchronously so an in-flight callback can no longer
+            // re-enter the manager after unregister. See deinit for rationale.
+            CFMachPortInvalidate(tap)
             if let source {
                 CFRunLoopRemoveSource(CFRunLoopGetMain(), source, .commonModes)
             }
@@ -240,6 +250,26 @@ final class HotkeyManager: @unchecked Sendable {
         runLoopSource = source
         lock.unlock()
 
+        guard let source else {
+            // The tap was created but its run-loop source could not be. Tear
+            // the tap down so it can't linger, and surface a registration
+            // failure through the existing path (matching the tapCreate
+            // failure above). Passing nil to CFRunLoopAddSource would crash.
+            CGEvent.tapEnable(tap: tap, enable: false)
+            CFMachPortInvalidate(tap)
+            lock.lock()
+            eventTap = nil
+            runLoopSource = nil
+            modifierOnlyShortcut = nil
+            gesture.reset()
+            recentTapDisables = []
+            eventTapDead = true
+            lock.unlock()
+            logger.error("Failed to create run-loop source for event tap")
+            dispatchRegistrationFailure(OSStatus(eventNotHandledErr))
+            return OSStatus(eventNotHandledErr)
+        }
+
         CFRunLoopAddSource(CFRunLoopGetMain(), source, .commonModes)
         CGEvent.tapEnable(tap: tap, enable: true)
         logger.info("CGEventTap enabled on main runloop for keyCode=\(shortcut.keyCode)")
@@ -302,6 +332,8 @@ final class HotkeyManager: @unchecked Sendable {
         } else if teardownTap != nil {
             if let tap = teardownTap {
                 CGEvent.tapEnable(tap: tap, enable: false)
+                // Invalidate so the dead tap can't dispatch further callbacks.
+                CFMachPortInvalidate(tap)
             }
             if let source = teardownSource {
                 CFRunLoopRemoveSource(CFRunLoopGetMain(), source, .commonModes)

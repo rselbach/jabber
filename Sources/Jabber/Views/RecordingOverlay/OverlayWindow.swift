@@ -55,8 +55,8 @@ class OverlayWindowController {
 }
 
 @MainActor
-final class OverlayWindow: OverlayWindowController {
-    private var waveformView: WaveformView?
+class OverlayWindow: OverlayWindowController {
+    var waveformView: WaveformView?
     private var hostingView: NSHostingView<WaveformContainer>?
     private let logger = Logger(subsystem: "com.rselbach.jabber", category: "OverlayWindow")
 
@@ -69,6 +69,12 @@ final class OverlayWindow: OverlayWindowController {
     }
 
     override func onShow() {
+        // A new session abandons any deferred hide carried over from the
+        // previous session's fallback-notice window. Without this, a stale
+        // pendingHide from session A would fire when session B's own
+        // fallback notice auto-clears (session B is still active), hiding
+        // the overlay mid-transcription.
+        pendingHide = false
         waveformView?.reset()
     }
 
@@ -111,7 +117,7 @@ final class OverlayWindow: OverlayWindowController {
         super.hide()
     }
 
-    private func fallbackNoticeCleared() {
+    func fallbackNoticeCleared() {
         guard pendingHide else { return }
         pendingHide = false
         super.hide()

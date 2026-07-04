@@ -1,0 +1,69 @@
+import AppKit
+import XCTest
+@testable import Jabber
+
+@MainActor
+final class OverlayWindowTests: XCTestCase {
+    // Regression: session A ends while a fallback notice is on screen, so
+    // hide() is deferred (pendingHide = true). The user starts session B
+    // inside the notice window; show() resets the notice silently. Without
+    // clearing pendingHide on show, session B's own fallback-notice auto-clear
+    // fires fallbackNoticeCleared(), sees the stale pendingHide, and hides the
+    // overlay while session B is still active. visibilityToken bumps on every
+    // super.hide() call, so it's the synchronous proxy for "overlay got hidden".
+    func testDeferredHideDoesNotFireAfterNewSessionShow() {
+        let overlay = TestOverlayWindow()
+
+        overlay.show()
+        let tokenAfterFirstShow = overlay.visibilityToken
+        XCTAssertEqual(tokenAfterFirstShow, 1)
+
+        overlay.showFallbackNotice("session A — raw transcript used")
+        XCTAssertTrue(overlay.waveformView?.hasActiveFallbackNotice ?? false)
+
+        overlay.hide()
+        // Deferred: super.hide() must NOT run, so the token stays put.
+        XCTAssertEqual(overlay.visibilityToken, tokenAfterFirstShow)
+
+        // Session B begins. onShow must clear the stale pendingHide.
+        overlay.show()
+        let tokenAfterSecondShow = overlay.visibilityToken
+        XCTAssertEqual(tokenAfterSecondShow, 2)
+
+        overlay.showFallbackNotice("session B — refinement failed")
+        XCTAssertTrue(overlay.waveformView?.hasActiveFallbackNotice ?? false)
+
+        // Simulate session B's notice auto-clearing. The stale deferred hide
+        // from session A must NOT complete here — session B is still active.
+        overlay.waveformView?.clearFallbackNotice()
+
+        XCTAssertEqual(
+            overlay.visibilityToken,
+            tokenAfterSecondShow,
+            "stale pendingHide leaked into session B and hid the active overlay"
+        )
+    }
+}
+
+/// Minimal OverlayWindow subclass whose createWindow() doesn't depend on
+/// NSScreen.main (unavailable in headless test runners). Wires the fallback
+/// notice callback the same way the real createWindow does so the deferred-hide
+/// path is exercised against the production OverlayWindow logic.
+@MainActor
+final class TestOverlayWindow: OverlayWindow {
+    override func createWindow() -> Bool {
+        let panel = NSPanel(
+            contentRect: NSRect(x: 0, y: 0, width: 400, height: 104),
+            styleMask: [.borderless, .nonactivatingPanel],
+            backing: .buffered,
+            defer: false
+        )
+        let waveform = WaveformView()
+        waveform.onFallbackNoticeCleared = { [weak self] in
+            self?.fallbackNoticeCleared()
+        }
+        window = panel
+        waveformView = waveform
+        return true
+    }
+}

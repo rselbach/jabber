@@ -406,9 +406,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func setupModelStateCallback() {
-        transcriptionService.setStateCallback { [weak self] state in
-            Task { @MainActor in
-                self?.handleModelState(state)
+        // `handle` is a @MainActor closure so the weak-self read happens on the
+        // main actor (clean under StrictConcurrency); it is @Sendable so it can
+        // be captured by the @Sendable state callback below.
+        let handle: @Sendable @MainActor (TranscriptionService.State) -> Void = { [weak self] state in
+            self?.handleModelState(state)
+        }
+        transcriptionService.setStateCallback { state in
+            // Serialize delivery over the FIFO main queue. A fresh unstructured
+            // `Task { @MainActor }` per state change has no ordering guarantee,
+            // so a rapid `.loading` -> `.ready` pair could apply reversed and
+            // leave a stale status icon/overlay. The main dispatch queue is
+            // serial, so submissions run in order; `assumeIsolated` runs the
+            // `@MainActor` body synchronously without re-queue.
+            DispatchQueue.main.async {
+                MainActor.assumeIsolated {
+                    handle(state)
+                }
             }
         }
     }

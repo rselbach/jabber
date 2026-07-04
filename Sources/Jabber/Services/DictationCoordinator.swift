@@ -150,6 +150,8 @@ final class DictationCoordinator {
     private var lastStreamingPreviewText = ""
     private let streamingPreviewInterval: Duration
     private let minimumStreamingPreviewSampleCount: Int
+    private let isPostProcessingEnabled: @MainActor () -> Bool
+    private let replacementEntriesProvider: @MainActor () -> [ReplacementEntry]
     private let logger = Logger(subsystem: "com.rselbach.jabber", category: "DictationCoordinator")
 
     init(
@@ -160,7 +162,9 @@ final class DictationCoordinator {
         dictationHistoryStore: any DictationHistoryProtocol = DictationHistoryStore.shared,
         postProcessingProvider: (any PostProcessingProvider)? = RoutedPostProcessor(),
         streamingPreviewInterval: Duration = .milliseconds(500),
-        minimumStreamingPreviewSampleCount: Int = 16_000
+        minimumStreamingPreviewSampleCount: Int = 16_000,
+        isPostProcessingEnabled: @escaping @MainActor () -> Bool = { TypedSettings[.postProcessingEnabled] },
+        replacementEntriesProvider: @escaping @MainActor () -> [ReplacementEntry] = { TypedSettings.replacementEntries }
     ) {
         self.audioCapture = audioCapture
         self.transcriptionService = transcriptionService
@@ -170,6 +174,8 @@ final class DictationCoordinator {
         self.postProcessingProvider = postProcessingProvider
         self.streamingPreviewInterval = streamingPreviewInterval
         self.minimumStreamingPreviewSampleCount = minimumStreamingPreviewSampleCount
+        self.isPostProcessingEnabled = isPostProcessingEnabled
+        self.replacementEntriesProvider = replacementEntriesProvider
 
         self.audioCapture.onAudioLevel = { [weak self] level in
             self?.onAudioLevel?(level)
@@ -381,7 +387,7 @@ final class DictationCoordinator {
             // user's chosen text so what gets typed matches what gets stored
             // in history. Skipped (no-op) when no rules are configured.
             var resolvedOutcome = postProcessingOutcome
-            let replacementEntries = TypedSettings.replacementEntries
+            let replacementEntries = replacementEntriesProvider()
             if !replacementEntries.isEmpty {
                 resolvedOutcome.finalText = ReplacementWordsResolver.resolve(
                     transcript: postProcessingOutcome.finalText,
@@ -460,7 +466,7 @@ final class DictationCoordinator {
     private func applyPostProcessing(to rawText: String) async throws -> PostProcessingOutcome {
         let rawTrimmed = rawText.trimmingCharacters(in: .whitespacesAndNewlines)
 
-        guard TypedSettings[.postProcessingEnabled],
+        guard isPostProcessingEnabled(),
               !rawTrimmed.isEmpty,
               let provider = postProcessingProvider else {
             return PostProcessingOutcome(

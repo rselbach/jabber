@@ -6,13 +6,11 @@ final class DictationHistoryStoreTests: XCTestCase {
 
     override func setUp() async throws {
         try await super.setUp()
-        UserDefaults.standard.removeObject(forKey: AppSettingKey.saveHistoryEnabled)
         historyDirectoryURL = FileManager.default.temporaryDirectory
             .appendingPathComponent("JabberTests.DictationHistoryStore.\(UUID().uuidString)", isDirectory: true)
     }
 
     override func tearDown() async throws {
-        UserDefaults.standard.removeObject(forKey: AppSettingKey.saveHistoryEnabled)
         if let historyDirectoryURL, FileManager.default.fileExists(atPath: historyDirectoryURL.path) {
             try FileManager.default.removeItem(at: historyDirectoryURL)
         }
@@ -58,15 +56,15 @@ final class DictationHistoryStoreTests: XCTestCase {
     }
 
     func testSaveSessionRequiresOptInSetting() async {
-        let store = makeStore()
+        let disabledStore = makeStore(isSaveEnabled: { false })
 
-        await store.saveSession(session(transcript: "disabled", timestamp: Date(timeIntervalSince1970: 100)))
+        await disabledStore.saveSession(session(transcript: "disabled", timestamp: Date(timeIntervalSince1970: 100)))
         XCTAssertFalse(FileManager.default.fileExists(atPath: historyDirectoryURL.path))
 
-        UserDefaults.standard.set(true, forKey: AppSettingKey.saveHistoryEnabled)
-        await store.saveSession(session(transcript: "enabled", timestamp: Date(timeIntervalSince1970: 200)))
+        let enabledStore = makeStore(isSaveEnabled: { true })
+        await enabledStore.saveSession(session(transcript: "enabled", timestamp: Date(timeIntervalSince1970: 200)))
 
-        let entries = await store.entries()
+        let entries = await enabledStore.entries()
 
         XCTAssertEqual(entries.map(\.transcript), ["enabled"])
     }
@@ -253,11 +251,16 @@ final class DictationHistoryStoreTests: XCTestCase {
         XCTAssertEqual(entries.map(\.transcript), ["Greendale Community College"])
     }
 
-    private func makeStore(maxEntryCount: Int = 50, maxByteCount: Int64 = 500 * 1024 * 1024) -> DictationHistoryStore {
+    private func makeStore(
+        maxEntryCount: Int = 50,
+        maxByteCount: Int64 = 500 * 1024 * 1024,
+        isSaveEnabled: @escaping @MainActor () -> Bool = { true }
+    ) -> DictationHistoryStore {
         DictationHistoryStore(
             directoryURL: historyDirectoryURL,
             maxEntryCount: maxEntryCount,
-            maxByteCount: maxByteCount
+            maxByteCount: maxByteCount,
+            isSaveEnabled: isSaveEnabled
         )
     }
 

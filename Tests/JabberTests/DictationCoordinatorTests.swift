@@ -9,6 +9,8 @@ final class DictationCoordinatorTests: XCTestCase {
     private var mediaPlaybackService: FakeMediaPlaybackService!
     private var dictationHistoryStore: FakeDictationHistoryStore!
     private var postProcessor: FakePostProcessingProvider!
+    private var postProcessingEnabled = false
+    private var replacementEntries: [ReplacementEntry] = []
     private var coordinator: DictationCoordinator!
 
     override func setUp() async throws {
@@ -19,8 +21,8 @@ final class DictationCoordinatorTests: XCTestCase {
         mediaPlaybackService = FakeMediaPlaybackService()
         dictationHistoryStore = FakeDictationHistoryStore()
         postProcessor = FakePostProcessingProvider()
-        UserDefaults.standard.removeObject(forKey: AppSettingKey.postProcessingEnabled)
-        UserDefaults.standard.removeObject(forKey: AppSettingKey.replacementEntries)
+        postProcessingEnabled = false
+        replacementEntries = []
         coordinator = DictationCoordinator(
             audioCapture: audioCapture,
             transcriptionService: transcriptionService,
@@ -29,7 +31,9 @@ final class DictationCoordinatorTests: XCTestCase {
             dictationHistoryStore: dictationHistoryStore,
             postProcessingProvider: postProcessor,
             streamingPreviewInterval: .milliseconds(10),
-            minimumStreamingPreviewSampleCount: 16_000
+            minimumStreamingPreviewSampleCount: 16_000,
+            isPostProcessingEnabled: { [weak self] in self?.postProcessingEnabled ?? false },
+            replacementEntriesProvider: { [weak self] in self?.replacementEntries ?? [] }
         )
     }
 
@@ -41,8 +45,6 @@ final class DictationCoordinatorTests: XCTestCase {
         mediaPlaybackService = nil
         dictationHistoryStore = nil
         postProcessor = nil
-        UserDefaults.standard.removeObject(forKey: AppSettingKey.postProcessingEnabled)
-        UserDefaults.standard.removeObject(forKey: AppSettingKey.replacementEntries)
         try await super.tearDown()
     }
 
@@ -437,7 +439,7 @@ final class DictationCoordinatorTests: XCTestCase {
     // MARK: - Post-processing
 
     private func enablePostProcessing() {
-        UserDefaults.standard.set(true, forKey: AppSettingKey.postProcessingEnabled)
+        postProcessingEnabled = true
     }
 
     func testPostProcessingDisabledDoesNotCallProvider() async {
@@ -836,10 +838,7 @@ final class DictationCoordinatorTests: XCTestCase {
     // MARK: - Instant replacement (final pass)
 
     private func enableReplacementEntries(_ entries: [ReplacementEntry]) {
-        UserDefaults.standard.set(
-            ReplacementEntriesCodec.encode(entries),
-            forKey: AppSettingKey.replacementEntries
-        )
+        replacementEntries = entries
     }
 
     func testInstantReplacementAppliedToRawTranscript() async {

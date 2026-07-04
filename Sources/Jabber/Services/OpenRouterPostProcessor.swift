@@ -173,43 +173,48 @@ struct OpenRouterPostProcessor: PostProcessingProvider {
 /// shared with the typed accessor via the pure `resolve` helpers.
 struct RoutedPostProcessor: PostProcessingProvider {
     private static let logger = Logger(subsystem: "com.rselbach.jabber", category: "PostProcessingRouter")
+    private let defaults: UserDefaults
+
+    init(defaults: UserDefaults = .standard) {
+        self.defaults = defaults
+    }
 
     var displayName: String {
-        Self.currentKind().displayName
+        currentKind().displayName
     }
 
     var isAvailable: Bool {
-        switch Self.currentKind() {
+        switch currentKind() {
         case .appleIntelligence:
             return AppleIntelligencePostProcessor().isAvailable
         case .openRouter:
-            return OpenRouterPostProcessor(apiKey: Self.currentApiKey(), modelId: Self.currentModelId()).isAvailable
+            return OpenRouterPostProcessor(apiKey: Self.currentApiKey(), modelId: currentModelId()).isAvailable
         }
     }
 
     func process(_ transcript: String) async throws -> String {
-        switch Self.currentKind() {
+        switch currentKind() {
         case .appleIntelligence:
             return try await AppleIntelligencePostProcessor().process(transcript)
         case .openRouter:
             return try await OpenRouterPostProcessor(
                 apiKey: Self.currentApiKey(),
-                modelId: Self.currentModelId()
+                modelId: currentModelId()
             ).process(transcript)
         }
     }
 
     // MARK: - Call-time settings reads (non-isolated, UserDefaults is thread-safe)
 
-    private static func currentKind() -> PostProcessingProviderKind {
+    private func currentKind() -> PostProcessingProviderKind {
         PostProcessingProviderKind.resolve(
-            rawValue: UserDefaults.standard.string(forKey: AppSettingKey.postProcessingProviderKind)
+            rawValue: defaults.string(forKey: AppSettingKey.postProcessingProviderKind)
         )
     }
 
-    private static func currentModelId() -> String {
+    private func currentModelId() -> String {
         OpenRouterModelCatalog.resolveModelId(
-            UserDefaults.standard.string(forKey: AppSettingKey.openRouterModel)
+            defaults.string(forKey: AppSettingKey.openRouterModel)
         )
     }
 

@@ -7,36 +7,43 @@ import XCTest
 /// reads the provider-kind setting without touching the Keychain or Apple
 /// Intelligence availability, keeping them deterministic.
 final class RoutedPostProcessorTests: XCTestCase {
+    private var defaults: UserDefaults!
+    private let suiteName = "JabberTests.RoutedPostProcessor.\(UUID().uuidString)"
+
+    override func setUp() async throws {
+        try await super.setUp()
+        defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
+    }
+
     override func tearDown() async throws {
-        UserDefaults.standard.removeObject(forKey: AppSettingKey.postProcessingProviderKind)
-        UserDefaults.standard.removeObject(forKey: AppSettingKey.openRouterModel)
+        defaults = nil
+        UserDefaults.standard.removePersistentDomain(forName: suiteName)
         try await super.tearDown()
     }
 
     func testDisplayNameDefaultsToAppleIntelligence() {
-        UserDefaults.standard.removeObject(forKey: AppSettingKey.postProcessingProviderKind)
-        XCTAssertEqual(RoutedPostProcessor().displayName, "Apple Intelligence")
+        XCTAssertEqual(RoutedPostProcessor(defaults: defaults).displayName, "Apple Intelligence")
     }
 
     func testDisplayNameReflectsOpenRouterSelection() {
-        UserDefaults.standard.set(PostProcessingProviderKind.openRouter.rawValue, forKey: AppSettingKey.postProcessingProviderKind)
-        XCTAssertEqual(RoutedPostProcessor().displayName, "OpenRouter")
+        defaults.set(PostProcessingProviderKind.openRouter.rawValue, forKey: AppSettingKey.postProcessingProviderKind)
+        XCTAssertEqual(RoutedPostProcessor(defaults: defaults).displayName, "OpenRouter")
     }
 
     func testDisplayNameReflectsAppleIntelligenceSelection() {
-        UserDefaults.standard.set(PostProcessingProviderKind.appleIntelligence.rawValue, forKey: AppSettingKey.postProcessingProviderKind)
-        XCTAssertEqual(RoutedPostProcessor().displayName, "Apple Intelligence")
+        defaults.set(PostProcessingProviderKind.appleIntelligence.rawValue, forKey: AppSettingKey.postProcessingProviderKind)
+        XCTAssertEqual(RoutedPostProcessor(defaults: defaults).displayName, "Apple Intelligence")
     }
 
     func testDisplayNameFallsBackForInvalidStoredKind() {
-        UserDefaults.standard.set("changnesia", forKey: AppSettingKey.postProcessingProviderKind)
-        XCTAssertEqual(RoutedPostProcessor().displayName, "Apple Intelligence")
+        defaults.set("changnesia", forKey: AppSettingKey.postProcessingProviderKind)
+        XCTAssertEqual(RoutedPostProcessor(defaults: defaults).displayName, "Apple Intelligence")
     }
 
     func testRouterConformsToPostProcessingProvider() {
         // Compile-time + runtime confirmation that the router satisfies the
         // protocol the coordinator depends on.
-        let provider: any PostProcessingProvider = RoutedPostProcessor()
+        let provider: any PostProcessingProvider = RoutedPostProcessor(defaults: defaults)
         XCTAssertFalse(provider.displayName.isEmpty)
     }
 }

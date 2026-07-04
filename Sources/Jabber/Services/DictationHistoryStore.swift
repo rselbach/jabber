@@ -129,18 +129,21 @@ actor DictationHistoryStore: DictationHistoryProtocol {
     private let maxEntryCount: Int
     private let maxByteCount: Int64
     private let fileManager: FileManager
+    private let isSaveEnabled: @MainActor () -> Bool
     private let logger = Logger(subsystem: "com.rselbach.jabber", category: "DictationHistoryStore")
 
     init(
         directoryURL: URL = DictationHistoryStore.defaultDirectoryURL,
         maxEntryCount: Int = DictationHistoryStore.defaultMaxEntryCount,
         maxByteCount: Int64 = DictationHistoryStore.defaultMaxByteCount,
-        fileManager: FileManager = .default
+        fileManager: FileManager = .default,
+        isSaveEnabled: @escaping @MainActor () -> Bool = { TypedSettings[.saveHistoryEnabled] }
     ) {
         self.directoryURL = directoryURL
         self.maxEntryCount = maxEntryCount
         self.maxByteCount = maxByteCount
         self.fileManager = fileManager
+        self.isSaveEnabled = isSaveEnabled
     }
 
     nonisolated static var defaultDirectoryURL: URL {
@@ -151,7 +154,7 @@ actor DictationHistoryStore: DictationHistoryProtocol {
     }
 
     func saveSession(_ session: DictationHistorySession) async {
-        let isEnabled = await MainActor.run { TypedSettings[.saveHistoryEnabled] }
+        let isEnabled = await MainActor.run { isSaveEnabled() }
         guard isEnabled else { return }
 
         do {

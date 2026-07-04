@@ -301,8 +301,13 @@ final class HotkeyManager: @unchecked Sendable {
         var teardownTap: CFMachPort?
         var teardownSource: CFRunLoopSource?
         var teardownDebounce: DispatchWorkItem?
+        var gestureAction: ModifierOnlyGestureReducer.Action = .none
+        var disabledDebounce: DispatchWorkItem?
 
         lock.lock()
+        gestureAction = gesture.handle(.tapDisabled)
+        disabledDebounce = modifierOnlyDebounce
+        modifierOnlyDebounce = nil
         let (updated, shouldReenable) = EventTapReenablePolicy.shouldReenable(
             recentDisableTimes: recentTapDisables,
             newDisableTime: now
@@ -316,15 +321,17 @@ final class HotkeyManager: @unchecked Sendable {
             eventTapDead = true
             teardownTap = eventTap
             teardownSource = runLoopSource
-            teardownDebounce = modifierOnlyDebounce
+            teardownDebounce = disabledDebounce
             eventTap = nil
             runLoopSource = nil
             modifierOnlyShortcut = nil
             gesture.reset()
             recentTapDisables = []
-            modifierOnlyDebounce = nil
         }
         lock.unlock()
+
+        disabledDebounce?.cancel()
+        dispatchGesture(gestureAction)
 
         if let tap = reenableTap {
             logger.warning("CGEventTap disabled by system (\(String(describing: type))); re-enabling (\(reenableCount) recent disable(s)). If this repeats, Accessibility permission is likely missing.")
@@ -597,6 +604,7 @@ struct ModifierOnlyGestureReducer: Sendable, Equatable {
         case modifierUp
         case otherKeyDown
         case debounceElapsed
+        case tapDisabled
     }
 
     /// Debounce applied before `onKeyDown` fires. Matches the FluidVoice
@@ -673,6 +681,21 @@ struct ModifierOnlyGestureReducer: Sendable, Equatable {
             }
             state = .active
             return .fireDown
+
+        case .tapDisabled:
+            switch state {
+            case .idle:
+                otherKeyPressedDuringModifier = false
+                return .none
+            case .pending:
+                state = .idle
+                otherKeyPressedDuringModifier = false
+                return .cancelStart
+            case .active:
+                state = .idle
+                otherKeyPressedDuringModifier = false
+                return .fireUp
+            }
         }
     }
 

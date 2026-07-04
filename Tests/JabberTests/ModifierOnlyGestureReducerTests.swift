@@ -76,6 +76,27 @@ final class ModifierOnlyGestureReducerTests: XCTestCase {
         XCTAssertEqual(g.handle(.modifierUp), .none)
         XCTAssertEqual(g.handle(.otherKeyDown), .none)
         XCTAssertEqual(g.handle(.debounceElapsed), .none)
+        XCTAssertEqual(g.handle(.tapDisabled), .none)
+        XCTAssertEqual(g.state, .idle)
+    }
+
+    func testTapDisabledWhilePendingCancelsStartAndSuppressesDebounce() {
+        var g = ModifierOnlyGestureReducer()
+
+        XCTAssertEqual(g.handle(.modifierDown), .scheduleStart)
+        XCTAssertEqual(g.handle(.tapDisabled), .cancelStart)
+        XCTAssertEqual(g.state, .idle)
+
+        // A stale debounce tick after the tap-disable teardown must never start.
+        XCTAssertEqual(g.handle(.debounceElapsed), .none)
+    }
+
+    func testTapDisabledWhileActiveFiresKeyUpAndReturnsIdle() {
+        var g = ModifierOnlyGestureReducer()
+
+        XCTAssertEqual(g.handle(.modifierDown), .scheduleStart)
+        XCTAssertEqual(g.handle(.debounceElapsed), .fireDown)
+        XCTAssertEqual(g.handle(.tapDisabled), .fireUp)
         XCTAssertEqual(g.state, .idle)
     }
 

@@ -208,9 +208,17 @@ final class OnboardingCoordinator {
         case .started, .progress, .finished:
             downloadErrorMessage = nil
         case .failed:
-            guard !state.isCancelled else { return }
+            guard !state.isCancelled else {
+                downloadErrorMessage = nil
+                return
+            }
             downloadErrorMessage = state.errorDescription ?? state.status
         }
+    }
+
+    func cancelModelDownload(_ modelId: String) {
+        downloadErrorMessage = nil
+        modelManager.cancelDownload(modelId)
     }
 
     private var isSelectedModelReady: Bool {

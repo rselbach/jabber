@@ -613,10 +613,19 @@ struct OnboardingView: View {
             VStack(alignment: .leading, spacing: 4) {
                 ProgressView(value: model.downloadProgress)
 
-                Text("Downloading — \(Int(model.downloadProgress * 100))%")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .monospacedDigit()
+                HStack(spacing: 8) {
+                    Text("Downloading — \(Int(model.downloadProgress * 100))%")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .monospacedDigit()
+
+                    Spacer(minLength: 8)
+
+                    Button("Cancel") {
+                        coordinator.cancelModelDownload(model.id)
+                    }
+                    .buttonStyle(.borderless)
+                }
             }
         } else if model.isDownloaded {
             if isActive {

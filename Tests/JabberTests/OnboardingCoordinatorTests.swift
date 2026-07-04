@@ -59,4 +59,29 @@ final class OnboardingCoordinatorTests: XCTestCase {
         coordinator.goBack()
         XCTAssertEqual(coordinator.step, .welcome)
     }
+
+    func testCancelledDownloadDoesNotLeaveErrorMessage() {
+        let modelId = coordinator.recommendedModelIdForSelectedLanguage()
+
+        coordinator.handleModelDownloadState(ModelDownloadState(
+            modelId: modelId,
+            progress: 0.5,
+            status: "Download failed: Greendale Community College",
+            phase: .failed,
+            errorDescription: "Network went full Señor Chang",
+            isCancelled: false
+        ))
+        XCTAssertEqual(coordinator.downloadErrorMessage, "Network went full Señor Chang")
+
+        coordinator.handleModelDownloadState(ModelDownloadState(
+            modelId: modelId,
+            progress: 0.5,
+            status: "Download cancelled: Greendale Community College",
+            phase: .failed,
+            errorDescription: nil,
+            isCancelled: true
+        ))
+
+        XCTAssertNil(coordinator.downloadErrorMessage)
+    }
 }

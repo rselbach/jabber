@@ -111,6 +111,15 @@ final class MediaPlaybackService: MediaPlaybackProtocol {
             return
         }
 
+        guard currentSessionID == sessionID, !Task.isCancelled else {
+            logger.notice("Media pause completed after dictation ended; undoing stale pause")
+            guard await client.send(.play) else {
+                logger.warning("MediaRemote failed to undo stale media pause")
+                return
+            }
+            return
+        }
+
         logger.notice("Paused media playback for dictation")
         didPauseMediaForThisSession = true
 

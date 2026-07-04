@@ -127,6 +127,25 @@ final class MediaPlaybackServiceTests: XCTestCase {
         XCTAssertTrue(client.commands.isEmpty)
     }
 
+    func testFinishingDuringPauseCommandUnpausesStaleSession() async {
+        client.isPlayingResult = true
+        client.holdSendUntilReleased = true
+        let pauseStarted = expectation(description: "pause send starts")
+        client.sendExpectations[.pause] = pauseStarted
+        let playSent = expectation(description: "stale pause is undone with play")
+        client.sendExpectations[.play] = playSent
+        let service = makeService()
+
+        service.pauseForDictationIfNeeded()
+        await fulfillment(of: [pauseStarted], timeout: 1.0)
+
+        service.resumeAfterDictationIfNeeded()
+        client.releaseSend(true)
+        await fulfillment(of: [playSent], timeout: 1.0)
+
+        XCTAssertEqual(client.commands, [.pause, .play])
+    }
+
     // MARK: - runProcess pipe drain + timeout (deadlock regression)
 
     /// 100_000 bytes far exceeds the ~64KB pipe buffer. With read-after-
@@ -178,6 +197,7 @@ final class FakeMediaRemoteClient: MediaRemoteControlling {
     var isPlayingResult = false
     var isPlayingResults: [Bool] = []
     var holdIsPlayingUntilReleased = false
+    var holdSendUntilReleased = false
     var commandResults: [MediaRemoteCommand: Bool] = [:]
     var systemPlayPauseResult = true
     /// Optional per-command expectation fulfilled when `send` is invoked, so
@@ -189,6 +209,7 @@ final class FakeMediaRemoteClient: MediaRemoteControlling {
     private(set) var commands: [MediaRemoteCommand] = []
     private(set) var systemPlayPauseCallCount = 0
     private var isPlayingContinuation: CheckedContinuation<Bool, Never>?
+    private var sendContinuation: CheckedContinuation<Bool, Never>?
 
     func isPlaying() async -> Bool {
         isPlayingCallCount += 1
@@ -209,6 +230,13 @@ final class FakeMediaRemoteClient: MediaRemoteControlling {
     func send(_ command: MediaRemoteCommand) async -> Bool {
         commands.append(command)
         sendExpectations[command]?.fulfill()
+
+        if holdSendUntilReleased {
+            return await withCheckedContinuation { continuation in
+                sendContinuation = continuation
+            }
+        }
+
         return commandResults[command] ?? true
     }
 
@@ -220,6 +248,13 @@ final class FakeMediaRemoteClient: MediaRemoteControlling {
     func releaseIsPlaying(_ result: Bool) {
         let continuation = isPlayingContinuation
         isPlayingContinuation = nil
+        continuation?.resume(returning: result)
+    }
+
+    func releaseSend(_ result: Bool) {
+        holdSendUntilReleased = false
+        let continuation = sendContinuation
+        sendContinuation = nil
         continuation?.resume(returning: result)
     }
 }

@@ -7,6 +7,7 @@ class OverlayWindowController {
     var window: NSPanel?
     var visibilityToken: UInt64 = 0
     let animationDuration: TimeInterval
+    private var isHiding = false
 
     init(animationDuration: TimeInterval) {
         self.animationDuration = animationDuration
@@ -19,13 +20,18 @@ class OverlayWindowController {
                 return
             }
         }
+        guard window?.isVisible != true || isHiding || shouldShowWhenAlreadyVisible() else { return }
         // Recompute the frame against the current screen on every show. The
         // panel is created once and cached; without repositioning, unplugging
         // the display it was created on (or a resolution change) strands it
         // offscreen and every future dictation shows an invisible overlay.
         reposition()
         visibilityToken &+= 1
-        window?.alphaValue = 1
+        isHiding = false
+        NSAnimationContext.runAnimationGroup { context in
+            context.duration = 0
+            window?.animator().alphaValue = 1
+        }
         onShow()
         window?.orderFront(nil)
     }
@@ -33,6 +39,7 @@ class OverlayWindowController {
     func hide() {
         visibilityToken &+= 1
         let token = visibilityToken
+        isHiding = true
 
         NSAnimationContext.runAnimationGroup { context in
             context.duration = animationDuration
@@ -42,10 +49,12 @@ class OverlayWindowController {
                 guard let self, let window = self.window else { return }
                 guard token == self.visibilityToken else {
                     window.alphaValue = 1
+                    self.isHiding = false
                     return
                 }
                 window.orderOut(nil)
                 window.alphaValue = 1
+                self.isHiding = false
             }
         }
     }
@@ -59,6 +68,10 @@ class OverlayWindowController {
     /// no-op; subclasses with screen-relative geometry override this. Called on
     /// every `show()` so a cached panel follows the user's current display.
     func reposition() {}
+
+    func shouldShowWhenAlreadyVisible() -> Bool {
+        false
+    }
 
     func onShow() {}
     func onWindowCreationFailed() {}
@@ -86,6 +99,10 @@ class OverlayWindow: OverlayWindowController {
         // the overlay mid-transcription.
         pendingHide = false
         waveformView?.reset()
+    }
+
+    override func shouldShowWhenAlreadyVisible() -> Bool {
+        pendingHide
     }
 
     override func onWindowCreationFailed() {

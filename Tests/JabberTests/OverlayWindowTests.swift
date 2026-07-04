@@ -57,14 +57,35 @@ final class OverlayWindowTests: XCTestCase {
         overlay.show()
         XCTAssertEqual(overlay.window?.frame, NSRect(x: 100, y: 100, width: 400, height: 104))
 
-        // Simulate a screen change (external display unplugged / resolution
-        // change): the injected frame moves. The cached panel must follow.
+        // Simulate a real hide followed by a screen change (external display
+        // unplugged / resolution change): the injected frame moves. The cached
+        // panel must follow when it is shown again.
+        overlay.window?.orderOut(nil)
         overlay.injectedFrame = NSRect(x: 2000, y: 500, width: 400, height: 104)
         overlay.show()
         XCTAssertEqual(
             overlay.window?.frame,
             NSRect(x: 2000, y: 500, width: 400, height: 104),
             "show() must reposition the cached panel against the current screen"
+        )
+    }
+
+    func testShowSkipsVisibleWindow() {
+        let overlay = TestOverlayWindow()
+
+        overlay.show()
+        let tokenAfterFirstShow = overlay.visibilityToken
+        let repositionCountAfterFirstShow = overlay.repositionCount
+
+        overlay.injectedFrame = NSRect(x: 2000, y: 500, width: 400, height: 104)
+        overlay.show()
+
+        XCTAssertEqual(overlay.visibilityToken, tokenAfterFirstShow)
+        XCTAssertEqual(overlay.repositionCount, repositionCountAfterFirstShow)
+        XCTAssertEqual(
+            overlay.window?.frame,
+            NSRect(x: 0, y: 0, width: 400, height: 104),
+            "already-visible show() calls should not churn reposition/orderFront work"
         )
     }
 
@@ -115,6 +136,7 @@ final class OverlayWindowTests: XCTestCase {
 @MainActor
 final class TestOverlayWindow: OverlayWindow {
     var injectedFrame: NSRect = .init(x: 0, y: 0, width: 400, height: 104)
+    var repositionCount = 0
 
     override func createWindow() -> Bool {
         let panel = NSPanel(
@@ -134,5 +156,10 @@ final class TestOverlayWindow: OverlayWindow {
 
     override func frameForCurrentScreen() -> NSRect? {
         injectedFrame
+    }
+
+    override func reposition() {
+        repositionCount += 1
+        super.reposition()
     }
 }

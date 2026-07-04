@@ -693,7 +693,21 @@ final class DictationCoordinator {
 
     private static func containsCorrectionTrigger(_ text: String) -> Bool {
         let lower = text.lowercased()
-        return correctionTriggerPhrases.contains(where: { lower.contains($0) })
+        for phrase in correctionTriggerPhrases {
+            var searchStart = lower.startIndex
+            while searchStart < lower.endIndex {
+                guard let range = lower.range(of: phrase, range: searchStart ..< lower.endIndex) else { break }
+                let leftOK = range.lowerBound == lower.startIndex
+                    || !lower[lower.index(before: range.lowerBound)].isLetter
+                let rightOK = range.upperBound == lower.endIndex
+                    || !lower[range.upperBound].isLetter
+                if leftOK && rightOK {
+                    return true
+                }
+                searchStart = range.upperBound
+            }
+        }
+        return false
     }
 
     /// True when the processed output opens with a markdown structural marker

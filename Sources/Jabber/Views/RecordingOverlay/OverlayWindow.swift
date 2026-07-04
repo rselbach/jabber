@@ -192,6 +192,7 @@ enum OverlayPanelFactory {
         )
 
         panel.level = .floating
+        panel.hidesOnDeactivate = false
         panel.isOpaque = false
         panel.backgroundColor = .clear
         panel.hasShadow = true

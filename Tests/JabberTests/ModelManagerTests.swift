@@ -211,6 +211,51 @@ final class ModelManagerTests: XCTestCase {
         modelManager.cancelDownload("nonexistent")
     }
 
+    func testAcceptedDownloadProgressRequiresActiveDownload() {
+        XCTAssertNil(
+            ModelManager.acceptedDownloadProgress(
+                hasActiveDownload: false,
+                isDownloading: true,
+                currentProgress: 0.95,
+                incomingProgress: 0.97
+            )
+        )
+    }
+
+    func testAcceptedDownloadProgressRequiresDownloadingModel() {
+        XCTAssertNil(
+            ModelManager.acceptedDownloadProgress(
+                hasActiveDownload: true,
+                isDownloading: false,
+                currentProgress: 1.0,
+                incomingProgress: 0.97
+            )
+        )
+    }
+
+    func testAcceptedDownloadProgressDropsBackwardReports() {
+        XCTAssertNil(
+            ModelManager.acceptedDownloadProgress(
+                hasActiveDownload: true,
+                isDownloading: true,
+                currentProgress: 0.98,
+                incomingProgress: 0.97
+            )
+        )
+    }
+
+    func testAcceptedDownloadProgressClampsForwardReports() throws {
+        let progress = try XCTUnwrap(
+            ModelManager.acceptedDownloadProgress(
+                hasActiveDownload: true,
+                isDownloading: true,
+                currentProgress: 0.98,
+                incomingProgress: 1.2
+            )
+        )
+        XCTAssertEqual(progress, 1.0)
+    }
+
     // MARK: - Failed-download folder cleanup
 
     // The live download path can't be simulated without injecting a downloader

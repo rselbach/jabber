@@ -564,19 +564,42 @@ final class ModelManager {
         progress: Double,
         status: String? = nil
     ) {
+        let currentProgress = currentDownloadProgress(for: modelId)
+        let isDownloading = models.first { $0.id == modelId }?.isDownloading ?? false
+        guard let progressToPublish = Self.acceptedDownloadProgress(
+            hasActiveDownload: activeDownloads[modelId] != nil,
+            isDownloading: isDownloading,
+            currentProgress: currentProgress,
+            incomingProgress: progress
+        ) else { return }
+
         let now = CFAbsoluteTimeGetCurrent()
-        guard shouldPublishDownloadProgress(modelId: modelId, progress: progress, now: now) else { return }
+        guard shouldPublishDownloadProgress(modelId: modelId, progress: progressToPublish, now: now) else { return }
 
         updateModel(modelId) { model in
-            model.downloadProgress = progress
+            model.downloadProgress = progressToPublish
         }
         postDownloadState(
             modelId: modelId,
             modelName: modelName,
-            progress: progress,
+            progress: progressToPublish,
             phase: .progress,
             statusOverride: status
         )
+    }
+
+    static func acceptedDownloadProgress(
+        hasActiveDownload: Bool,
+        isDownloading: Bool,
+        currentProgress: Double,
+        incomingProgress: Double
+    ) -> Double? {
+        guard hasActiveDownload, isDownloading else { return nil }
+
+        let clampedProgress = min(max(incomingProgress, 0), 1)
+        guard clampedProgress >= currentProgress else { return nil }
+
+        return clampedProgress
     }
 
     private func postDownloadState(

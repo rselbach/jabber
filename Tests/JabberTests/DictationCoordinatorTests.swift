@@ -355,6 +355,83 @@ final class DictationCoordinatorTests: XCTestCase {
         XCTAssertTrue(typingService.outputs.isEmpty)
     }
 
+    // Regression: a stale session's `defer` unconditionally nilled
+    // `transcriptionTask`, clobbering a newer session's live task. Sequence:
+    // session A transcribing -> cancel() (A's inference is uncancellable and
+    // keeps running) -> start + stop session B (transcriptionTask = taskB) ->
+    // A's task unwinds and its defer dropped the reference to B's live task, so
+    // a later cancel() during B could no longer cancel B and B's inference
+    // burned to completion. The fix folds the nil into the session-guarded
+    // finish() so B's task reference survives A's unwind.
+    func testStaleTaskDeferDoesNotClobberNewerSessionTranscriptionTask() async throws {
+        transcriptionService.supportsStreamingTranscription = false
+
+        // Session A: transcribe parks on an uncancellable hold (simulating real
+        // on-device inference that does not respond to Task.cancel() mid flight).
+        transcriptionService.holdTranscribeUntilReleased = true
+        transcriptionService.transcribeResult = .success("A result")
+
+        let aStarted = XCTestExpectation(description: "session A transcribe started (parked)")
+        transcriptionService.onTranscribeStarted = { aStarted.fulfill() }
+
+        audioCapture.storedSamples = makeLoudSamples()
+        XCTAssertTrue(coordinator.start())
+        coordinator.stop()
+        XCTAssertTrue(coordinator.isTranscribing)
+
+        // Wait until A's transcribe is parked, so cancel() lands while A's
+        // inference is in flight (not before it starts).
+        await fulfillment(of: [aStarted], timeout: 1.0)
+
+        coordinator.cancel()
+        XCTAssertTrue(coordinator.isIdle)
+
+        // Session B: a cancellable transcribe with a delay long enough that
+        // cancel() lands before it would complete on its own.
+        transcriptionService.holdTranscribeUntilReleased = false
+        transcriptionService.transcribeDelay = .milliseconds(400)
+        transcriptionService.transcribeResult = .success("B result")
+        transcriptionService.onTranscribeStarted = nil
+
+        // B's transcription must be cancelled, not burned to completion. If
+        // A's stale defer dropped taskB, cancel() during B cannot cancel it and
+        // B's transcribe runs to completion -> onTranscribeCompleted fires and
+        // the inverted expectation fails.
+        let noBCompletion = XCTestExpectation(description: "session B transcription is cancelled, not burned to completion")
+        noBCompletion.isInverted = true
+        transcriptionService.onTranscribeCompleted = { noBCompletion.fulfill() }
+
+        XCTAssertTrue(coordinator.start())
+        coordinator.stop()
+        XCTAssertTrue(coordinator.isTranscribing)
+
+        // Release A's parked inference and yield so A's task unwinds and its
+        // defer runs BEFORE we cancel B. (The continuation resumes on the main
+        // actor; without the yield, cancel B would run first and the bug would
+        // not reproduce.)
+        transcriptionService.releaseTranscribe()
+        try await Task.sleep(for: .milliseconds(50))
+
+        // Cancel B: with the fix, taskB.cancel() fires and B's sleep throws
+        // CancellationError. With the bug, transcriptionTask was nilled by A's
+        // defer so B burns to completion.
+        coordinator.cancel()
+        XCTAssertTrue(coordinator.isIdle)
+
+        await fulfillment(of: [noBCompletion], timeout: 1.0)
+
+        XCTAssertTrue(typingService.outputs.isEmpty, "neither cancelled session should type output")
+        XCTAssertEqual(
+            transcriptionService.transcribeCompletionCount,
+            0,
+            "B's transcription must be cancelled, not burned to completion after A's stale defer unwound"
+        )
+
+        // Release any parked state so tearDown doesn't trip over a dangling
+        // continuation from a failed/unreleased path.
+        transcriptionService.releaseTranscribe()
+    }
+
     func testCancelDuringPostProcessingDiscardsResult() async {
         enablePostProcessing()
         postProcessor.isAvailable = true
@@ -971,6 +1048,11 @@ final class FakeTranscriptionService: TranscriptionProtocol, @unchecked Sendable
     private var _holdStreamingUntilReleased = false
     private var _streamingRelease: CheckedContinuation<Void, Never>?
     private var _onStreamingStarted: (() -> Void)?
+    private var _holdTranscribeUntilReleased = false
+    private var _transcribeRelease: CheckedContinuation<Void, Never>?
+    private var _onTranscribeStarted: (() -> Void)?
+    private var _onTranscribeCompleted: (() -> Void)?
+    private var _transcribeCompletionCount = 0
 
     var supportsStreamingTranscription: Bool {
         get { lock.withLock { _supportsStreamingTranscription } }
@@ -1034,6 +1116,34 @@ final class FakeTranscriptionService: TranscriptionProtocol, @unchecked Sendable
         set { lock.withLock { _holdStreamingUntilReleased = newValue } }
     }
 
+    /// Parks `transcribe(samples:)` on an uncancellable continuation (simulating
+    /// real on-device inference that does not respond to `Task.cancel()` mid
+    /// flight) until `releaseTranscribe()` is called. Used to reproduce the
+    /// stale-task-defer race where a cancelled session's inference keeps
+    /// running after a newer session has started.
+    var holdTranscribeUntilReleased: Bool {
+        get { lock.withLock { _holdTranscribeUntilReleased } }
+        set { lock.withLock { _holdTranscribeUntilReleased = newValue } }
+    }
+
+    var onTranscribeStarted: (() -> Void)? {
+        get { lock.withLock { _onTranscribeStarted } }
+        set { lock.withLock { _onTranscribeStarted = newValue } }
+    }
+
+    /// Fired when `transcribe(samples:)` returns a value (ran to completion),
+    /// not when it throws `CancellationError`. Used to assert that a newer
+    /// session's task is cancelled (not burned to completion) after a stale
+    /// session's defer unwinds.
+    var onTranscribeCompleted: (() -> Void)? {
+        get { lock.withLock { _onTranscribeCompleted } }
+        set { lock.withLock { _onTranscribeCompleted = newValue } }
+    }
+
+    var transcribeCompletionCount: Int {
+        lock.withLock { _transcribeCompletionCount }
+    }
+
     func setVocabularyPrompt(_ prompt: String) async {
         vocabularyPrompt = prompt
     }
@@ -1095,15 +1205,61 @@ final class FakeTranscriptionService: TranscriptionProtocol, @unchecked Sendable
         continuation?.resume()
     }
 
+    /// Resumes a `transcribe(samples:)` call parked via
+    /// `holdTranscribeUntilReleased`.
+    func releaseTranscribe() {
+        let continuation = lock.withLock {
+            let continuation = _transcribeRelease
+            _transcribeRelease = nil
+            return continuation
+        }
+        continuation?.resume()
+    }
+
     func transcribe(samples: [Float]) async throws -> String {
         lock.withLock {
             _callOrder.append(.final)
         }
-        if let delay = transcribeDelay {
-            try await Task.sleep(for: delay)
+        let snapshot = lock.withLock {
+            (
+                delay: _transcribeDelay,
+                result: _transcribeResult,
+                hold: _holdTranscribeUntilReleased,
+                onStarted: _onTranscribeStarted,
+                onCompleted: _onTranscribeCompleted
+            )
         }
-        try Task.checkCancellation()
-        return try transcribeResult.get()
+
+        do {
+            if snapshot.hold {
+                await withCheckedContinuation { continuation in
+                    let onStarted = lock.withLock {
+                        _transcribeRelease = continuation
+                        return _onTranscribeStarted
+                    }
+                    onStarted?()
+                }
+            } else {
+                snapshot.onStarted?()
+                if let delay = snapshot.delay {
+                    try await Task.sleep(for: delay)
+                }
+            }
+
+            try Task.checkCancellation()
+            let result = try snapshot.result.get()
+            lock.withLock { _transcribeCompletionCount += 1 }
+            snapshot.onCompleted?()
+            return result
+        } catch is CancellationError {
+            throw CancellationError()
+        } catch {
+            // Non-cancellation failure from the configured result: the
+            // transcribe call ran to its end state, so record a completion.
+            lock.withLock { _transcribeCompletionCount += 1 }
+            snapshot.onCompleted?()
+            throw error
+        }
     }
 }
 

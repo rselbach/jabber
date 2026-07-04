@@ -346,7 +346,15 @@ final class DictationCoordinator {
     private func transcribeAndOutput(samples: [Float], sessionID: UUID) async {
         defer {
             _ = activity.complete(sessionID)
-            transcriptionTask = nil
+            // Do NOT unconditionally nil transcriptionTask here. finish(sessionID:)
+            // clears it under a `currentSessionID == sessionID` guard; an
+            // unconditional nil would clobber a newer session's live task. The
+            // race: session A transcribing -> cancel() (nils transcriptionTask,
+            // but A's inference is uncancellable and keeps running) -> user
+            // starts + stops session B (transcriptionTask = taskB) -> A's task
+            // unwinds and its defer would drop the reference to B's live task,
+            // so a later cancel() during B could no longer cancel B. Folding the
+            // nil into the session-guarded finish() preserves B's task.
             finish(sessionID: sessionID)
         }
 

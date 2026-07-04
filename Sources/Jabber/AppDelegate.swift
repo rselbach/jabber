@@ -11,6 +11,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var modelMigrationNoticeWindow: NSWindow?
     private var presentedModelMigrationNotice: ModelMigrationNotice?
     private var modelMigrationNoticeHandled = false
+    private var onboardingCompletedBeforeUserInitiatedRun = false
 
     private let hotkeyManager = HotkeyManager()
     private let audioCapture = AudioCaptureService()
@@ -654,7 +655,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     @objc private func handleOnboardingRequest() {
-        TypedSettings[.onboardingCompleted] = false
+        onboardingCompletedBeforeUserInitiatedRun = TypedSettings[.onboardingCompleted]
+            || TypedSettings[.didShowFirstRunSetup]
         showOnboardingWindow(userInitiated: true)
     }
 
@@ -715,6 +717,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func completeOnboarding() {
         TypedSettings[.onboardingCompleted] = true
         TypedSettings[.didShowFirstRunSetup] = true
+        onboardingCompletedBeforeUserInitiatedRun = false
         // windowWillClose refreshes the activation policy.
         onboardingWindow?.close()
         // Now that onboarding has settled the user's model choice, kick off
@@ -945,6 +948,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         showMainWindow(initialSection: .gettingStarted)
     }
 
+    private func handleAbandonedOnboarding(previouslyCompleted: Bool) {
+        if previouslyCompleted {
+            TypedSettings[.onboardingCompleted] = true
+        }
+
+        guard ModelManager.shared.hasAnyDownloadedModel else { return }
+        guard !isModelLoadInProgress, !transcriptionService.isReady else { return }
+
+        if !startDeclinedModelMigrationFallbackIfNeeded() {
+            startModelLoadingTask()
+        }
+    }
+
     private func handleDictationStateChange(_ state: DictationCoordinator.State) {
         switch state {
         case .idle:
@@ -1098,9 +1114,15 @@ extension AppDelegate: NSWindowDelegate {
         guard let window = notification.object as? NSWindow else { return }
 
         if window === onboardingWindow {
+            let abandoned = !TypedSettings[.onboardingCompleted]
+            let previouslyCompleted = onboardingCompletedBeforeUserInitiatedRun
+            onboardingCompletedBeforeUserInitiatedRun = false
             onboardingCoordinator?.stop()
             onboardingCoordinator = nil
             onboardingWindow = nil
+            if abandoned {
+                handleAbandonedOnboarding(previouslyCompleted: previouslyCompleted)
+            }
         } else if window === modelMigrationNoticeWindow {
             if !modelMigrationNoticeHandled,
                let notice = presentedModelMigrationNotice {

@@ -6,8 +6,8 @@ final class APIKeyPersistenceDecisionTests: XCTestCase {
     // Regression: a transient keychain read failure (e.g. user cancelled the
     // auth prompt) blanks the SecureField. onDisappear fires on every sidebar
     // switch and previously treated that blank as "delete stored key" — wiping
-    // the user's real key. Load must succeed before any write, and unchanged
-    // values skip the write entirely.
+    // the user's real key. Empty values must stay blocked after a failed load,
+    // but a freshly typed key should still save; unchanged values skip writes.
     func testShouldPersistGuardsAgainstReadFailureAndUnchangedValues() {
         let tests: [String: (input: (
             didLoadSuccessfully: Bool,
@@ -17,8 +17,11 @@ final class APIKeyPersistenceDecisionTests: XCTestCase {
             "read failed: never persist, even if field looks deletable": (
                 input: (false, "", ""), want: false
             ),
-            "read failed: never persist, even if field has a value": (
-                input: (false, "", "sk-key-greendale"), want: false
+            "read failed, user typed a new key: persist": (
+                input: (false, "", "sk-key-greendale"), want: true
+            ),
+            "read failed, user typed a new key with whitespace: persist": (
+                input: (false, "", "  sk-key-greendale  "), want: true
             ),
             "loaded, unchanged key: skip the write": (
                 input: (true, "sk-troy-barnes", "sk-troy-barnes"), want: false

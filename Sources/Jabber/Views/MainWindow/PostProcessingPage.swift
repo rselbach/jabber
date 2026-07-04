@@ -140,9 +140,9 @@ struct PostProcessingPage: View {
 /// the user's real stored key:
 ///
 /// - A transient keychain read failure (e.g. user cancelled the auth prompt)
-///   blanks the SecureField. Without the load-success check, the next
-///   `onDisappear` (every sidebar switch) would treat that blank as "delete
-///   stored key" and wipe it.
+///   blanks the SecureField. Without the failed-load empty-value guard, the
+///   next `onDisappear` (every sidebar switch) would treat that blank as
+///   "delete stored key" and wipe it. Non-empty values are still safe to save.
 /// - The field is unchanged since the last successful load. Skipping the
 ///   write avoids a gratuitous `SecItemUpdate` on every sidebar switch.
 enum APIKeyPersistenceDecision {
@@ -151,8 +151,9 @@ enum APIKeyPersistenceDecision {
         loadedValue: String,
         currentValue: String
     ) -> Bool {
-        guard didLoadSuccessfully else { return false }
-        return normalized(currentValue) != normalized(loadedValue)
+        let normalizedCurrentValue = normalized(currentValue)
+        guard didLoadSuccessfully else { return !normalizedCurrentValue.isEmpty }
+        return normalizedCurrentValue != normalized(loadedValue)
     }
 
     private static func normalized(_ value: String) -> String {

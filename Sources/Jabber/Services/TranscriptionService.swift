@@ -201,67 +201,86 @@ actor TranscriptionService {
             isLoading = true
             defer { isLoading = false }
 
-            try Task.checkCancellation()
-            guard loadGeneration == currentLoadGeneration else { throw CancellationError() }
-
-            notifyState(.loading(status: "Preparing model...", progress: nil))
-
-            var modelIdToLoad = desiredModelId
-            let modelFolder: URL
             do {
-                modelFolder = try await ModelManager.shared.ensureModelDownloaded(modelIdToLoad)
-            } catch let error as ModelError {
-                switch error {
-                case .modelNotFound:
-                    logger.warning("Unknown model id '\(modelIdToLoad)', falling back to base")
-                    let fallbackModelId = LanguageModelCatalog.recommendedModelId(for: Constants.defaultLanguage)
-                    await MainActor.run {
-                        TypedSettings[.selectedModel] = fallbackModelId
-                    }
-                    modelIdToLoad = fallbackModelId
+                try Task.checkCancellation()
+                guard loadGeneration == currentLoadGeneration else { throw CancellationError() }
+
+                notifyState(.loading(status: "Preparing model...", progress: nil))
+
+                var modelIdToLoad = desiredModelId
+                let modelFolder: URL
+                do {
                     modelFolder = try await ModelManager.shared.ensureModelDownloaded(modelIdToLoad)
-                default:
-                    throw error
+                } catch let error as ModelError {
+                    switch error {
+                    case .modelNotFound:
+                        logger.warning("Unknown model id '\(modelIdToLoad)', falling back to base")
+                        let fallbackModelId = LanguageModelCatalog.recommendedModelId(for: Constants.defaultLanguage)
+                        await MainActor.run {
+                            TypedSettings[.selectedModel] = fallbackModelId
+                        }
+                        modelIdToLoad = fallbackModelId
+                        modelFolder = try await ModelManager.shared.ensureModelDownloaded(modelIdToLoad)
+                    default:
+                        throw error
+                    }
                 }
-            }
 
-            try Task.checkCancellation()
-            guard loadGeneration == currentLoadGeneration else { throw CancellationError() }
+                try Task.checkCancellation()
+                guard loadGeneration == currentLoadGeneration else { throw CancellationError() }
 
-            guard let newProvider = makeProvider(for: modelIdToLoad) else {
-                throw ModelError.modelNotFound(modelId: modelIdToLoad)
-            }
-
-            notifyState(.loading(status: "Loading model...", progress: nil))
-
-            try await newProvider.load(from: modelFolder) { [weak self] progress, status in
-                Task {
-                    await self?.publishModelLoadProgress(
-                        status: status,
-                        progress: progress,
-                        generation: currentLoadGeneration
-                    )
+                guard let newProvider = makeProvider(for: modelIdToLoad) else {
+                    throw ModelError.modelNotFound(modelId: modelIdToLoad)
                 }
-            }
 
-            // Both bail-out paths after a successful load must release the
-            // freshly-loaded weights. `newProvider.load(from:)` brought multi-GB
-            // MLX buffers into memory; discarding the reference without
-            // unloading leaks them until the next load replaces the provider.
-            if Task.isCancelled {
-                newProvider.unload()
-                throw CancellationError()
-            }
-            guard loadGeneration == currentLoadGeneration else {
-                newProvider.unload()
-                throw CancellationError()
-            }
+                notifyState(.loading(status: "Loading model...", progress: nil))
 
-            provider = newProvider
-            loadedModelId = modelIdToLoad
-            setReady(true)
-            notifyState(.ready)
-            return
+                try await newProvider.load(from: modelFolder) { [weak self] progress, status in
+                    Task {
+                        await self?.publishModelLoadProgress(
+                            status: status,
+                            progress: progress,
+                            generation: currentLoadGeneration
+                        )
+                    }
+                }
+
+                // Both bail-out paths after a successful load must release the
+                // freshly-loaded weights. `newProvider.load(from:)` brought multi-GB
+                // MLX buffers into memory; discarding the reference without
+                // unloading leaks them until the next load replaces the provider.
+                if Task.isCancelled {
+                    newProvider.unload()
+                    throw CancellationError()
+                }
+                guard loadGeneration == currentLoadGeneration else {
+                    newProvider.unload()
+                    throw CancellationError()
+                }
+
+                provider = newProvider
+                loadedModelId = modelIdToLoad
+                setReady(true)
+                notifyState(.ready)
+                return
+            } catch {
+                // Surface the failure so a lazy load triggered from
+                // transcribe()/transcribeStreaming() doesn't leave the menu bar
+                // stuck on "Loading model..." forever. A CancellationError with
+                // a matching generation is a direct cancel (e.g. app terminate)
+                // and reports notReady rather than a scary error. A stale load
+                // (generation bumped by a newer one) must keep quiet so it
+                // doesn't clobber the newer load's .loading state.
+                if loadGeneration == currentLoadGeneration {
+                    setReady(false)
+                    if error is CancellationError {
+                        notifyState(.notReady)
+                    } else {
+                        notifyState(.error(error.localizedDescription))
+                    }
+                }
+                throw error
+            }
         }
     }
 

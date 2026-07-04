@@ -18,7 +18,7 @@ final class NemotronASRProvider: TranscriptionProvider, @unchecked Sendable {
         model != nil
     }
 
-    func load(from cacheDir: URL, progressHandler: ((Double, String) -> Void)?) async throws {
+    func load(from cacheDir: URL, progressHandler: (@Sendable (Double, String) -> Void)?) async throws {
         // NemotronStreamingASRModel.fromPretrained exposes no cacheDir/downloadBase parameter, so
         // the protocol-supplied cacheDir is unused here. The dependency always resolves the storage
         // location itself via HuggingFaceDownloader.getCacheDirectory(for:), landing under

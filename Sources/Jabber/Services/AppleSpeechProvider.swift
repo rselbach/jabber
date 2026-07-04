@@ -24,7 +24,7 @@ final class AppleSpeechProvider: TranscriptionProvider, @unchecked Sendable {
         self.modelId = modelId
     }
 
-    func load(from cacheDir: URL, progressHandler: ((Double, String) -> Void)?) async throws {
+    func load(from cacheDir: URL, progressHandler: (@Sendable (Double, String) -> Void)?) async throws {
         let languageCode = await MainActor.run { TypedSettings[.selectedLanguage] }
         let locale = Self.locale(for: languageCode)
 
@@ -39,7 +39,7 @@ final class AppleSpeechProvider: TranscriptionProvider, @unchecked Sendable {
     /// instead of transcribing in the stale locale.
     private func prepareForLocale(
         _ locale: Locale,
-        progressHandler: ((Double, String) -> Void)?
+        progressHandler: (@Sendable (Double, String) -> Void)?
     ) async throws {
         let transcriber = SpeechTranscriber(
             locale: locale,
@@ -57,16 +57,9 @@ final class AppleSpeechProvider: TranscriptionProvider, @unchecked Sendable {
         if !installedIDs.contains(Self.normalized(locale)) {
             if let downloader = try await AssetInventory.assetInstallationRequest(supporting: [transcriber]) {
                 let progress = downloader.progress
-                // progressHandler's type comes from the TranscriptionProvider protocol as a
-                // non-Sendable closure, so it cannot cross a Task boundary by default. It is
-                // only invoked from this single monitor Task, preserving the pre-existing
-                // timing/behavior, so we opt out of the check here rather than add sync. When
-                // transcribe() re-prepares for a new locale it passes nil, making the monitor
-                // a no-op loop.
-                nonisolated(unsafe) let onProgress = progressHandler
                 let monitorTask = Task {
                     while !Task.isCancelled, !progress.isFinished, !progress.isCancelled {
-                        onProgress?(progress.fractionCompleted, "Downloading speech model...")
+                        progressHandler?(progress.fractionCompleted, "Downloading speech model...")
                         do {
                             try await Task.sleep(for: .milliseconds(100))
                         } catch {

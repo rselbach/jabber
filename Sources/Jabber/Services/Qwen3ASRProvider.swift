@@ -15,7 +15,7 @@ final class Qwen3ASRProvider: TranscriptionProvider, @unchecked Sendable {
         model != nil
     }
 
-    func load(from cacheDir: URL, progressHandler: ((Double, String) -> Void)?) async throws {
+    func load(from cacheDir: URL, progressHandler: (@Sendable (Double, String) -> Void)?) async throws {
         let m = try await Qwen3ASRModel.fromPretrained(
             modelId: huggingFaceModelId,
             cacheDir: cacheDir,

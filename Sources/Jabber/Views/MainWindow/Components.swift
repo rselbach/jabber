@@ -67,12 +67,6 @@ struct ModelRow: View {
 
             trailingContent
         }
-        .contentShape(Rectangle())
-        .onTapGesture {
-            if model.isDownloaded {
-                onSelect()
-            }
-        }
     }
 
     @ViewBuilder

@@ -229,6 +229,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         alert.addButton(withTitle: "Retry")
         alert.addButton(withTitle: "OK")
 
+        NSApp.activate(ignoringOtherApps: true)
         let response = alert.runModal()
         if response == .alertFirstButtonReturn {
             startModelLoadingTask()

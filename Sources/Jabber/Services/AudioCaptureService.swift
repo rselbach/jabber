@@ -8,25 +8,29 @@ final class AudioCaptureService {
     private let targetSampleRate: Double = 16_000
     private let converterQueue = DispatchQueue(label: "com.jabber.audioconverter")
     nonisolated(unsafe) private var converter: AVAudioConverter?
-    private static let initialCapturedSampleCapacity = 16_000 * 60
+    nonisolated private static let initialCapturedSampleCapacity = 16_000 * 60
 
-    private let queue = DispatchQueue(label: "com.jabber.audiocapture")
-    nonisolated(unsafe) private var lastLevelUpdate: CFAbsoluteTime = 0
-    nonisolated(unsafe) private var capturedSamples: [Float]
-    nonisolated(unsafe) private var _isCapturing = false
+    nonisolated private let captureState = OSAllocatedUnfairLock(initialState: CaptureState())
     private let logger = Logger(subsystem: "com.rselbach.jabber", category: "AudioCaptureService")
+
+    private struct CaptureState {
+        var lastLevelUpdate: CFAbsoluteTime = 0
+        var capturedSamples: [Float] = []
+        var isCapturing = false
+    }
 
     var onAudioLevel: ((Float) -> Void)?
     var onConversionError: ((Error) -> Void)?
 
     init() {
-        capturedSamples = []
-        capturedSamples.reserveCapacity(Self.initialCapturedSampleCapacity)
+        captureState.withLock {
+            $0.capturedSamples.reserveCapacity(Self.initialCapturedSampleCapacity)
+        }
     }
 
     private var isCapturing: Bool {
-        get { queue.sync { _isCapturing } }
-        set { queue.sync { _isCapturing = newValue } }
+        get { captureState.withLock { $0.isCapturing } }
+        set { captureState.withLock { $0.isCapturing = newValue } }
     }
 
     nonisolated private func getConverter() -> AVAudioConverter? {
@@ -50,8 +54,8 @@ final class AudioCaptureService {
     func startCapture() throws {
         guard !isCapturing else { return }
 
-        queue.sync {
-            capturedSamples.removeAll(keepingCapacity: true)
+        captureState.withLock {
+            $0.capturedSamples.removeAll(keepingCapacity: true)
         }
 
         let engine = audioEngine()
@@ -76,8 +80,8 @@ final class AudioCaptureService {
             self?.processBuffer(buffer)
         }
 
-        queue.sync {
-            _isCapturing = true
+        captureState.withLock {
+            $0.isCapturing = true
         }
         do {
             try engine.start()
@@ -88,26 +92,26 @@ final class AudioCaptureService {
     }
 
     func stopCapture() {
-        let wasCapturing = queue.sync { _isCapturing }
+        let wasCapturing = captureState.withLock { $0.isCapturing }
         guard wasCapturing else { return }
         guard let engine = engineStorage as? AVAudioEngine else {
-            queue.sync {
-                _isCapturing = false
+            captureState.withLock {
+                $0.isCapturing = false
             }
             setConverter(nil)
             return
         }
         engine.inputNode.removeTap(onBus: 0)
         engine.stop()
-        queue.sync {
-            _isCapturing = false
+        captureState.withLock {
+            $0.isCapturing = false
         }
         setConverter(nil)
     }
 
     func currentSamples() -> [Float] {
-        queue.sync {
-            capturedSamples
+        captureState.withLock {
+            $0.capturedSamples
         }
     }
 
@@ -115,8 +119,8 @@ final class AudioCaptureService {
     /// callers that only need to know whether new audio arrived (e.g. the
     /// streaming preview's "skip when unchanged" guard).
     func sampleCount() -> Int {
-        queue.sync {
-            capturedSamples.count
+        captureState.withLock {
+            $0.capturedSamples.count
         }
     }
 
@@ -125,9 +129,9 @@ final class AudioCaptureService {
     /// stays constant instead of growing with session length. The final
     /// transcription still reads the full buffer via `currentSamples()`.
     func recentSamples(maxCount: Int) -> [Float] {
-        queue.sync {
-            guard capturedSamples.count > maxCount else { return capturedSamples }
-            return Array(capturedSamples.suffix(maxCount))
+        captureState.withLock {
+            guard $0.capturedSamples.count > maxCount else { return $0.capturedSamples }
+            return Array($0.capturedSamples.suffix(maxCount))
         }
     }
 
@@ -136,10 +140,10 @@ final class AudioCaptureService {
 
         let rms = calculateRms(from: buffer)
         let now = CFAbsoluteTimeGetCurrent()
-        let shouldReportLevel: Bool = queue.sync {
-            guard _isCapturing else { return false }
-            if now - lastLevelUpdate >= 1.0 / 30.0 {
-                lastLevelUpdate = now
+        let shouldReportLevel: Bool = captureState.withLock {
+            guard $0.isCapturing else { return false }
+            if now - $0.lastLevelUpdate >= 1.0 / 30.0 {
+                $0.lastLevelUpdate = now
                 return true
             }
             return false
@@ -165,10 +169,10 @@ final class AudioCaptureService {
         let frames = Int(convertedBuffer.frameLength)
         guard frames > 0 else { return }
 
-        let samples = UnsafeBufferPointer(start: channelData, count: frames)
-        queue.sync {
-            guard _isCapturing else { return }
-            capturedSamples.append(contentsOf: samples)
+        let samples = Array(UnsafeBufferPointer(start: channelData, count: frames))
+        captureState.withLock {
+            guard $0.isCapturing else { return }
+            $0.capturedSamples.append(contentsOf: samples)
         }
     }
 

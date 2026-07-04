@@ -7,7 +7,7 @@ struct HotkeyRecorderView: View {
     let onShortcutChange: (HotkeyShortcut) -> Void
 
     @State private var isRecording = false
-    @State private var eventMonitor: Any?
+    @State private var monitorHandle: EventMonitorHandle?
     @State private var validationMessage: String?
     @State private var recorder = HotkeyRecorderReducer()
 
@@ -71,14 +71,11 @@ struct HotkeyRecorderView: View {
             )
             return
         }
-        eventMonitor = monitor
+        monitorHandle = EventMonitorHandle(monitor: monitor)
     }
 
     private func stopRecording() {
-        if let eventMonitor {
-            NSEvent.removeMonitor(eventMonitor)
-            self.eventMonitor = nil
-        }
+        monitorHandle = nil
         guard isRecording else { return }
         isRecording = false
         NotificationCenter.default.post(
@@ -143,6 +140,19 @@ struct HotkeyRecorderView: View {
         stopRecording()
         onShortcutChange(shortcut)
     }
+}
+
+/// Wraps an `NSEvent` local monitor token so `removeMonitor` is called on
+/// deinit. Guards against monitor leaks when SwiftUI doesn't fire `onDisappear`
+/// — the `@State` storage is released when the view is destroyed, triggering
+/// `deinit` here.
+private final class EventMonitorHandle {
+    let monitor: Any
+    init(monitor: Any) {
+        self.monitor = monitor
+    }
+
+    deinit { NSEvent.removeMonitor(monitor) }
 }
 
 /// Pure decision logic for the shortcut recorder.

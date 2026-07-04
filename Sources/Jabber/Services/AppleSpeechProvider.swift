@@ -135,20 +135,35 @@ final class AppleSpeechProvider: TranscriptionProvider, @unchecked Sendable {
             }
         }
 
-        try await analyzer.start(inputSequence: inputStream)
-        continuation.yield(AnalyzerInput(buffer: convertedBuffer))
-        continuation.finish()
         do {
+            try await analyzer.start(inputSequence: inputStream)
+            continuation.yield(AnalyzerInput(buffer: convertedBuffer))
+            continuation.finish()
             try await analyzer.finalizeAndFinishThroughEndOfInput()
             try await resultsTask.value
         } catch is CancellationError {
+            continuation.finish()
+            await cancelResultsTask(resultsTask)
             throw CancellationError()
         } catch {
-            logger.error("Speech transcription finalization failed: \(error.localizedDescription)")
+            continuation.finish()
+            await cancelResultsTask(resultsTask)
+            logger.error("Speech transcription failed: \(error.localizedDescription)")
             throw TranscriptionError.transcriptionFailed
         }
 
         return finalText.withLock { $0 }.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private func cancelResultsTask(_ resultsTask: Task<Void, any Error>) async {
+        resultsTask.cancel()
+        do {
+            try await resultsTask.value
+        } catch is CancellationError {
+            return
+        } catch {
+            logger.error("Speech transcription results task failed after cancellation: \(error.localizedDescription)")
+        }
     }
 
     func unload() {

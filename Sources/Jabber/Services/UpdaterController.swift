@@ -31,10 +31,12 @@ final class UpdaterController: ObservableObject {
         updaterController = controller
 
         controller.updater.publisher(for: \.canCheckForUpdates)
+            .receive(on: DispatchQueue.main)
             .assign(to: &$canCheckForUpdates)
 
         automaticallyChecksForUpdates = controller.updater.automaticallyChecksForUpdates
         controller.updater.publisher(for: \.automaticallyChecksForUpdates)
+            .receive(on: DispatchQueue.main)
             .sink { [weak self] value in
                 guard let self else { return }
                 if self.automaticallyChecksForUpdates != value {
@@ -66,6 +68,7 @@ final class UpdaterController: ObservableObject {
         updater.publisher(for: \.canCheckForUpdates)
             .filter { $0 }
             .first()
+            .receive(on: DispatchQueue.main)
             .sink { [weak self] _ in
                 self?.updaterController?.updater.checkForUpdatesInBackground()
             }

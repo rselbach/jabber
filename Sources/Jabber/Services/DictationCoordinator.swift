@@ -564,8 +564,10 @@ final class DictationCoordinator {
             let normalized = processed.trimmingCharacters(in: .whitespacesAndNewlines)
             // An empty retry is ambiguous (the first pass was non-empty-but-
             // bad), so treat it as another validation failure and fall back.
-            if !normalized.isEmpty,
-               Self.suspiciousPostProcessingError(raw: rawTrimmed, processed: normalized) == nil {
+            let validationError = normalized.isEmpty
+                ? nil
+                : Self.suspiciousPostProcessingError(raw: rawTrimmed, processed: normalized)
+            if !normalized.isEmpty, validationError == nil {
                 return PostProcessingOutcome(
                     finalText: normalized,
                     outputText: normalized,
@@ -574,7 +576,7 @@ final class DictationCoordinator {
                     errorDescription: nil
                 )
             }
-            let retryError = Self.suspiciousPostProcessingError(raw: rawTrimmed, processed: normalized)
+            let retryError = validationError
                 ?? PostProcessingValidationError(
                     kind: .suspiciousShrinkage,
                     detail: "retry returned an empty result after a rejected first pass"

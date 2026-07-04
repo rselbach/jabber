@@ -243,22 +243,34 @@ final class OnboardingCoordinator {
         guard permissionPollingTask == nil else { return }
 
         permissionPollingTask = Task { [weak self] in
-            await self?.pollPermissions()
+            // Resolve self weakly per iteration so the coordinator can deinit
+            // when its strong refs drop, even if stop() is never called. The
+            // previous `await self?.pollPermissions()` strong-promoted self for
+            // the entire (infinite) loop, leaking the coordinator and polling
+            // AXIsProcessTrusted()/refreshModels() every second forever after
+            // the onboarding window closed.
+            while let self, !Task.isCancelled {
+                guard await self.pollPermissionsOnce() else { return }
+            }
         }
     }
 
-    private func pollPermissions() async {
-        while !Task.isCancelled {
-            refreshState()
+    /// One polling iteration. Returns false (and stops the loop) on cancel or
+    /// sleep failure, matching the previous `pollPermissions` semantics; true
+    /// to continue.
+    @discardableResult
+    private func pollPermissionsOnce() async -> Bool {
+        refreshState()
 
-            do {
-                try await Task.sleep(for: .seconds(1))
-            } catch is CancellationError {
-                return
-            } catch {
-                logger.error("Onboarding permission polling failed: \(error.localizedDescription)")
-                return
-            }
+        do {
+            try await Task.sleep(for: .seconds(1))
+        } catch is CancellationError {
+            return false
+        } catch {
+            logger.error("Onboarding permission polling failed: \(error.localizedDescription)")
+            return false
         }
+
+        return true
     }
 }

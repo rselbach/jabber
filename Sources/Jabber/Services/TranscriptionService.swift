@@ -53,8 +53,50 @@ actor ProviderCallGate {
 }
 
 actor TranscriptionService {
+    struct LoadDependencies: Sendable {
+        let waitForUIReady: @Sendable () async -> Void
+        let selectedModelId: @Sendable () async -> String
+        let setSelectedModelId: @Sendable (String) async -> Void
+        let ensureModelDownloaded: @Sendable (String) async throws -> URL
+        let makeProvider: @Sendable (String) -> TranscriptionProvider?
+
+        static let live = LoadDependencies(
+            waitForUIReady: {
+                await AppReadinessGate.shared.waitForUIReady()
+            },
+            selectedModelId: {
+                await ModelManager.shared.selectedModelId()
+            },
+            setSelectedModelId: { modelId in
+                await MainActor.run {
+                    TypedSettings[.selectedModel] = modelId
+                }
+            },
+            ensureModelDownloaded: { modelId in
+                try await ModelManager.shared.ensureModelDownloaded(modelId)
+            },
+            makeProvider: { modelId in
+                Self.defaultProvider(for: modelId)
+            }
+        )
+
+        private static func defaultProvider(for modelId: String) -> TranscriptionProvider? {
+            guard let def = AppMode.modelDefinition(for: modelId) else { return nil }
+
+            switch def.family {
+            case .qwen3ASR:
+                return Qwen3ASRProvider(modelId: modelId, huggingFaceModelId: def.huggingFaceModelId)
+            case .nemotronASR:
+                return NemotronASRProvider(modelId: modelId, huggingFaceModelId: def.huggingFaceModelId)
+            case .appleSpeech:
+                return AppleSpeechProvider(modelId: modelId)
+            }
+        }
+    }
+
     private var provider: TranscriptionProvider?
     private let providerCallGate = ProviderCallGate()
+    private let loadDependencies: LoadDependencies
     private var isLoading = false
     private var loadedModelId: String?
     private var sessionModelIdOverride: String?
@@ -70,6 +112,10 @@ actor TranscriptionService {
         case loading(status: String, progress: Double?)
         case ready
         case error(String)
+    }
+
+    init(loadDependencies: LoadDependencies = .live) {
+        self.loadDependencies = loadDependencies
     }
 
     nonisolated func setStateCallback(_ callback: @escaping @Sendable (State) -> Void) {
@@ -116,7 +162,7 @@ actor TranscriptionService {
     }
 
     func ensureModelLoaded() async throws {
-        await AppReadinessGate.shared.waitForUIReady()
+        await loadDependencies.waitForUIReady()
         try Task.checkCancellation()
 
         let desiredModelId = await desiredModelId()
@@ -220,19 +266,6 @@ actor TranscriptionService {
         notifyState(.notReady)
     }
 
-    private func makeProvider(for modelId: String) -> TranscriptionProvider? {
-        guard let def = AppMode.modelDefinition(for: modelId) else { return nil }
-
-        switch def.family {
-        case .qwen3ASR:
-            return Qwen3ASRProvider(modelId: modelId, huggingFaceModelId: def.huggingFaceModelId)
-        case .nemotronASR:
-            return NemotronASRProvider(modelId: modelId, huggingFaceModelId: def.huggingFaceModelId)
-        case .appleSpeech:
-            return AppleSpeechProvider(modelId: modelId)
-        }
-    }
-
     private func loadModel(desiredModelId capturedModelId: String) async throws {
         // The captured id may be stale by the time we wake from waitForModelLoad
         // (the user or a migration could have changed the selection). Re-read
@@ -272,17 +305,15 @@ actor TranscriptionService {
             var modelIdToLoad = desiredModelId
             let modelFolder: URL
             do {
-                modelFolder = try await ModelManager.shared.ensureModelDownloaded(modelIdToLoad)
+                modelFolder = try await loadDependencies.ensureModelDownloaded(modelIdToLoad)
             } catch let error as ModelError {
                 switch error {
                 case .modelNotFound:
                     logger.warning("Unknown model id '\(modelIdToLoad)', falling back to base")
                     let fallbackModelId = LanguageModelCatalog.recommendedModelId(for: Constants.defaultLanguage)
-                    await MainActor.run {
-                        TypedSettings[.selectedModel] = fallbackModelId
-                    }
+                    await loadDependencies.setSelectedModelId(fallbackModelId)
                     modelIdToLoad = fallbackModelId
-                    modelFolder = try await ModelManager.shared.ensureModelDownloaded(modelIdToLoad)
+                    modelFolder = try await loadDependencies.ensureModelDownloaded(modelIdToLoad)
                 default:
                     throw error
                 }
@@ -291,7 +322,7 @@ actor TranscriptionService {
             try Task.checkCancellation()
             guard loadGeneration == currentLoadGeneration else { throw CancellationError() }
 
-            guard let newProvider = makeProvider(for: modelIdToLoad) else {
+            guard let newProvider = loadDependencies.makeProvider(modelIdToLoad) else {
                 throw ModelError.modelNotFound(modelId: modelIdToLoad)
             }
 
@@ -389,7 +420,7 @@ actor TranscriptionService {
         if let sessionModelIdOverride {
             return sessionModelIdOverride
         }
-        return await ModelManager.shared.selectedModelId()
+        return await loadDependencies.selectedModelId()
     }
 
     // MARK: - Pure resolution helpers (testable without the actor)

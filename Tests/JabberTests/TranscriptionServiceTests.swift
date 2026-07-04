@@ -1,7 +1,152 @@
+import os
 import XCTest
 @testable import Jabber
 
 final class TranscriptionServiceTests: XCTestCase {
+    func testConcurrentLoadModelCallersShareSingleProviderLoad() async throws {
+        let downloadProbe = ModelDownloadProbe()
+        let provider = FakeTranscriptionProvider(modelId: AppMode.qwen3ModelId)
+        let loadStarted = TestLatch()
+        let releaseLoad = TestLatch()
+        provider.holdLoad(started: loadStarted, release: releaseLoad)
+        let service = TranscriptionService(loadDependencies: TranscriptionService.LoadDependencies(
+            waitForUIReady: {},
+            selectedModelId: { AppMode.qwen3ModelId },
+            setSelectedModelId: { _ in },
+            ensureModelDownloaded: { modelId in
+                try await downloadProbe.ensureDownloaded(modelId)
+            },
+            makeProvider: { _ in provider }
+        ))
+
+        let firstTask = Task {
+            try await service.ensureModelLoaded()
+        }
+        await loadStarted.wait()
+
+        let secondTask = Task {
+            try await service.ensureModelLoaded()
+        }
+
+        try await Task.sleep(for: .milliseconds(50))
+        let modelIdsWhileFirstHeld = await downloadProbe.modelIds
+        XCTAssertEqual(modelIdsWhileFirstHeld, [AppMode.qwen3ModelId])
+        XCTAssertEqual(provider.loadCallCount, 1)
+
+        await releaseLoad.open()
+        try await firstTask.value
+        try await secondTask.value
+
+        let finalModelIds = await downloadProbe.modelIds
+        let currentModelId = await service.currentModelId()
+        XCTAssertEqual(finalModelIds, [AppMode.qwen3ModelId])
+        XCTAssertEqual(provider.loadCallCount, 1)
+        XCTAssertEqual(provider.unloadCallCount, 0)
+        XCTAssertEqual(currentModelId, AppMode.qwen3ModelId)
+    }
+
+    func testUnloadDuringLoadCancelsGenerationAndUnloadsNewProvider() async throws {
+        let downloadProbe = ModelDownloadProbe()
+        let provider = FakeTranscriptionProvider(modelId: AppMode.qwen3ModelId)
+        let loadStarted = TestLatch()
+        let releaseLoad = TestLatch()
+        provider.holdLoad(started: loadStarted, release: releaseLoad)
+        let service = TranscriptionService(loadDependencies: TranscriptionService.LoadDependencies(
+            waitForUIReady: {},
+            selectedModelId: { AppMode.qwen3ModelId },
+            setSelectedModelId: { _ in },
+            ensureModelDownloaded: { modelId in
+                try await downloadProbe.ensureDownloaded(modelId)
+            },
+            makeProvider: { _ in provider }
+        ))
+
+        let loadTask = Task {
+            try await service.ensureModelLoaded()
+        }
+        await loadStarted.wait()
+
+        await service.unloadModel()
+        await releaseLoad.open()
+
+        do {
+            try await loadTask.value
+            XCTFail("load should be cancelled after a generation bump")
+        } catch is CancellationError {}
+
+        XCTAssertEqual(provider.loadCallCount, 1)
+        XCTAssertEqual(provider.unloadCallCount, 1)
+        let currentModelId = await service.currentModelId()
+        XCTAssertNil(currentModelId)
+    }
+
+    func testReentrantSelectedModelAwaitDoesNotStartDuplicateLoad() async throws {
+        let selectedProbe = SelectedModelProbe(modelId: AppMode.qwen3ModelId)
+        let downloadProbe = ModelDownloadProbe()
+        let provider = FakeTranscriptionProvider(modelId: AppMode.qwen3ModelId)
+        let service = TranscriptionService(loadDependencies: TranscriptionService.LoadDependencies(
+            waitForUIReady: {},
+            selectedModelId: {
+                await selectedProbe.selectedModelId()
+            },
+            setSelectedModelId: { _ in },
+            ensureModelDownloaded: { modelId in
+                try await downloadProbe.ensureDownloaded(modelId)
+            },
+            makeProvider: { _ in provider }
+        ))
+
+        let firstTask = Task {
+            try await service.ensureModelLoaded()
+        }
+        await selectedProbe.waitForCallCount(1)
+
+        let secondTask = Task {
+            try await service.ensureModelLoaded()
+        }
+        await selectedProbe.waitForCallCount(2)
+        await selectedProbe.releaseAll()
+
+        try await firstTask.value
+        try await secondTask.value
+
+        let modelIds = await downloadProbe.modelIds
+        XCTAssertEqual(modelIds, [AppMode.qwen3ModelId])
+        XCTAssertEqual(provider.loadCallCount, 1)
+        XCTAssertEqual(provider.unloadCallCount, 0)
+    }
+
+    func testUnknownModelFallsBackToRecommendedDefaultLanguageModel() async throws {
+        let selectedModelId = "greendale-human-being"
+        let fallbackModelId = LanguageModelCatalog.recommendedModelId(for: Constants.defaultLanguage)
+        let downloadProbe = ModelDownloadProbe(missingModelIds: [selectedModelId])
+        let selectedModelSetter = SelectedModelSetterProbe()
+        let provider = FakeTranscriptionProvider(modelId: fallbackModelId)
+        let service = TranscriptionService(loadDependencies: TranscriptionService.LoadDependencies(
+            waitForUIReady: {},
+            selectedModelId: { selectedModelId },
+            setSelectedModelId: { modelId in
+                await selectedModelSetter.set(modelId)
+            },
+            ensureModelDownloaded: { modelId in
+                try await downloadProbe.ensureDownloaded(modelId)
+            },
+            makeProvider: { modelId in
+                modelId == fallbackModelId ? provider : nil
+            }
+        ))
+
+        try await service.ensureModelLoaded()
+
+        let downloadedModelIds = await downloadProbe.modelIds
+        let selectedModelIds = await selectedModelSetter.modelIds
+        let currentModelId = await service.currentModelId()
+        XCTAssertEqual(downloadedModelIds, [selectedModelId, fallbackModelId])
+        XCTAssertEqual(selectedModelIds, [fallbackModelId])
+        XCTAssertEqual(provider.loadCallCount, 1)
+        XCTAssertEqual(currentModelId, fallbackModelId)
+    }
+
     func testProviderCallGateSerializesConcurrentOperations() async throws {
         let gate = ProviderCallGate()
         let probe = ProviderCallProbe()
@@ -149,5 +294,166 @@ private actor ProviderCallProbe {
 
     func finish() {
         activeCount -= 1
+    }
+}
+
+private final class FakeTranscriptionProvider: TranscriptionProvider, @unchecked Sendable {
+    private struct State {
+        var loadStarted: TestLatch?
+        var releaseLoad: TestLatch?
+        var isReady = false
+        var loadCallCount = 0
+        var unloadCallCount = 0
+    }
+
+    let modelId: String
+
+    private let state = OSAllocatedUnfairLock(initialState: State())
+
+    init(modelId: String) {
+        self.modelId = modelId
+    }
+
+    var isReady: Bool {
+        state.withLock { state in
+            state.isReady
+        }
+    }
+
+    var loadCallCount: Int {
+        state.withLock { state in
+            state.loadCallCount
+        }
+    }
+
+    var unloadCallCount: Int {
+        state.withLock { state in
+            state.unloadCallCount
+        }
+    }
+
+    func holdLoad(started: TestLatch, release: TestLatch) {
+        state.withLock { state in
+            state.loadStarted = started
+            state.releaseLoad = release
+        }
+    }
+
+    func load(from _: URL, progressHandler _: ((Double, String) -> Void)?) async throws {
+        let holds = state.withLock { state in
+            state.loadCallCount += 1
+            return (started: state.loadStarted, release: state.releaseLoad)
+        }
+
+        await holds.started?.open()
+        await holds.release?.wait()
+
+        state.withLock { state in
+            state.isReady = true
+        }
+    }
+
+    func transcribe(samples _: [Float], language _: String?, vocabularyPrompt _: String?) async throws -> String {
+        "Troy and Abed in the morning"
+    }
+
+    func transcribeStreaming(samples _: [Float], language _: String?, vocabularyPrompt _: String?) async throws -> String {
+        "Troy and Abed in the morning"
+    }
+
+    func resetStreamingTranscription() {}
+
+    func unload() {
+        state.withLock { state in
+            state.unloadCallCount += 1
+            state.isReady = false
+        }
+    }
+}
+
+private actor ModelDownloadProbe {
+    private let missingModelIds: Set<String>
+    private var _modelIds: [String] = []
+
+    init(missingModelIds: Set<String> = []) {
+        self.missingModelIds = missingModelIds
+    }
+
+    var modelIds: [String] {
+        _modelIds
+    }
+
+    func ensureDownloaded(_ modelId: String) throws -> URL {
+        _modelIds.append(modelId)
+        if missingModelIds.contains(modelId) {
+            throw ModelError.modelNotFound(modelId: modelId)
+        }
+        return FileManager.default.temporaryDirectory
+            .appendingPathComponent("JabberTests.TranscriptionService.")
+            .appendingPathComponent(modelId, isDirectory: true)
+    }
+}
+
+private actor SelectedModelSetterProbe {
+    private var _modelIds: [String] = []
+
+    var modelIds: [String] {
+        _modelIds
+    }
+
+    func set(_ modelId: String) {
+        _modelIds.append(modelId)
+    }
+}
+
+private actor SelectedModelProbe {
+    private let modelId: String
+    private var callCount = 0
+    private var isReleased = false
+    private var waitForCallCountContinuations: [(Int, CheckedContinuation<Void, Never>)] = []
+    private var releaseContinuations: [CheckedContinuation<Void, Never>] = []
+
+    init(modelId: String) {
+        self.modelId = modelId
+    }
+
+    func selectedModelId() async -> String {
+        callCount += 1
+        resumeCallCountWaiters()
+        if !isReleased {
+            await withCheckedContinuation { continuation in
+                releaseContinuations.append(continuation)
+            }
+        }
+        return modelId
+    }
+
+    func waitForCallCount(_ want: Int) async {
+        if callCount >= want { return }
+        await withCheckedContinuation { continuation in
+            waitForCallCountContinuations.append((want, continuation))
+        }
+    }
+
+    func releaseAll() {
+        guard !isReleased else { return }
+        isReleased = true
+        let continuations = releaseContinuations
+        releaseContinuations = []
+        for continuation in continuations {
+            continuation.resume()
+        }
+    }
+
+    private func resumeCallCountWaiters() {
+        let readyContinuations = waitForCallCountContinuations.filter { want, _ in
+            callCount >= want
+        }
+        waitForCallCountContinuations.removeAll { want, _ in
+            callCount >= want
+        }
+        for (_, continuation) in readyContinuations {
+            continuation.resume()
+        }
     }
 }

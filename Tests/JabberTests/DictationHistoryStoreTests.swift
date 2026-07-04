@@ -253,6 +253,30 @@ final class DictationHistoryStoreTests: XCTestCase {
 
     // MARK: - Bug 3: corrupt metadata.json must be pruned, not just missing
 
+    func testSaveRecordsHumanReadableModelNameForNonQwenModels() async throws {
+        // The history entry's `modelName` label must show the human-readable
+        // display name for every model family, not just Qwen3. Previously the
+        // qwen3ASRVariant lookup returned nil for nemotron/apple-speech and the
+        // raw id leaked into the UI.
+        let store = makeStore()
+        let tests: [String: (modelID: String, want: String)] = [
+            "nemotron": (AppMode.nemotronModelId, "Nemotron"),
+            "apple-speech": (AppMode.appleSpeechModelId, "Apple Speech"),
+            "qwen3": (AppMode.qwen3ModelId, "Qwen3-ASR 1.7B 8-bit")
+        ]
+
+        for (name, tc) in tests {
+            let entry = try await store.save(DictationHistorySession(
+                samples: [0.25],
+                transcript: "Greendale Community College",
+                modelID: tc.modelID,
+                language: "en",
+                timestamp: Date(timeIntervalSince1970: 100)
+            ))
+            XCTAssertEqual(entry.modelName, tc.want, name)
+        }
+    }
+
     func testRetentionPrunesCorruptMetadataEntryDirectories() async throws {
         let store = makeStore()
 

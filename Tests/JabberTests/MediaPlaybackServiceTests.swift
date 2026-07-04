@@ -51,11 +51,14 @@ final class MediaPlaybackServiceTests: XCTestCase {
 
     func testResumesOnlyAfterSuccessfulPause() async throws {
         client.isPlayingResults = [true, false]
+        let playSent = expectation(description: "resume sends play")
+        client.sendExpectations[.play] = playSent
         let service = makeService()
 
         service.pauseForDictationIfNeeded()
         try await Task.sleep(for: .milliseconds(20))
         service.resumeAfterDictationIfNeeded()
+        await fulfillment(of: [playSent], timeout: 1.0)
 
         XCTAssertEqual(client.commands, [.pause, .play])
         XCTAssertEqual(client.systemPlayPauseCallCount, 0)
@@ -76,14 +79,39 @@ final class MediaPlaybackServiceTests: XCTestCase {
 
     func testFallsBackToSystemMediaKeyWhenPauseCommandDoesNotStopPlayback() async throws {
         client.isPlayingResults = [true, true]
+        let playSent = expectation(description: "resume sends play")
+        client.sendExpectations[.play] = playSent
         let service = makeService()
 
         service.pauseForDictationIfNeeded()
         try await Task.sleep(for: .milliseconds(20))
         service.resumeAfterDictationIfNeeded()
+        await fulfillment(of: [playSent], timeout: 1.0)
 
         XCTAssertEqual(client.commands, [.pause, .play])
         XCTAssertEqual(client.systemPlayPauseCallCount, 1)
+    }
+
+    /// A failed play command must still clear the should-resume flag, so a
+    /// later resume call can't replay it. This exercises the failure branch of
+    /// `send(.play)` that was unreachable when `send` always returned `true`.
+    func testResumeDoesNotReplayAfterFailedPlay() async throws {
+        client.isPlayingResults = [true, false]
+        client.commandResults[.play] = false
+        let playSent = expectation(description: "resume attempts play once")
+        client.sendExpectations[.play] = playSent
+        let service = makeService()
+
+        service.pauseForDictationIfNeeded()
+        try await Task.sleep(for: .milliseconds(20))
+        service.resumeAfterDictationIfNeeded()
+        await fulfillment(of: [playSent], timeout: 1.0)
+
+        // Second resume must not send play again: the flag was cleared even
+        // though the play command failed. No async work is spawned here, so the
+        // command log is stable.
+        service.resumeAfterDictationIfNeeded()
+        XCTAssertEqual(client.commands, [.pause, .play])
     }
 
     func testFinishingBeforePlaybackQueryReturnsPreventsLatePause() async throws {
@@ -152,6 +180,10 @@ final class FakeMediaRemoteClient: MediaRemoteControlling {
     var holdIsPlayingUntilReleased = false
     var commandResults: [MediaRemoteCommand: Bool] = [:]
     var systemPlayPauseResult = true
+    /// Optional per-command expectation fulfilled when `send` is invoked, so
+    /// callers can wait deterministically for a fire-and-forget resume Task
+    /// instead of sleeping.
+    var sendExpectations: [MediaRemoteCommand: XCTestExpectation] = [:]
 
     private(set) var isPlayingCallCount = 0
     private(set) var commands: [MediaRemoteCommand] = []
@@ -174,8 +206,9 @@ final class FakeMediaRemoteClient: MediaRemoteControlling {
         return isPlayingResult
     }
 
-    func send(_ command: MediaRemoteCommand) -> Bool {
+    func send(_ command: MediaRemoteCommand) async -> Bool {
         commands.append(command)
+        sendExpectations[command]?.fulfill()
         return commandResults[command] ?? true
     }
 

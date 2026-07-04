@@ -21,7 +21,7 @@ enum MediaRemoteCommand: Int32, Sendable {
 protocol MediaRemoteControlling: AnyObject {
     var isAvailable: Bool { get }
     func isPlaying() async -> Bool
-    func send(_ command: MediaRemoteCommand) -> Bool
+    func send(_ command: MediaRemoteCommand) async -> Bool
     func sendSystemPlayPauseKey() -> Bool
 }
 
@@ -80,9 +80,18 @@ final class MediaPlaybackService: MediaPlaybackProtocol {
 
         guard shouldResume else { return }
         logger.notice("Resuming media playback paused by Jabber")
-        guard client.send(.play) else {
-            logger.warning("MediaRemote failed to resume media playback")
-            return
+        // send is async (it awaits the adapter process); resume is called from
+        // synchronous sites, so drive the await in a Task and report failures
+        // there. This matches the fire-and-forget enqueue the real client used
+        // to do, but now a failed play is actually surfaced instead of hidden
+        // behind an unconditional `true`.
+        let client = client
+        let logger = logger
+        Task {
+            guard await client.send(.play) else {
+                logger.warning("MediaRemote failed to resume media playback")
+                return
+            }
         }
     }
 
@@ -96,7 +105,7 @@ final class MediaPlaybackService: MediaPlaybackProtocol {
         }
         guard currentSessionID == sessionID, !Task.isCancelled else { return }
 
-        guard client.send(.pause) else {
+        guard await client.send(.pause) else {
             logger.warning("MediaRemote failed to pause media playback")
             pauseWithSystemMediaKeyIfStillPlaying(sessionID: sessionID)
             return
@@ -179,25 +188,28 @@ final class MediaRemoteClient: MediaRemoteControlling {
         return snapshot.isPlaying
     }
 
-    func send(_ command: MediaRemoteCommand) -> Bool {
+    func send(_ command: MediaRemoteCommand) async -> Bool {
         guard let libraryURL, let scriptURL else { return false }
 
-        let processQueue = processQueue
-        let logger = logger
-        processQueue.async {
-            let result = Self.runAdapterCommand(
-                scriptURL: scriptURL,
-                libraryURL: libraryURL,
-                arguments: [command.adapterArgument]
-            )
-            guard result.terminationStatus != 0 else { return }
-
-            logger.warning(
-                "MediaRemoteAdapter \(command.adapterArgument, privacy: .public) command failed with status \(result.terminationStatus): \(result.errorOutput, privacy: .public)"
-            )
+        return await withCheckedContinuation { (continuation: CheckedContinuation<Bool, Never>) in
+            let box = SingleResumeBox(continuation)
+            let processQueue = processQueue
+            let logger = logger
+            processQueue.async {
+                let result = Self.runAdapterCommand(
+                    scriptURL: scriptURL,
+                    libraryURL: libraryURL,
+                    arguments: [command.adapterArgument]
+                )
+                let success = result.terminationStatus == 0
+                if !success {
+                    logger.warning(
+                        "MediaRemoteAdapter \(command.adapterArgument, privacy: .public) command failed with status \(result.terminationStatus): \(result.errorOutput, privacy: .public)"
+                    )
+                }
+                box.resume(returning: success)
+            }
         }
-
-        return true
     }
 
     func sendSystemPlayPauseKey() -> Bool {

@@ -331,15 +331,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func setupHotkey() {
         hotkeyManager.onKeyDown = { [weak self] in
-            Task { @MainActor in
-                await self?.handleHotkeyDownEvent()
-            }
+            self?.handleHotkeyDownEvent()
         }
 
         hotkeyManager.onKeyUp = { [weak self] in
-            Task { @MainActor in
-                self?.handleHotkeyUpEvent()
-            }
+            self?.handleHotkeyUpEvent()
         }
 
         hotkeyManager.onRegistrationFailure = { [weak self] status in
@@ -467,7 +463,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         dictationCoordinator.isRecording || pendingHotkeyStartID != nil
     }
 
-    private func handleHotkeyDownEvent() async {
+    private func handleHotkeyDownEvent() {
         guard activeHotkeyPressMode == nil else { return }
 
         let mode = TypedSettings.hotkeyActivationMode
@@ -475,12 +471,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         switch mode {
         case .hold:
-            await startDictationFromHotkey()
+            startDictationFromHotkey()
         case .toggle:
             if hasActiveOrPendingRecording {
                 stopOrAbortDictationFromHotkey()
             } else {
-                await startDictationFromHotkey()
+                startDictationFromHotkey()
             }
         case .automatic:
             automaticHotkeyPressStartedAt = CFAbsoluteTimeGetCurrent()
@@ -489,7 +485,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 stopOrAbortDictationFromHotkey()
             } else {
                 automaticHotkeyPressStartedRecording = true
-                await startDictationFromHotkey()
+                startDictationFromHotkey()
             }
         }
     }
@@ -521,10 +517,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
-    private func startDictationFromHotkey() async {
+    private func startDictationFromHotkey() {
         currentHotkeyPressID += 1
         let pressID = currentHotkeyPressID
         pendingHotkeyStartID = pressID
+
+        Task { @MainActor [weak self] in
+            await self?.finishStartDictationFromHotkey(pressID: pressID)
+        }
+    }
+
+    private func finishStartDictationFromHotkey(pressID: Int) async {
         defer {
             if pendingHotkeyStartID == pressID {
                 pendingHotkeyStartID = nil

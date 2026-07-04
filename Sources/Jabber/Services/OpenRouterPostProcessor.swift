@@ -218,9 +218,9 @@ struct OpenRouterPostProcessor: PostProcessingProvider {
 /// shared with the typed accessor via the pure `resolve` helpers.
 struct RoutedPostProcessor: PostProcessingProvider {
     private static let logger = Logger(subsystem: "com.rselbach.jabber", category: "PostProcessingRouter")
-    // `UserDefaults` is thread-safe (Apple docs) but not `Sendable`-annotated,
-    // so the property is marked `nonisolated(unsafe)` to satisfy the protocol's
-    // `Sendable` requirement without an unchecked conformance on the whole type.
+    /// `UserDefaults` is thread-safe (Apple docs) but not `Sendable`-annotated,
+    /// so the property is marked `nonisolated(unsafe)` to satisfy the protocol's
+    /// `Sendable` requirement without an unchecked conformance on the whole type.
     private nonisolated(unsafe) let defaults: UserDefaults
 
     init(defaults: UserDefaults = .standard) {

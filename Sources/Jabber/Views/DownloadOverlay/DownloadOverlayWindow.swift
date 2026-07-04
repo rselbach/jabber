@@ -23,7 +23,28 @@ final class DownloadOverlayWindow: OverlayWindowController {
 
     @discardableResult
     override func createWindow() -> Bool {
-        guard let screen = NSScreen.main ?? NSScreen.screens.first else { return false }
+        guard let frame = frameForCurrentScreen() else { return false }
+
+        let panel = OverlayPanelFactory.makePanel(frame: frame)
+
+        let content = DownloadOverlayContent(viewModel: viewModel)
+        let hostingView = NSHostingView(rootView: content)
+        hostingView.frame = NSRect(x: 0, y: 0, width: frame.width, height: frame.height)
+
+        panel.contentView = hostingView
+        window = panel
+        return true
+    }
+
+    override func reposition() {
+        guard let frame = frameForCurrentScreen() else { return }
+        window?.setFrame(frame, display: true)
+    }
+
+    /// Centered overlay frame for the current screen. Overridable so tests can
+    /// inject a deterministic frame (NSScreen cannot be fabricated).
+    func frameForCurrentScreen() -> NSRect? {
+        guard let screen = NSScreen.main ?? NSScreen.screens.first else { return nil }
         let screenFrame = screen.visibleFrame
 
         let windowWidth: CGFloat = 320
@@ -32,17 +53,7 @@ final class DownloadOverlayWindow: OverlayWindowController {
         let x = screenFrame.origin.x + (screenFrame.width - windowWidth) / 2
         let y = screenFrame.origin.y + (screenFrame.height - windowHeight) / 2
 
-        let frame = NSRect(x: x, y: y, width: windowWidth, height: windowHeight)
-
-        let panel = OverlayPanelFactory.makePanel(frame: frame)
-
-        let content = DownloadOverlayContent(viewModel: viewModel)
-        let hostingView = NSHostingView(rootView: content)
-        hostingView.frame = NSRect(x: 0, y: 0, width: windowWidth, height: windowHeight)
-
-        panel.contentView = hostingView
-        window = panel
-        return true
+        return NSRect(x: x, y: y, width: windowWidth, height: windowHeight)
     }
 }
 

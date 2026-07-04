@@ -43,17 +43,45 @@ final class OverlayWindowTests: XCTestCase {
             "stale pendingHide leaked into session B and hid the active overlay"
         )
     }
+
+    // Regression: the overlay panel is created once and cached, positioned
+    // against NSScreen.main at creation time. Without recomputing on every
+    // show(), unplugging the display it was created on strands it offscreen
+    // and every future dictation shows an invisible overlay. show() must
+    // reposition against the current screen on every call.
+    func testShowRepositionsWindowOnEveryCall() {
+        let overlay = TestOverlayWindow()
+
+        // First show creates the panel and applies the injected frame.
+        overlay.injectedFrame = NSRect(x: 100, y: 100, width: 400, height: 104)
+        overlay.show()
+        XCTAssertEqual(overlay.window?.frame, NSRect(x: 100, y: 100, width: 400, height: 104))
+
+        // Simulate a screen change (external display unplugged / resolution
+        // change): the injected frame moves. The cached panel must follow.
+        overlay.injectedFrame = NSRect(x: 2000, y: 500, width: 400, height: 104)
+        overlay.show()
+        XCTAssertEqual(
+            overlay.window?.frame,
+            NSRect(x: 2000, y: 500, width: 400, height: 104),
+            "show() must reposition the cached panel against the current screen"
+        )
+    }
 }
 
 /// Minimal OverlayWindow subclass whose createWindow() doesn't depend on
 /// NSScreen.main (unavailable in headless test runners). Wires the fallback
 /// notice callback the same way the real createWindow does so the deferred-hide
-/// path is exercised against the production OverlayWindow logic.
+/// path is exercised against the production OverlayWindow logic. Overrides
+/// frameForCurrentScreen() to inject a deterministic frame so reposition-on-show
+/// is testable without fabricating an NSScreen.
 @MainActor
 final class TestOverlayWindow: OverlayWindow {
+    var injectedFrame: NSRect = .init(x: 0, y: 0, width: 400, height: 104)
+
     override func createWindow() -> Bool {
         let panel = NSPanel(
-            contentRect: NSRect(x: 0, y: 0, width: 400, height: 104),
+            contentRect: injectedFrame,
             styleMask: [.borderless, .nonactivatingPanel],
             backing: .buffered,
             defer: false
@@ -65,5 +93,9 @@ final class TestOverlayWindow: OverlayWindow {
         window = panel
         waveformView = waveform
         return true
+    }
+
+    override func frameForCurrentScreen() -> NSRect? {
+        injectedFrame
     }
 }

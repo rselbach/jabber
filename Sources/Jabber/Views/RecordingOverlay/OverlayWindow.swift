@@ -19,6 +19,11 @@ class OverlayWindowController {
                 return
             }
         }
+        // Recompute the frame against the current screen on every show. The
+        // panel is created once and cached; without repositioning, unplugging
+        // the display it was created on (or a resolution change) strands it
+        // offscreen and every future dictation shows an invisible overlay.
+        reposition()
         visibilityToken &+= 1
         window?.alphaValue = 1
         onShow()
@@ -49,6 +54,11 @@ class OverlayWindowController {
     func createWindow() -> Bool {
         false
     }
+
+    /// Recompute and apply the window frame against the current screen. Default
+    /// no-op; subclasses with screen-relative geometry override this. Called on
+    /// every `show()` so a cached panel follows the user's current display.
+    func reposition() {}
 
     func onShow() {}
     func onWindowCreationFailed() {}
@@ -129,17 +139,7 @@ class OverlayWindow: OverlayWindowController {
 
     @discardableResult
     override func createWindow() -> Bool {
-        guard let screen = NSScreen.main ?? NSScreen.screens.first else { return false }
-        let screenFrame = screen.visibleFrame
-
-        let windowWidth: CGFloat = 400
-        let windowHeight: CGFloat = 104
-        let bottomMargin: CGFloat = 100
-
-        let x = screenFrame.origin.x + (screenFrame.width - windowWidth) / 2
-        let y = screenFrame.origin.y + bottomMargin
-
-        let frame = NSRect(x: x, y: y, width: windowWidth, height: windowHeight)
+        guard let frame = frameForCurrentScreen() else { return false }
 
         let panel = OverlayPanelFactory.makePanel(frame: frame)
 
@@ -149,7 +149,7 @@ class OverlayWindow: OverlayWindowController {
         }
         let container = WaveformContainer(waveformView: waveform)
         let hostingView = NSHostingView(rootView: container)
-        hostingView.frame = NSRect(x: 0, y: 0, width: windowWidth, height: windowHeight)
+        hostingView.frame = NSRect(x: 0, y: 0, width: frame.width, height: frame.height)
 
         panel.contentView = hostingView
 
@@ -157,6 +157,27 @@ class OverlayWindow: OverlayWindowController {
         waveformView = waveform
         self.hostingView = hostingView
         return true
+    }
+
+    override func reposition() {
+        guard let frame = frameForCurrentScreen() else { return }
+        window?.setFrame(frame, display: true)
+    }
+
+    /// Bottom-center overlay frame for the current screen. Overridable so tests
+    /// can inject a deterministic frame (NSScreen cannot be fabricated).
+    func frameForCurrentScreen() -> NSRect? {
+        guard let screen = NSScreen.main ?? NSScreen.screens.first else { return nil }
+        let screenFrame = screen.visibleFrame
+
+        let windowWidth: CGFloat = 400
+        let windowHeight: CGFloat = 104
+        let bottomMargin: CGFloat = 100
+
+        let x = screenFrame.origin.x + (screenFrame.width - windowWidth) / 2
+        let y = screenFrame.origin.y + bottomMargin
+
+        return NSRect(x: x, y: y, width: windowWidth, height: windowHeight)
     }
 }
 

@@ -16,6 +16,8 @@ struct PostProcessingPage: View {
     /// Last value successfully loaded from the keychain. Used to skip
     /// gratuitous `SecItemUpdate` calls when the field is unchanged.
     @State private var loadedApiKey: String = ""
+    @State private var isLoadingOpenRouterAPIKey = false
+    @State private var loadOpenRouterAPIKeyTask: Task<Void, Never>?
 
     var body: some View {
         Form {
@@ -37,6 +39,9 @@ struct PostProcessingPage: View {
                     case .openRouter:
                         SecureField("OpenRouter API key", text: $openRouterApiKey)
                             .textContentType(.password)
+                            .onChange(of: openRouterApiKey) { _, _ in
+                                cancelOpenRouterAPIKeyLoadAfterUserEdit()
+                            }
                             .onSubmit {
                                 saveOpenRouterAPIKey()
                             }
@@ -65,10 +70,6 @@ struct PostProcessingPage: View {
         .formStyle(.grouped)
         .onAppear {
             loadOpenRouterAPIKey()
-            // Reading the keychain can surface an auth prompt that deactivates
-            // Jabber; bring it back to the front once the prompt resolves so
-            // the main window doesn't end up stranded behind other apps.
-            NSApp.activate(ignoringOtherApps: false)
         }
         // The main window is retained when closed, so onDisappear is not
         // guaranteed to fire; persist the key on window close as well.
@@ -99,21 +100,56 @@ struct PostProcessingPage: View {
     /// Loads the OpenRouter API key from the Keychain into the SecureField.
     /// Keychain errors are surfaced as inline red text, not a modal alert.
     private func loadOpenRouterAPIKey() {
-        do {
-            let key = try OpenRouterKeychain.readKey() ?? ""
-            openRouterApiKey = key
-            loadedApiKey = key
-            didLoadKeySuccessfully = true
-            keychainError = nil
-        } catch {
-            // Don't treat the empty field as a deletion: a transient read
-            // failure (e.g. user cancelled the auth prompt) must not wipe the
-            // real stored key on the next onDisappear save.
-            openRouterApiKey = ""
-            loadedApiKey = ""
-            didLoadKeySuccessfully = false
-            keychainError = error.localizedDescription
+        loadOpenRouterAPIKeyTask?.cancel()
+        isLoadingOpenRouterAPIKey = true
+
+        loadOpenRouterAPIKeyTask = Task {
+            let result = await Task.detached(priority: .userInitiated) {
+                do {
+                    return try APIKeyLoadResult.success(OpenRouterKeychain.readKey() ?? "")
+                } catch {
+                    return APIKeyLoadResult.failure(error.localizedDescription)
+                }
+            }.value
+
+            guard !Task.isCancelled else { return }
+
+            await MainActor.run {
+                loadOpenRouterAPIKeyTask = nil
+                isLoadingOpenRouterAPIKey = false
+
+                switch result {
+                case let .success(key):
+                    openRouterApiKey = key
+                    loadedApiKey = key
+                    didLoadKeySuccessfully = true
+                    keychainError = nil
+                case let .failure(message):
+                    // Don't treat the empty field as a deletion: a transient
+                    // read failure (e.g. user cancelled the auth prompt) must
+                    // not wipe the real stored key on the next save.
+                    openRouterApiKey = ""
+                    loadedApiKey = ""
+                    didLoadKeySuccessfully = false
+                    keychainError = message
+                }
+
+                // Reading the keychain can surface an auth prompt that
+                // deactivates Jabber; bring it back to the front once the
+                // prompt resolves so the main window doesn't end up stranded
+                // behind other apps.
+                NSApp.activate(ignoringOtherApps: false)
+            }
         }
+    }
+
+    private func cancelOpenRouterAPIKeyLoadAfterUserEdit() {
+        guard isLoadingOpenRouterAPIKey else { return }
+        loadOpenRouterAPIKeyTask?.cancel()
+        loadOpenRouterAPIKeyTask = nil
+        isLoadingOpenRouterAPIKey = false
+        didLoadKeySuccessfully = false
+        loadedApiKey = ""
     }
 
     /// Persists the SecureField's API key to the Keychain. An empty/whitespace
@@ -121,6 +157,7 @@ struct PostProcessingPage: View {
     private func saveOpenRouterAPIKey() {
         guard APIKeyPersistenceDecision.shouldPersist(
             didLoadSuccessfully: didLoadKeySuccessfully,
+            isLoadInProgress: isLoadingOpenRouterAPIKey,
             loadedValue: loadedApiKey,
             currentValue: openRouterApiKey
         ) else { return }
@@ -134,6 +171,7 @@ struct PostProcessingPage: View {
             }
             openRouterApiKey = trimmed
             loadedApiKey = trimmed
+            didLoadKeySuccessfully = true
             keychainError = nil
         } catch {
             keychainError = error.localizedDescription
@@ -151,12 +189,17 @@ struct PostProcessingPage: View {
 ///   "delete stored key" and wipe it. Non-empty values are still safe to save.
 /// - The field is unchanged since the last successful load. Skipping the
 ///   write avoids a gratuitous `SecItemUpdate` on every sidebar switch.
+/// - The async keychain load is still in flight. Close/terminate notifications
+///   can arrive before the read completes, and saving the initial empty field
+///   would clobber a real stored key.
 enum APIKeyPersistenceDecision {
     static func shouldPersist(
         didLoadSuccessfully: Bool,
+        isLoadInProgress: Bool,
         loadedValue: String,
         currentValue: String
     ) -> Bool {
+        guard !isLoadInProgress else { return false }
         let normalizedCurrentValue = normalized(currentValue)
         guard didLoadSuccessfully else { return !normalizedCurrentValue.isEmpty }
         return normalizedCurrentValue != normalized(loadedValue)
@@ -165,4 +208,9 @@ enum APIKeyPersistenceDecision {
     private static func normalized(_ value: String) -> String {
         value.trimmingCharacters(in: .whitespacesAndNewlines)
     }
+}
+
+private enum APIKeyLoadResult: Sendable {
+    case success(String)
+    case failure(String)
 }

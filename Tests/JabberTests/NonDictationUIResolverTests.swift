@@ -2,21 +2,38 @@ import XCTest
 @testable import Jabber
 
 final class NonDictationUIResolverTests: XCTestCase {
-    func testResolveReturnsLoadingModelWhenModelIsNotReady() {
+    func testResolveReturnsLoadingModelWhenModelIsNotReadyAndLoadInProgress() {
         let state = NonDictationUIResolver.resolve(
             forceLoading: false,
             modelState: .notReady,
-            downloadState: nil
+            downloadState: nil,
+            isLoadInProgress: true
         )
 
         XCTAssertEqual(state, defaultLoadingState())
+    }
+
+    func testResolveReturnsErrorWhenModelIsNotReadyAndNoLoadInProgress() {
+        // After the user dismisses the migration notice with "Not Now" (or any
+        // path that leaves no load running), an indeterminate "Loading
+        // model..." spinner would be a lie. The honest state is that the model
+        // is not usable and nothing is preparing it.
+        let state = NonDictationUIResolver.resolve(
+            forceLoading: false,
+            modelState: .notReady,
+            downloadState: nil,
+            isLoadInProgress: false
+        )
+
+        XCTAssertEqual(state, .error)
     }
 
     func testResolveReturnsReadyWhenModelIsReadyAndNoDownload() {
         let state = NonDictationUIResolver.resolve(
             forceLoading: false,
             modelState: .ready,
-            downloadState: nil
+            downloadState: nil,
+            isLoadInProgress: false
         )
 
         XCTAssertEqual(state, .ready)
@@ -26,7 +43,8 @@ final class NonDictationUIResolverTests: XCTestCase {
         let state = NonDictationUIResolver.resolve(
             forceLoading: false,
             modelState: .error("boom"),
-            downloadState: sampleDownloadState()
+            downloadState: sampleDownloadState(),
+            isLoadInProgress: false
         )
 
         XCTAssertEqual(state, .error)
@@ -37,7 +55,8 @@ final class NonDictationUIResolverTests: XCTestCase {
         let state = NonDictationUIResolver.resolve(
             forceLoading: false,
             modelState: .ready,
-            downloadState: downloadState
+            downloadState: downloadState,
+            isLoadInProgress: false
         )
 
         XCTAssertEqual(state, .downloading(downloadState))
@@ -48,7 +67,8 @@ final class NonDictationUIResolverTests: XCTestCase {
         let state = NonDictationUIResolver.resolve(
             forceLoading: false,
             modelState: .loading(status: "Preparing model...", progress: nil),
-            downloadState: downloadState
+            downloadState: downloadState,
+            isLoadInProgress: true
         )
 
         XCTAssertEqual(state, .downloading(downloadState))
@@ -58,7 +78,8 @@ final class NonDictationUIResolverTests: XCTestCase {
         let state = NonDictationUIResolver.resolve(
             forceLoading: true,
             modelState: .ready,
-            downloadState: sampleDownloadState()
+            downloadState: sampleDownloadState(),
+            isLoadInProgress: false
         )
 
         XCTAssertEqual(state, defaultLoadingState())
@@ -68,7 +89,8 @@ final class NonDictationUIResolverTests: XCTestCase {
         let state = NonDictationUIResolver.resolve(
             forceLoading: false,
             modelState: .loading(status: "Loading text decoder weights...", progress: 0.92),
-            downloadState: nil
+            downloadState: nil,
+            isLoadInProgress: true
         )
 
         XCTAssertEqual(

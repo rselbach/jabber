@@ -886,7 +886,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         guard let state = notification.object as? ModelDownloadState else { return }
 
         updateDownloadTracking(with: state)
-        syncNonDictationUI(forceLoading: shouldForceLoading(for: state))
+
+        // When the selected model finishes downloading, ensure a load starts.
+        // This covers the migration-notice "Download" path, the notice's
+        // "Choose Another" path (downloading the already-selected model is a
+        // no-op via selectModel, so modelDidChange never fires), and the plain
+        // Speech page "Download" button. Without this the freshly-downloaded
+        // model sits unloaded until app restart.
+        let isSelectedModelFinished = state.phase == .finished
+            && state.modelId == selectedModelId
+
+        if isSelectedModelFinished, !isModelLoadInProgress {
+            startModelLoadingTask()
+        }
+
+        syncNonDictationUI(forceLoading: isSelectedModelFinished)
     }
 
     private func updateDownloadTracking(with state: ModelDownloadState) {
@@ -904,12 +918,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private var selectedModelId: String? {
         ModelManager.shared.selectedModelId()
-    }
-
-    private func shouldForceLoading(for state: ModelDownloadState) -> Bool {
-        state.phase == .finished
-            && isModelLoadInProgress
-            && state.modelId == selectedModelId
     }
 
     private func currentDownloadForUI() -> ModelDownloadState? {
@@ -937,7 +945,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         NonDictationUIResolver.resolve(
             forceLoading: forceLoading,
             modelState: modelState,
-            downloadState: currentDownloadForUI()
+            downloadState: currentDownloadForUI(),
+            isLoadInProgress: isModelLoadInProgress
         )
     }
 

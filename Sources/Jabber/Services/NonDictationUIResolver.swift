@@ -13,7 +13,8 @@ enum NonDictationUIResolver {
     static func resolve(
         forceLoading: Bool,
         modelState: TranscriptionService.State,
-        downloadState: ModelDownloadState?
+        downloadState: ModelDownloadState?,
+        isLoadInProgress: Bool
     ) -> NonDictationUIState {
         switch (forceLoading, modelState, downloadState) {
         case (_, .error, _):
@@ -25,7 +26,12 @@ enum NonDictationUIResolver {
         case (_, .ready, _):
             return .ready
         case (_, .notReady, _):
-            return .loadingModel(status: defaultLoadingStatus, progress: nil)
+            // Honest about the idle state: if nothing is actually loading the
+            // model, don't fake an indeterminate spinner. The "Loading model..."
+            // overlay is only honest when a load task is in flight.
+            return isLoadInProgress
+                ? loadingState(for: modelState)
+                : .error
         case (_, .loading, _):
             return loadingState(for: modelState)
         }

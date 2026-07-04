@@ -8,14 +8,16 @@ final class AppleSpeechProvider: TranscriptionProvider, @unchecked Sendable {
     let modelId: String
 
     private let logger = Logger(subsystem: "com.rselbach.jabber", category: "AppleSpeechProvider")
+    private let state = OSAllocatedUnfairLock(initialState: State())
 
-    private var analyzerFormat: AVAudioFormat?
-    private var converter: AVAudioConverter?
-    private var preparedLocale: Locale?
-    private var ready = false
+    private struct State {
+        var analyzerFormat: AVAudioFormat?
+        var preparedLocale: Locale?
+        var ready = false
+    }
 
     var isReady: Bool {
-        ready
+        state.withLock { $0.ready }
     }
 
     init(modelId: String) {
@@ -27,7 +29,7 @@ final class AppleSpeechProvider: TranscriptionProvider, @unchecked Sendable {
         let locale = Self.locale(for: languageCode)
 
         try await prepareForLocale(locale, progressHandler: progressHandler)
-        ready = true
+        state.withLock { $0.ready = true }
         progressHandler?(1.0, "Ready")
     }
 
@@ -77,15 +79,16 @@ final class AppleSpeechProvider: TranscriptionProvider, @unchecked Sendable {
             }
         }
 
-        analyzerFormat = await SpeechAnalyzer.bestAvailableAudioFormat(compatibleWith: [transcriber])
-        if let analyzerFormat {
-            converter = AVAudioConverter(from: Self.inputFormat, to: analyzerFormat)
+        let analyzerFormat = await SpeechAnalyzer.bestAvailableAudioFormat(compatibleWith: [transcriber])
+        state.withLock {
+            $0.analyzerFormat = analyzerFormat
+            $0.preparedLocale = locale
         }
-        preparedLocale = locale
     }
 
     func transcribe(samples: [Float], language: String?, vocabularyPrompt: String?) async throws -> String {
-        guard ready else { throw TranscriptionError.loadFailed }
+        let initialState = state.withLock { $0 }
+        guard initialState.ready else { throw TranscriptionError.loadFailed }
 
         // Prefer the freshly-passed language over the locale captured at load()
         // time. TranscriptionService only reloads when the model id changes, so
@@ -94,10 +97,11 @@ final class AppleSpeechProvider: TranscriptionProvider, @unchecked Sendable {
         // resolved locale differs from the one the converter was built for,
         // re-prepare (installing the new locale's asset if needed and
         // rebuilding the audio path) so transcription matches.
-        let locale = Self.resolveLocale(language: language, preparedLocale: preparedLocale)
-        if locale != preparedLocale {
+        let locale = Self.resolveLocale(language: language, preparedLocale: initialState.preparedLocale)
+        if locale != initialState.preparedLocale {
             try await prepareForLocale(locale, progressHandler: nil)
         }
+        let analyzerFormat = state.withLock { $0.analyzerFormat }
 
         let transcriber = SpeechTranscriber(
             locale: locale,
@@ -114,7 +118,8 @@ final class AppleSpeechProvider: TranscriptionProvider, @unchecked Sendable {
         }
 
         let convertedBuffer: AVAudioPCMBuffer
-        if let converter, let analyzerFormat {
+        if let analyzerFormat,
+           let converter = AVAudioConverter(from: Self.inputFormat, to: analyzerFormat) {
             convertedBuffer = try Self.convert(buffer, with: converter, to: analyzerFormat)
         } else {
             convertedBuffer = buffer
@@ -167,10 +172,11 @@ final class AppleSpeechProvider: TranscriptionProvider, @unchecked Sendable {
     }
 
     func unload() {
-        ready = false
-        preparedLocale = nil
-        converter = nil
-        analyzerFormat = nil
+        state.withLock {
+            $0.ready = false
+            $0.preparedLocale = nil
+            $0.analyzerFormat = nil
+        }
     }
 
     // MARK: - Locale Resolution

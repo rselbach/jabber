@@ -32,8 +32,29 @@ final class TranscriptionStateObserver: @unchecked Sendable {
     }
 }
 
+actor ProviderCallGate {
+    private var tail: Task<Void, Never>?
+
+    func run<T: Sendable>(_ operation: @escaping @Sendable () async throws -> T) async throws -> T {
+        let predecessor = tail
+        let operationTask = Task.detached { () throws -> T in
+            if let predecessor {
+                await predecessor.value
+            }
+            return try await operation()
+        }
+        tail = Task.detached {
+            // The caller awaiting operationTask receives the real result; the
+            // tail only keeps later provider calls ordered.
+            _ = await operationTask.result
+        }
+        return try await operationTask.value
+    }
+}
+
 actor TranscriptionService {
     private var provider: TranscriptionProvider?
+    private let providerCallGate = ProviderCallGate()
     private var isLoading = false
     private var loadedModelId: String?
     private var sessionModelIdOverride: String?
@@ -108,7 +129,9 @@ actor TranscriptionService {
 
     func unloadModel() async {
         loadGeneration &+= 1
-        provider?.unload()
+        if let provider {
+            await unloadProvider(provider)
+        }
         provider = nil
         loadedModelId = nil
         setReady(false)
@@ -136,7 +159,11 @@ actor TranscriptionService {
 
         let lang = Self.resolveLanguageForProvider(selectedLanguage)
         let prompt = vocabularyPrompt.isEmpty ? nil : vocabularyPrompt
-        return try await provider.transcribe(samples: samples, language: lang, vocabularyPrompt: prompt)
+        let text = try await providerCallGate.run {
+            try await provider.transcribe(samples: samples, language: lang, vocabularyPrompt: prompt)
+        }
+        try Task.checkCancellation()
+        return text
     }
 
     func transcribeStreaming(samples: [Float]) async throws -> String {
@@ -152,17 +179,29 @@ actor TranscriptionService {
 
         let lang = Self.resolveLanguageForProvider(selectedLanguage)
         let prompt = vocabularyPrompt.isEmpty ? nil : vocabularyPrompt
-        return try await provider.transcribeStreaming(samples: samples, language: lang, vocabularyPrompt: prompt)
+        let text = try await providerCallGate.run {
+            try await provider.transcribeStreaming(samples: samples, language: lang, vocabularyPrompt: prompt)
+        }
+        try Task.checkCancellation()
+        return text
     }
 
-    func resetStreamingTranscription() {
-        provider?.resetStreamingTranscription()
+    func resetStreamingTranscription() async {
+        guard let provider else { return }
+        do {
+            try await providerCallGate.run {
+                provider.resetStreamingTranscription()
+            }
+        } catch is CancellationError {
+        } catch {
+            logger.error("Streaming transcription reset failed: \(error.localizedDescription)")
+        }
     }
 
-    private func resolveLoadedModel(desiredModelId: String) -> Bool {
+    private func resolveLoadedModel(desiredModelId: String) async -> Bool {
         guard let provider, provider.isReady else { return false }
         guard loadedModelId == desiredModelId else {
-            resetLoadedModel()
+            await resetLoadedModel()
             return false
         }
 
@@ -171,8 +210,10 @@ actor TranscriptionService {
         return true
     }
 
-    private func resetLoadedModel() {
-        provider?.unload()
+    private func resetLoadedModel() async {
+        if let provider {
+            await unloadProvider(provider)
+        }
         provider = nil
         loadedModelId = nil
         setReady(false)
@@ -211,7 +252,7 @@ actor TranscriptionService {
                 continue
             }
 
-            if resolveLoadedModel(desiredModelId: desiredModelId) {
+            if await resolveLoadedModel(desiredModelId: desiredModelId) {
                 return
             }
 
@@ -271,15 +312,17 @@ actor TranscriptionService {
             // MLX buffers into memory; discarding the reference without
             // unloading leaks them until the next load replaces the provider.
             if Task.isCancelled {
-                newProvider.unload()
+                await unloadProvider(newProvider)
                 throw CancellationError()
             }
             guard loadGeneration == currentLoadGeneration else {
-                newProvider.unload()
+                await unloadProvider(newProvider)
                 throw CancellationError()
             }
 
-            provider?.unload()
+            if let provider {
+                await unloadProvider(provider)
+            }
             provider = newProvider
             loadedModelId = modelIdToLoad
             setReady(true)
@@ -311,6 +354,17 @@ actor TranscriptionService {
         let displayStatus = trimmedStatus.isEmpty ? "Loading model..." : trimmedStatus
         let boundedProgress = min(max(progress, 0), 1)
         notifyState(.loading(status: displayStatus, progress: boundedProgress))
+    }
+
+    private func unloadProvider(_ provider: TranscriptionProvider) async {
+        do {
+            try await providerCallGate.run {
+                provider.unload()
+            }
+        } catch is CancellationError {
+        } catch {
+            logger.error("Provider unload failed: \(error.localizedDescription)")
+        }
     }
 
     private func waitForModelLoad() async throws {

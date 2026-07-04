@@ -35,6 +35,7 @@ final class HotkeyManager: @unchecked Sendable {
     // stale in-flight callback cannot re-enter teardown. Held under `lock`.
     private var recentTapDisables: [Date] = []
     private var eventTapDead = false
+    private var pendingRegistrationFailure: OSStatus?
     // Pure decision logic for the gesture (debounce/cancel rules). Held under
     // `lock`; mutated only from the event tap callback and the debounce timer.
     private var gesture = ModifierOnlyGestureReducer()
@@ -42,7 +43,11 @@ final class HotkeyManager: @unchecked Sendable {
 
     var onKeyDown: (@MainActor () -> Void)?
     var onKeyUp: (@MainActor () -> Void)?
-    var onRegistrationFailure: (@MainActor (OSStatus) -> Void)?
+    var onRegistrationFailure: (@MainActor (OSStatus) -> Void)? {
+        didSet {
+            replayPendingRegistrationFailure()
+        }
+    }
 
     init() {
         installEventHandler()
@@ -137,11 +142,23 @@ final class HotkeyManager: @unchecked Sendable {
     }
 
     private func dispatchRegistrationFailure(_ status: OSStatus) {
-        if let onRegistrationFailure {
-            Task { @MainActor in
-                onRegistrationFailure(status)
-            }
+        guard let onRegistrationFailure else {
+            pendingRegistrationFailure = status
+            return
         }
+
+        pendingRegistrationFailure = nil
+        Task { @MainActor in
+            onRegistrationFailure(status)
+        }
+    }
+
+    private func replayPendingRegistrationFailure() {
+        guard onRegistrationFailure != nil, let status = pendingRegistrationFailure else {
+            return
+        }
+
+        dispatchRegistrationFailure(status)
     }
 
     private func isDeinit() -> Bool {

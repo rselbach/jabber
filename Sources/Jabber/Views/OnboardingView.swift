@@ -632,7 +632,9 @@ struct OnboardingView: View {
         } else {
             Button("Download") {
                 coordinator.selectModel(model.id)
-                _ = modelManager.startDownload(model.id)
+                if !modelManager.startDownload(model.id) {
+                    modelManager.refreshModels()
+                }
             }
             .buttonStyle(.borderedProminent)
         }

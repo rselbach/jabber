@@ -147,7 +147,9 @@ actor DictationHistoryStore: DictationHistoryProtocol {
     }
 
     nonisolated static var defaultDirectoryURL: URL {
-        let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+        let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first
+            ?? URL(fileURLWithPath: NSHomeDirectory(), isDirectory: true)
+            .appendingPathComponent("Library/Application Support", isDirectory: true)
         return appSupport
             .appendingPathComponent("Jabber", isDirectory: true)
             .appendingPathComponent("DictationHistory", isDirectory: true)

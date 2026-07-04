@@ -293,6 +293,16 @@ final class ModelManager {
             // so a re-download picks up where it left off — do NOT clean up.
             throw CancellationError()
         } catch {
+            if Task.isCancelled {
+                postDownloadState(
+                    modelId: modelId,
+                    modelName: modelName,
+                    progress: currentDownloadProgress(for: modelId),
+                    phase: .failed,
+                    isCancelled: true
+                )
+                throw CancellationError()
+            }
             postDownloadState(
                 modelId: modelId,
                 modelName: modelName,
@@ -497,6 +507,8 @@ final class ModelManager {
                 }
             }
         )
+
+        try Task.checkCancellation()
 
         let validation = ModelInstallationValidator.validate(folder: downloadFolder, for: def.family)
         if validation.isComplete {

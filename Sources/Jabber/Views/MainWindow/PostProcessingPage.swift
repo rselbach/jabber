@@ -70,9 +70,6 @@ struct PostProcessingPage: View {
             // the main window doesn't end up stranded behind other apps.
             NSApp.activate(ignoringOtherApps: false)
         }
-        .onDisappear {
-            saveOpenRouterAPIKey()
-        }
         // The main window is retained when closed, so onDisappear is not
         // guaranteed to fire; persist the key on window close as well.
         // Filter to the main window only — willCloseNotification fires for
@@ -82,6 +79,15 @@ struct PostProcessingPage: View {
         .onReceive(NotificationCenter.default.publisher(for: NSWindow.willCloseNotification)) { notification in
             guard let window = notification.object as? NSWindow,
                   window.identifier == NSUserInterfaceItemIdentifier("com.rselbach.jabber.main") else { return }
+            saveOpenRouterAPIKey()
+        }
+        // Quitting (Cmd-Q) bypasses both onDisappear and
+        // willCloseNotification for still-open windows. Flush on app
+        // termination so a pasted key isn't lost.
+        .onReceive(NotificationCenter.default.publisher(for: NSApplication.willTerminateNotification)) { _ in
+            saveOpenRouterAPIKey()
+        }
+        .onDisappear {
             saveOpenRouterAPIKey()
         }
     }

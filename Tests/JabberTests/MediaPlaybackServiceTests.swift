@@ -182,6 +182,20 @@ final class MediaPlaybackServiceTests: XCTestCase {
         XCTAssertLessThan(elapsed, 5.0)
     }
 
+    func testRunProcessKillsChildThatIgnoresTermination() {
+        let start = Date()
+        let result = MediaRemoteClient.runProcess(
+            executableURL: URL(fileURLWithPath: "/usr/bin/perl"),
+            arguments: ["-e", "local $SIG{TERM} = sub {}; sleep 30"],
+            timeout: .milliseconds(200)
+        )
+        let elapsed = Date().timeIntervalSince(start)
+
+        XCTAssertEqual(result.terminationStatus, -1)
+        XCTAssertTrue(result.errorOutput.contains("timed out"))
+        XCTAssertLessThan(elapsed, 5.0)
+    }
+
     private func makeService(isEnabled: Bool = true) -> MediaPlaybackService {
         MediaPlaybackService(
             client: client,

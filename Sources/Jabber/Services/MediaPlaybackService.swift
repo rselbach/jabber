@@ -1,4 +1,5 @@
 import AppKit
+import Darwin
 import Foundation
 import MediaRemoteAdapter
 import os
@@ -293,7 +294,8 @@ final class MediaRemoteClient: MediaRemoteControlling {
     /// `waitUntilExit` deadlocks: the child blocks on write, the parent blocks
     /// in `waitUntilExit`, and the serial `processQueue` (every later
     /// play/pause/isPlaying) hangs behind it with a zombie perl. Enforces
-    /// `timeout`: a stuck child is SIGTERM'd so the queue can't hang forever.
+    /// `timeout`: a stuck child gets SIGTERM, then SIGKILL if it refuses to
+    /// exit, so the queue can't hang forever.
     nonisolated static func runProcess(
         executableURL: URL,
         arguments: [String],
@@ -502,8 +504,10 @@ private final class PipeReader: @unchecked Sendable {
 
 /// Coordinates the hard timeout for `runProcess`: the waiting thread marks the
 /// process finished after `waitUntilExit` returns, the timeout thread SIGTERMs
-/// a still-running child. The lock decides who wins.
+/// then SIGKILLs a still-running child. The lock decides who wins.
 private final class TimeoutGuard: @unchecked Sendable {
+    private static let terminationGracePeriod: DispatchTimeInterval = .milliseconds(500)
+
     private let lock = NSLock()
     private var finished = false
     private var killedByTimeout = false
@@ -523,11 +527,24 @@ private final class TimeoutGuard: @unchecked Sendable {
     }
 
     /// Called from the timeout work item. SIGTERMs the child only if it is still
-    /// running and no one has marked it finished yet.
+    /// running and no one has marked it finished yet, then escalates to SIGKILL
+    /// after a short grace period if the process ignores SIGTERM.
     func fireTimeout() {
+        let shouldTerminate = lock.withLock {
+            guard !finished else { return false }
+            killedByTimeout = true
+            return true
+        }
+        guard shouldTerminate, process.isRunning else { return }
+        process.terminate()
+        DispatchQueue.global().asyncAfter(deadline: .now() + Self.terminationGracePeriod) { [weak self] in
+            self?.forceKillIfStillRunning()
+        }
+    }
+
+    private func forceKillIfStillRunning() {
         let shouldKill = lock.withLock { !finished }
         guard shouldKill, process.isRunning else { return }
-        lock.withLock { killedByTimeout = true }
-        process.terminate()
+        kill(process.processIdentifier, SIGKILL)
     }
 }

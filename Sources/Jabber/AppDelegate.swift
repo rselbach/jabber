@@ -305,6 +305,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     @objc private func openSettings() {
         showMainWindow(initialSection: .general)
+        // `showMainWindow` honors `initialSection` only when creating the
+        // window; when it is already open the selection is driven via this
+        // notification so the Settings item always lands on General.
+        NotificationCenter.default.post(
+            name: Constants.Notifications.mainWindowSectionDidRequest,
+            object: MainWindowView.Section.general
+        )
     }
 
     @objc private func openVocabulary() {

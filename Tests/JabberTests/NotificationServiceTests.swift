@@ -24,4 +24,11 @@ final class NotificationServiceTests: XCTestCase {
             )
         }
     }
+
+    func testForegroundPresentationOptionsShowBannerAndSound() {
+        let options = NotificationService.foregroundPresentationOptions
+
+        XCTAssertTrue(options.contains(.banner))
+        XCTAssertTrue(options.contains(.sound))
+    }
 }

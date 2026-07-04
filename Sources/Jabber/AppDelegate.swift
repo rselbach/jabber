@@ -63,6 +63,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // `@AppStorage` reads never observe a pre-migration value and the
         // SettingsStore getters can stay pure (no writes during view updates).
         TypedSettings.migrateStoredValues()
+        _ = NotificationService.shared
         setupMenuBar()
         setupHotkey()
         setupDictationCoordinator()

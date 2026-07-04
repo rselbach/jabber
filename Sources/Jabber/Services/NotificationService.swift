@@ -3,23 +3,30 @@ import AppKit
 import os
 
 @MainActor
-final class NotificationService {
+final class NotificationService: NSObject {
     static let shared = NotificationService()
+    nonisolated static let foregroundPresentationOptions: UNNotificationPresentationOptions = [.banner, .sound]
 
     private let logger = Logger(subsystem: "com.rselbach.jabber", category: "NotificationService")
     private let notificationCenter: UNUserNotificationCenter?
     private let isValidBundle: Bool
     private var isAuthorized = false
 
-    private init() {
+    private override init() {
         isValidBundle = Bundle.main.bundleIdentifier != nil
 
         if isValidBundle {
-            // Initialize notification center immediately
             notificationCenter = UNUserNotificationCenter.current()
-            setupNotifications()
         } else {
             notificationCenter = nil
+        }
+
+        super.init()
+
+        if isValidBundle {
+            notificationCenter?.delegate = self
+            setupNotifications()
+        } else {
             logger.info("Running without proper bundle - notifications will use alerts")
         }
     }
@@ -162,5 +169,14 @@ final class NotificationService {
         }
 
         alert.runModal()
+    }
+}
+
+extension NotificationService: UNUserNotificationCenterDelegate {
+    nonisolated func userNotificationCenter(
+        _ center: UNUserNotificationCenter,
+        willPresent notification: UNNotification
+    ) async -> UNNotificationPresentationOptions {
+        Self.foregroundPresentationOptions
     }
 }

@@ -244,8 +244,18 @@ actor TranscriptionService {
                 }
             }
 
-            try Task.checkCancellation()
-            guard loadGeneration == currentLoadGeneration else { throw CancellationError() }
+            // Both bail-out paths after a successful load must release the
+            // freshly-loaded weights. `newProvider.load(from:)` brought multi-GB
+            // MLX buffers into memory; discarding the reference without
+            // unloading leaks them until the next load replaces the provider.
+            if Task.isCancelled {
+                newProvider.unload()
+                throw CancellationError()
+            }
+            guard loadGeneration == currentLoadGeneration else {
+                newProvider.unload()
+                throw CancellationError()
+            }
 
             provider = newProvider
             loadedModelId = modelIdToLoad

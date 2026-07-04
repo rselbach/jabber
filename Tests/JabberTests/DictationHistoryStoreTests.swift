@@ -96,6 +96,71 @@ final class DictationHistoryStoreTests: XCTestCase {
         ))
     }
 
+    func testRetentionRemovesOldestValidEntriesByByteCount() async throws {
+        let store = makeStore(maxByteCount: 5_000)
+
+        let oldEntry = try await store.save(session(
+            samples: Array(repeating: 0.25, count: 10_000),
+            transcript: "Troy Barnes",
+            timestamp: Date(timeIntervalSince1970: 100)
+        ))
+        _ = try await store.save(session(
+            samples: Array(repeating: 0.25, count: 100),
+            transcript: "Abed Nadir",
+            timestamp: Date(timeIntervalSince1970: 200)
+        ))
+        _ = try await store.save(session(
+            samples: Array(repeating: 0.25, count: 100),
+            transcript: "Annie Edison",
+            timestamp: Date(timeIntervalSince1970: 300)
+        ))
+
+        let entries = await store.entries()
+
+        XCTAssertEqual(entries.map(\.transcript), ["Annie Edison", "Abed Nadir"])
+        XCTAssertFalse(FileManager.default.fileExists(
+            atPath: historyDirectoryURL.appendingPathComponent(oldEntry.directoryName).path
+        ))
+    }
+
+    func testSaveKeepsReturnedEntryWhenSingleSessionExceedsByteCount() async throws {
+        let store = makeStore(maxByteCount: 1)
+
+        let entry = try await store.save(session(
+            samples: Array(repeating: 0.25, count: 100),
+            transcript: "Greendale Human Being",
+            timestamp: Date(timeIntervalSince1970: 100)
+        ))
+
+        let entries = await store.entries()
+
+        XCTAssertEqual(entries.map(\.id), [entry.id])
+        XCTAssertTrue(FileManager.default.fileExists(atPath: store.audioURL(for: entry).path))
+    }
+
+    func testOversizedSessionCanBeEvictedByNextSave() async throws {
+        let store = makeStore(maxByteCount: 1_200)
+
+        let oversizedEntry = try await store.save(session(
+            samples: Array(repeating: 0.25, count: 10_000),
+            transcript: "Pierce Hawthorne",
+            timestamp: Date(timeIntervalSince1970: 100)
+        ))
+        let smallEntry = try await store.save(session(
+            samples: Array(repeating: 0.25, count: 10),
+            transcript: "Shirley Bennett",
+            timestamp: Date(timeIntervalSince1970: 200)
+        ))
+
+        let entries = await store.entries()
+
+        XCTAssertEqual(entries.map(\.id), [smallEntry.id])
+        XCTAssertFalse(FileManager.default.fileExists(
+            atPath: historyDirectoryURL.appendingPathComponent(oversizedEntry.directoryName).path
+        ))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: store.audioURL(for: smallEntry).path))
+    }
+
     func testDecodesLegacyEntryMissingPostProcessingFields() throws {
         // Simulates a metadata.json written before post-processing existed:
         // no rawTranscript / wasPostProcessed / postProcessingErrorDescription keys.
@@ -337,9 +402,13 @@ final class DictationHistoryStoreTests: XCTestCase {
         )
     }
 
-    private func session(transcript: String, timestamp: Date) -> DictationHistorySession {
+    private func session(
+        samples: [Float] = Array(repeating: 0.25, count: 100),
+        transcript: String,
+        timestamp: Date
+    ) -> DictationHistorySession {
         DictationHistorySession(
-            samples: Array(repeating: 0.25, count: 100),
+            samples: samples,
             transcript: transcript,
             modelID: AppMode.qwen3ModelId,
             language: "auto",

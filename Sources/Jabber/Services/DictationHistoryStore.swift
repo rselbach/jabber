@@ -216,7 +216,7 @@ actor DictationHistoryStore: DictationHistoryProtocol {
             throw error
         }
 
-        try enforceRetentionLimit()
+        try enforceRetentionLimit(protecting: entry.id)
         return entry
     }
 
@@ -277,14 +277,15 @@ actor DictationHistoryStore: DictationHistoryProtocol {
         }
     }
 
-    private func enforceRetentionLimit() throws {
+    private func enforceRetentionLimit(protecting protectedEntryID: UUID? = nil) throws {
         try pruneOrphanEntryDirectories()
 
         var entries = try loadEntries().sorted { $0.timestamp > $1.timestamp }
         var totalByteCount = try totalHistoryByteCount()
 
         while entries.count > maxEntryCount || totalByteCount > maxByteCount {
-            guard let entryToRemove = entries.popLast() else { break }
+            guard let removalIndex = entries.lastIndex(where: { $0.id != protectedEntryID }) else { break }
+            let entryToRemove = entries.remove(at: removalIndex)
             let entryURL = directoryURL.appendingPathComponent(entryToRemove.directoryName, isDirectory: true)
             let removedByteCount = try byteCount(at: entryURL)
             try fileManager.removeItem(at: entryURL)

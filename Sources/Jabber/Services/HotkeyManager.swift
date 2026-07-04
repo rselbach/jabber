@@ -463,18 +463,29 @@ final class HotkeyManager: @unchecked Sendable {
         dispatchGesture(action)
     }
 
+    /// Hop to the main actor via the main dispatch queue, which is FIFO.
+    ///
+    /// Replaces the ad-hoc `Task { @MainActor in ... }` hops used for gesture
+    /// delivery. Separate unstructured Tasks on the same actor have no formal
+    /// ordering guarantee, so a fast press-release could deliver onKeyUp
+    /// before onKeyDown — leaving the dictation coordinator with a stuck
+    /// "recording" state or a no-op. The main dispatch queue is serial, so
+    /// blocks submitted in order run in order; `assumeIsolated` runs the
+    /// `@MainActor` closure synchronously on the main actor without re-queue.
+    private static func deliverToMain(_ body: @escaping @Sendable @MainActor () -> Void) {
+        DispatchQueue.main.async {
+            MainActor.assumeIsolated { body() }
+        }
+    }
+
     private func dispatchGesture(_ action: ModifierOnlyGestureReducer.Action) {
         switch action {
         case .fireDown:
             logger.info("Modifier-only gesture fired: onKeyDown")
-            Task { @MainActor in
-                self.onKeyDown?()
-            }
+            Self.deliverToMain { self.onKeyDown?() }
         case .fireUp:
             logger.info("Modifier-only gesture fired: onKeyUp")
-            Task { @MainActor in
-                self.onKeyUp?()
-            }
+            Self.deliverToMain { self.onKeyUp?() }
         case .scheduleStart, .cancelStart, .none:
             break
         }
@@ -506,13 +517,9 @@ final class HotkeyManager: @unchecked Sendable {
                 let kind = GetEventKind(event)
 
                 if kind == UInt32(kEventHotKeyPressed) {
-                    Task { @MainActor in
-                        manager.onKeyDown?()
-                    }
+                    HotkeyManager.deliverToMain { manager.onKeyDown?() }
                 } else if kind == UInt32(kEventHotKeyReleased) {
-                    Task { @MainActor in
-                        manager.onKeyUp?()
-                    }
+                    HotkeyManager.deliverToMain { manager.onKeyUp?() }
                 }
 
                 return noErr

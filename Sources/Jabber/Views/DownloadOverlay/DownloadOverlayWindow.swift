@@ -44,8 +44,7 @@ final class DownloadOverlayWindow: OverlayWindowController {
     /// Centered overlay frame for the current screen. Overridable so tests can
     /// inject a deterministic frame (NSScreen cannot be fabricated).
     func frameForCurrentScreen() -> NSRect? {
-        guard let screen = NSScreen.main ?? NSScreen.screens.first else { return nil }
-        let screenFrame = screen.visibleFrame
+        guard let screenFrame = OverlayScreenResolver.currentVisibleFrame() else { return nil }
 
         let windowWidth: CGFloat = 320
         let windowHeight: CGFloat = 80

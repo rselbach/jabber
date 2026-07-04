@@ -167,8 +167,7 @@ class OverlayWindow: OverlayWindowController {
     /// Bottom-center overlay frame for the current screen. Overridable so tests
     /// can inject a deterministic frame (NSScreen cannot be fabricated).
     func frameForCurrentScreen() -> NSRect? {
-        guard let screen = NSScreen.main ?? NSScreen.screens.first else { return nil }
-        let screenFrame = screen.visibleFrame
+        guard let screenFrame = OverlayScreenResolver.currentVisibleFrame() else { return nil }
 
         let windowWidth: CGFloat = 400
         let windowHeight: CGFloat = 104
@@ -198,6 +197,25 @@ enum OverlayPanelFactory {
         panel.hasShadow = true
         panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
         return panel
+    }
+}
+
+enum OverlayScreenResolver {
+    static func screenFrame(containing point: NSPoint, screenFrames: [NSRect]) -> Int? {
+        screenFrames.firstIndex { $0.contains(point) }
+    }
+
+    @MainActor
+    static func currentVisibleFrame(
+        mouseLocation: NSPoint = NSEvent.mouseLocation,
+        screens: [NSScreen] = NSScreen.screens
+    ) -> NSRect? {
+        let visibleFrames = screens.map(\.visibleFrame)
+        if let index = screenFrame(containing: mouseLocation, screenFrames: visibleFrames) {
+            return visibleFrames[index]
+        }
+
+        return NSScreen.main?.visibleFrame ?? visibleFrames.first
     }
 }
 

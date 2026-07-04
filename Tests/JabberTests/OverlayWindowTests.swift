@@ -67,6 +67,43 @@ final class OverlayWindowTests: XCTestCase {
             "show() must reposition the cached panel against the current screen"
         )
     }
+
+    func testScreenFrameSelectsFrameContainingPoint() {
+        let screenFrames = [
+            NSRect(x: 0, y: 0, width: 1920, height: 1080),
+            NSRect(x: 1920, y: 120, width: 2560, height: 1440),
+            NSRect(x: -1280, y: 0, width: 1280, height: 720),
+        ]
+
+        XCTAssertEqual(
+            OverlayScreenResolver.screenFrame(
+                containing: NSPoint(x: 2200, y: 500),
+                screenFrames: screenFrames
+            ),
+            1
+        )
+        XCTAssertEqual(
+            OverlayScreenResolver.screenFrame(
+                containing: NSPoint(x: -100, y: 300),
+                screenFrames: screenFrames
+            ),
+            2
+        )
+    }
+
+    func testScreenFrameFallsBackWhenPointIsOutsideAllFrames() {
+        let screenFrames = [
+            NSRect(x: 0, y: 0, width: 1920, height: 1080),
+            NSRect(x: 1920, y: 0, width: 1920, height: 1080),
+        ]
+
+        XCTAssertNil(
+            OverlayScreenResolver.screenFrame(
+                containing: NSPoint(x: 1919, y: 1200),
+                screenFrames: screenFrames
+            )
+        )
+    }
 }
 
 /// Minimal OverlayWindow subclass whose createWindow() doesn't depend on

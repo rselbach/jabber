@@ -8,6 +8,14 @@ struct PostProcessingPage: View {
 
     @State private var openRouterApiKey: String = ""
     @State private var keychainError: String?
+    /// True only when `loadOpenRouterAPIKey` read the keychain successfully.
+    /// When false (read failed, e.g. user cancelled the auth prompt), the
+    /// empty field must not be persisted back as a deletion on the next
+    /// `onDisappear` — that would clobber the real stored key.
+    @State private var didLoadKeySuccessfully = false
+    /// Last value successfully loaded from the keychain. Used to skip
+    /// gratuitous `SecItemUpdate` calls when the field is unchanged.
+    @State private var loadedApiKey: String = ""
 
     var body: some View {
         Form {
@@ -86,10 +94,18 @@ struct PostProcessingPage: View {
     /// Keychain errors are surfaced as inline red text, not a modal alert.
     private func loadOpenRouterAPIKey() {
         do {
-            openRouterApiKey = try OpenRouterKeychain.readKey() ?? ""
+            let key = try OpenRouterKeychain.readKey() ?? ""
+            openRouterApiKey = key
+            loadedApiKey = key
+            didLoadKeySuccessfully = true
             keychainError = nil
         } catch {
+            // Don't treat the empty field as a deletion: a transient read
+            // failure (e.g. user cancelled the auth prompt) must not wipe the
+            // real stored key on the next onDisappear save.
             openRouterApiKey = ""
+            loadedApiKey = ""
+            didLoadKeySuccessfully = false
             keychainError = error.localizedDescription
         }
     }
@@ -97,6 +113,12 @@ struct PostProcessingPage: View {
     /// Persists the SecureField's API key to the Keychain. An empty/whitespace
     /// value deletes the stored key. Errors are surfaced as inline red text.
     private func saveOpenRouterAPIKey() {
+        guard APIKeyPersistenceDecision.shouldPersist(
+            didLoadSuccessfully: didLoadKeySuccessfully,
+            loadedValue: loadedApiKey,
+            currentValue: openRouterApiKey
+        ) else { return }
+
         let trimmed = openRouterApiKey.trimmingCharacters(in: .whitespacesAndNewlines)
         do {
             if trimmed.isEmpty {
@@ -105,9 +127,35 @@ struct PostProcessingPage: View {
                 try OpenRouterKeychain.saveKey(trimmed)
             }
             openRouterApiKey = trimmed
+            loadedApiKey = trimmed
             keychainError = nil
         } catch {
             keychainError = error.localizedDescription
         }
+    }
+}
+
+/// Decides whether `PostProcessingPage.saveOpenRouterAPIKey` should write to
+/// the keychain. Guards against two failure modes that previously clobbered
+/// the user's real stored key:
+///
+/// - A transient keychain read failure (e.g. user cancelled the auth prompt)
+///   blanks the SecureField. Without the load-success check, the next
+///   `onDisappear` (every sidebar switch) would treat that blank as "delete
+///   stored key" and wipe it.
+/// - The field is unchanged since the last successful load. Skipping the
+///   write avoids a gratuitous `SecItemUpdate` on every sidebar switch.
+enum APIKeyPersistenceDecision {
+    static func shouldPersist(
+        didLoadSuccessfully: Bool,
+        loadedValue: String,
+        currentValue: String
+    ) -> Bool {
+        guard didLoadSuccessfully else { return false }
+        return normalized(currentValue) != normalized(loadedValue)
+    }
+
+    private static func normalized(_ value: String) -> String {
+        value.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 }

@@ -15,9 +15,14 @@ struct JabberApp: App {
         .commands {
             CommandGroup(replacing: .appSettings) {
                 Button("Settings…") {
+                    // Cmd-, lands on General, matching the status-menu
+                    // "Settings…" item (openSettings). The section-carrying
+                    // notification is observed by AppDelegate (which shows the
+                    // window) and MainWindowView (which sets the sidebar
+                    // selection when the window is already open).
                     NotificationCenter.default.post(
-                        name: Constants.Notifications.mainWindowDidRequest,
-                        object: nil
+                        name: Constants.Notifications.mainWindowSectionDidRequest,
+                        object: MainWindowView.Section.general
                     )
                 }
                 .keyboardShortcut(",", modifiers: .command)

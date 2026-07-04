@@ -149,8 +149,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         NotificationCenter.default.addObserver(
             self,
-            selector: #selector(handleMainWindowRequest),
-            name: Constants.Notifications.mainWindowDidRequest,
+            selector: #selector(handleMainWindowSectionRequest(_:)),
+            name: Constants.Notifications.mainWindowSectionDidRequest,
             object: nil
         )
     }
@@ -694,8 +694,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         startModelLoadingTask()
     }
 
-    @objc private func handleMainWindowRequest() {
-        showMainWindow()
+    @objc private func handleMainWindowSectionRequest(_ notification: Notification) {
+        let section = notification.object as? MainWindowView.Section ?? .gettingStarted
+        showMainWindow(initialSection: section)
     }
 
     // MARK: - Model Migration Notice

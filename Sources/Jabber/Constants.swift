@@ -20,14 +20,14 @@ enum Constants {
         /// Posted when the user asks to run onboarding from Settings
         static let onboardingDidRequest = Notification.Name("com.rselbach.jabber.onboardingDidRequest")
 
-        /// Posted when the user asks to open the main app window
-        static let mainWindowDidRequest = Notification.Name("com.rselbach.jabber.mainWindowDidRequest")
-
         /// Posted to deep-link the main window to a specific sidebar section.
-        /// `object` is the `MainWindowView.Section` to select. Used so a menu
-        /// item can land on a page even when the window is already open (the
-        /// window instance is retained across close/reopen, so its initial
-        /// selection is only honored at creation time).
+        /// `object` is the `MainWindowView.Section` to select. Observed by
+        /// AppDelegate (which shows the window) and MainWindowView (which sets
+        /// the sidebar selection when the window is already open). Used so a
+        /// menu item — Cmd-, (General), the status-menu Settings, Vocabulary —
+        /// can land on a page even when the window instance already exists (the
+        /// window is retained across close/reopen, so its initial selection is
+        /// only honored at creation time).
         static let mainWindowSectionDidRequest = Notification.Name("com.rselbach.jabber.mainWindowSectionDidRequest")
     }
 

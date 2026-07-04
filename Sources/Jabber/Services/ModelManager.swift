@@ -54,9 +54,9 @@ final class ModelManager {
     }
 
     private(set) var models: [Model] = []
-    /// The most recent real migration observed this launch, if any. Only
-    /// set when a migration actually rewrites the selected model id, so a
-    /// later no-op call cannot clear a launch-time migration signal.
+    /// The most recent selected-model migration observed this launch, if any.
+    /// The stored selection is left untouched until the user explicitly acts,
+    /// so a later no-op call must not clear the launch-time migration signal.
     private(set) var lastMigration: Migration?
     private var lastDownloadProgressReport: [String: CFAbsoluteTime] = [:]
     private var activeDownloads: [String: ActiveDownload] = [:]
@@ -115,14 +115,25 @@ final class ModelManager {
     }
 
     private func applyMigration(from: String, to: String, notify: Bool) -> Migration {
-        logger.info("Migrating selected model from '\(from)' to '\(to)'")
-        settings[.selectedModel] = to
+        let shouldPersist = !replacementNeedsDownload(to)
+        if shouldPersist {
+            logger.info("Migrating selected model from '\(from)' to available replacement '\(to)'")
+            settings[.selectedModel] = to
+        } else {
+            logger.info("Selected model '\(from)' maps to replacement '\(to)'")
+        }
         let migration = Migration(from: from, to: to)
         lastMigration = migration
         if notify {
             NotificationCenter.default.post(name: Constants.Notifications.modelDidChange, object: nil)
         }
         return migration
+    }
+
+    private func replacementNeedsDownload(_ modelId: String) -> Bool {
+        guard let def = AppMode.modelDefinition(for: modelId) else { return true }
+        guard !def.isBuiltIn else { return false }
+        return !installedModelIds().contains(modelId)
     }
 
     func refreshModels() {
@@ -149,6 +160,7 @@ final class ModelManager {
     func selectModel(_ modelId: String) -> Bool {
         guard downloadedModels.contains(where: { $0.id == modelId }) else { return false }
         guard settings[.selectedModel] != modelId else { return false }
+        settings.remove(.declinedModelMigrationNoticeKey)
         settings[.selectedModel] = modelId
         NotificationCenter.default.post(name: Constants.Notifications.modelDidChange, object: nil)
         return true
@@ -181,6 +193,8 @@ final class ModelManager {
             logger.warning("Attempted to start download for non-existent model: \(modelId)")
             return false
         }
+
+        settings.remove(.declinedModelMigrationNoticeKey)
 
         guard activeDownloads[modelId] == nil else { return false }
 

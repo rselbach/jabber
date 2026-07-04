@@ -72,6 +72,13 @@ final class ModelMigrationNoticeResolverTests: XCTestCase {
         XCTAssertEqual(notice?.noticeKey, "old->new")
     }
 
+    func testNoticeKeyBuildsStableMigrationKey() {
+        XCTAssertEqual(
+            ModelMigrationNoticeResolver.noticeKey(for: ModelManager.Migration(from: "medium", to: "qwen3")),
+            "medium->qwen3"
+        )
+    }
+
     func testEmptyShownKeyDoesNotMatchValidMigration() {
         let notice = ModelMigrationNoticeResolver.resolve(
             migration: ModelManager.Migration(from: "old", to: "new"),
@@ -80,5 +87,56 @@ final class ModelMigrationNoticeResolverTests: XCTestCase {
             lastShownKey: ""
         )
         XCTAssertNotNil(notice, "Empty last-shown key means never prompted; notice should fire")
+    }
+
+    func testFallbackPrefersDownloadedRecommendedModel() {
+        XCTAssertEqual(
+            ModelFallbackResolver.downloadedFallbackModelId(
+                recommendedModelId: "nemotron",
+                downloadedModelIds: ["apple-speech", "nemotron"]
+            ),
+            "nemotron"
+        )
+    }
+
+    func testFallbackUsesFirstDownloadedModelWhenRecommendedMissing() {
+        XCTAssertEqual(
+            ModelFallbackResolver.downloadedFallbackModelId(
+                recommendedModelId: "nemotron",
+                downloadedModelIds: ["apple-speech", "qwen3"]
+            ),
+            "apple-speech"
+        )
+    }
+
+    func testFallbackReturnsNilWithoutDownloadedModels() {
+        XCTAssertNil(ModelFallbackResolver.downloadedFallbackModelId(
+            recommendedModelId: "nemotron",
+            downloadedModelIds: []
+        ))
+    }
+
+    func testDeclinedDownloadMatchesCurrentMigrationKey() {
+        XCTAssertTrue(ModelMigrationDeclineResolver.isDownloadDeclined(
+            migration: ModelManager.Migration(from: "medium", to: "qwen3-1.7b-4bit"),
+            declinedNoticeKey: "medium->qwen3-1.7b-4bit",
+            newModelDownloaded: false
+        ))
+    }
+
+    func testDeclinedDownloadIgnoresDifferentMigrationKey() {
+        XCTAssertFalse(ModelMigrationDeclineResolver.isDownloadDeclined(
+            migration: ModelManager.Migration(from: "small", to: "qwen3-0.6b-4bit"),
+            declinedNoticeKey: "medium->qwen3-1.7b-4bit",
+            newModelDownloaded: false
+        ))
+    }
+
+    func testDeclinedDownloadStopsBlockingWhenReplacementDownloaded() {
+        XCTAssertFalse(ModelMigrationDeclineResolver.isDownloadDeclined(
+            migration: ModelManager.Migration(from: "medium", to: "qwen3-1.7b-4bit"),
+            declinedNoticeKey: "medium->qwen3-1.7b-4bit",
+            newModelDownloaded: true
+        ))
     }
 }

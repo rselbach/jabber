@@ -9,6 +9,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var onboardingCoordinator: OnboardingCoordinator?
     private var mainWindow: NSWindow?
     private var modelMigrationNoticeWindow: NSWindow?
+    private var presentedModelMigrationNotice: ModelMigrationNotice?
+    private var modelMigrationNoticeHandled = false
 
     private let hotkeyManager = HotkeyManager()
     private let audioCapture = AudioCaptureService()
@@ -86,14 +88,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // Onboarding owns model selection for new users; let it drive any
         // download via its own model-download step. Starting the load task
         // here would pull a multi-GB default model the user may not pick.
-        if !willShowOnboarding, pendingNotice == nil {
-            startModelLoadingTask()
+        if !willShowOnboarding {
+            if let pendingNotice {
+                scheduleModelMigrationNoticePresentation(pendingNotice)
+            } else if !startDeclinedModelMigrationFallbackIfNeeded() {
+                startModelLoadingTask()
+            }
         }
         scheduleUIReadyFallbackIfNeeded()
         scheduleFirstRunSetupPrompt()
-        if let pendingNotice {
-            scheduleModelMigrationNoticePresentation(pendingNotice)
-        }
     }
 
     func applicationWillTerminate(_ notification: Notification) {
@@ -177,10 +180,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     @objc private func handleModelChange() {
+        TypedSettings.remove(.declinedModelMigrationNoticeKey)
         modelLoadTask?.cancel()
         dictationCoordinator.cancel()
         modelLoadTask = Task { [weak self] in
             guard let self else { return }
+            await transcriptionService.setSessionModelOverride(nil)
             await transcriptionService.unloadModel()
             if Task.isCancelled { return }
             await loadModel()
@@ -539,11 +544,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             let now = CFAbsoluteTimeGetCurrent()
             if now - lastModelUnavailableNotice > 1.5 {
                 lastModelUnavailableNotice = now
+                let declinedDownload = hasDeclinedModelMigrationDownloadPending()
                 NotificationService.shared.showWarning(
-                    title: "Model Not Ready",
-                    message: "Jabber is still preparing the speech model. Try again in a moment."
+                    title: declinedDownload ? "Model Not Downloaded" : "Model Not Ready",
+                    message: declinedDownload
+                        ? "Your selected speech model isn't downloaded. Open Speech settings to download it or choose another model."
+                        : "Jabber is still preparing the speech model. Try again in a moment."
                 )
-                showSetupGuidanceIfNeeded()
+                showSetupGuidanceIfNeeded(preferSpeechSettings: declinedDownload)
             }
             return
         }
@@ -738,6 +746,38 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         )
     }
 
+    private func hasDeclinedModelMigrationDownloadPending() -> Bool {
+        guard let migration = ModelManager.shared.lastMigration else { return false }
+        return ModelMigrationDeclineResolver.isDownloadDeclined(
+            migration: migration,
+            declinedNoticeKey: TypedSettings[.declinedModelMigrationNoticeKey],
+            newModelDownloaded: ModelManager.shared.downloadedModels.contains { $0.id == migration.to }
+        )
+    }
+
+    private func startDeclinedModelMigrationFallbackIfNeeded() -> Bool {
+        guard hasDeclinedModelMigrationDownloadPending() else { return false }
+
+        guard let fallbackModelId = modelMigrationFallbackModelId() else {
+            showSetupGuidanceIfNeeded(preferSpeechSettings: true)
+            return true
+        }
+
+        modelLoadTask = Task { [weak self] in
+            guard let self else { return }
+            await transcriptionService.setSessionModelOverride(fallbackModelId)
+            await loadModel()
+        }
+        return true
+    }
+
+    private func modelMigrationFallbackModelId() -> String? {
+        ModelFallbackResolver.downloadedFallbackModelId(
+            recommendedModelId: LanguageModelCatalog.recommendedModelId(for: TypedSettings[.selectedLanguage]),
+            downloadedModelIds: ModelManager.shared.downloadedModels.map(\.id)
+        )
+    }
+
     private func scheduleModelMigrationNoticePresentation(_ notice: ModelMigrationNotice) {
         modelMigrationNoticeTask = Task { [weak self] in
             do {
@@ -765,11 +805,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             newModelName: newModelName,
             onDownload: { [weak self] in
                 TypedSettings[.lastModelMigrationNoticeKey] = notice.noticeKey
+                TypedSettings.remove(.declinedModelMigrationNoticeKey)
+                TypedSettings[.selectedModel] = notice.migration.to
+                self?.modelMigrationNoticeHandled = true
                 ModelManager.shared.startDownload(notice.migration.to)
                 self?.closeModelMigrationNotice()
             },
             onChooseAnother: { [weak self] in
                 TypedSettings[.lastModelMigrationNoticeKey] = notice.noticeKey
+                TypedSettings.remove(.declinedModelMigrationNoticeKey)
+                self?.modelMigrationNoticeHandled = true
                 // Open the main window first so the activation policy stays
                 // regular; closing the notice then drops back only if the
                 // main window is also closed.
@@ -777,8 +822,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 self?.closeModelMigrationNotice()
             },
             onNotNow: { [weak self] in
-                TypedSettings[.lastModelMigrationNoticeKey] = notice.noticeKey
-                self?.closeModelMigrationNotice()
+                self?.declineModelMigrationNotice(notice, closeWindow: true)
             }
         )
 
@@ -794,9 +838,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         window.center()
 
         modelMigrationNoticeWindow = window
+        presentedModelMigrationNotice = notice
+        modelMigrationNoticeHandled = false
 
         NSApp.activate(ignoringOtherApps: true)
         window.makeKeyAndOrderFront(nil)
+    }
+
+    private func declineModelMigrationNotice(_ notice: ModelMigrationNotice, closeWindow: Bool) {
+        TypedSettings[.lastModelMigrationNoticeKey] = notice.noticeKey
+        TypedSettings[.declinedModelMigrationNoticeKey] = notice.noticeKey
+        modelMigrationNoticeHandled = true
+        startDeclinedModelMigrationFallbackIfNeeded()
+        if closeWindow {
+            closeModelMigrationNotice()
+        }
     }
 
     private func closeModelMigrationNotice() {
@@ -870,7 +926,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         )
     }
 
-    private func showSetupGuidanceIfNeeded() {
+    private func showSetupGuidanceIfNeeded(preferSpeechSettings: Bool = false) {
+        if preferSpeechSettings {
+            showMainWindow(initialSection: .speech)
+            return
+        }
+
         if shouldShowAutomaticOnboarding() {
             showOnboardingWindow(userInitiated: false)
             return
@@ -1037,6 +1098,12 @@ extension AppDelegate: NSWindowDelegate {
             onboardingCoordinator = nil
             onboardingWindow = nil
         } else if window === modelMigrationNoticeWindow {
+            if !modelMigrationNoticeHandled,
+               let notice = presentedModelMigrationNotice {
+                declineModelMigrationNotice(notice, closeWindow: false)
+            }
+            presentedModelMigrationNotice = nil
+            modelMigrationNoticeHandled = false
             modelMigrationNoticeWindow = nil
         } else if window !== mainWindow {
             return

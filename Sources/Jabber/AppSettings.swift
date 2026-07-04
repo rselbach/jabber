@@ -17,4 +17,5 @@ enum AppSettingKey {
     static let didShowFirstRunSetup = "didShowFirstRunSetup"
     static let onboardingCompleted = "onboardingCompleted"
     static let lastModelMigrationNoticeKey = "lastModelMigrationNoticeKey"
+    static let declinedModelMigrationNoticeKey = "declinedModelMigrationNoticeKey"
 }

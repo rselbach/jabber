@@ -36,6 +36,7 @@ actor TranscriptionService {
     private var provider: TranscriptionProvider?
     private var isLoading = false
     private var loadedModelId: String?
+    private var sessionModelIdOverride: String?
 
     private var loadGeneration: UInt64 = 0
 
@@ -97,7 +98,7 @@ actor TranscriptionService {
         await AppReadinessGate.shared.waitForUIReady()
         try Task.checkCancellation()
 
-        let desiredModelId = await ModelManager.shared.selectedModelId()
+        let desiredModelId = await desiredModelId()
         if loadedModelId == desiredModelId,
            provider?.isReady == true {
             return
@@ -112,6 +113,10 @@ actor TranscriptionService {
         loadedModelId = nil
         setReady(false)
         notifyState(.notReady)
+    }
+
+    func setSessionModelOverride(_ modelId: String?) {
+        sessionModelIdOverride = modelId
     }
 
     func currentModelId() async -> String? {
@@ -200,7 +205,7 @@ actor TranscriptionService {
                 try await waitForModelLoad()
             }
 
-            desiredModelId = await ModelManager.shared.selectedModelId()
+            desiredModelId = await self.desiredModelId()
 
             if isLoading {
                 continue
@@ -324,6 +329,13 @@ actor TranscriptionService {
 
             backoffDelay = min(backoffDelay * 2, maxBackoff)
         }
+    }
+
+    private func desiredModelId() async -> String {
+        if let sessionModelIdOverride {
+            return sessionModelIdOverride
+        }
+        return await ModelManager.shared.selectedModelId()
     }
 
     // MARK: - Pure resolution helpers (testable without the actor)

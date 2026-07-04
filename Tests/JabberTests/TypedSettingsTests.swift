@@ -37,6 +37,8 @@ final class TypedSettingsTests: XCTestCase {
         XCTAssertEqual(settings.replacementEntries, [], "Default replacement entries array should be empty")
         XCTAssertEqual(settings[.postProcessingProviderKind], PostProcessingProviderKind.defaultValue.rawValue)
         XCTAssertEqual(settings[.openRouterModel], OpenRouterModelCatalog.defaultModelId)
+        XCTAssertEqual(settings[.lastModelMigrationNoticeKey], "")
+        XCTAssertEqual(settings[.declinedModelMigrationNoticeKey], "")
     }
 
     func testPostProcessingProviderKindDefaultsAndPersistence() {

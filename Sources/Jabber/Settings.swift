@@ -18,6 +18,7 @@ enum TypedSetting<T>: Sendable {
     case postProcessingProviderKind
     case openRouterModel
     case lastModelMigrationNoticeKey
+    case declinedModelMigrationNoticeKey
 
     /// The UserDefaults key for this setting
     var key: String {
@@ -31,6 +32,7 @@ enum TypedSetting<T>: Sendable {
         case .postProcessingProviderKind: return AppSettingKey.postProcessingProviderKind
         case .openRouterModel: return AppSettingKey.openRouterModel
         case .lastModelMigrationNoticeKey: return AppSettingKey.lastModelMigrationNoticeKey
+        case .declinedModelMigrationNoticeKey: return AppSettingKey.declinedModelMigrationNoticeKey
         }
     }
 }
@@ -113,6 +115,8 @@ extension TypedSetting where T == String {
             return OpenRouterModelCatalog.defaultModelId
         case .lastModelMigrationNoticeKey:
             return ""
+        case .declinedModelMigrationNoticeKey:
+            return ""
         }
     }
 }
@@ -155,7 +159,8 @@ struct SettingsStore: Sendable {
             return PostProcessingProviderKind.resolve(rawValue: rawValue).rawValue
         case .openRouterModel:
             return OpenRouterModelCatalog.resolveModelId(rawValue)
-        case .selectedModel, .selectedLanguage, .vocabularyPrompt, .replacementEntries, .lastModelMigrationNoticeKey:
+        case .selectedModel, .selectedLanguage, .vocabularyPrompt, .replacementEntries,
+             .lastModelMigrationNoticeKey, .declinedModelMigrationNoticeKey:
             return rawValue
         }
     }

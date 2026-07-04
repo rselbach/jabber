@@ -81,6 +81,11 @@ struct HistoryPage: View {
     private func revealHistoryEntry(_ entry: DictationHistoryEntry) {
         Task { @MainActor in
             let audioURL = DictationHistoryStore.shared.audioURL(for: entry)
+            guard FileManager.default.fileExists(atPath: audioURL.path) else {
+                errorMessage = "Audio file for this session is missing. It may have been removed by retention cleanup."
+                showError = true
+                return
+            }
             NSWorkspace.shared.activateFileViewerSelecting([audioURL])
         }
     }

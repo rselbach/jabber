@@ -493,6 +493,7 @@ final class DictationCoordinator {
             // Expected when cancel() is called.
         } catch {
             logger.error("Transcription failed: \(error.localizedDescription)")
+            guard currentSessionID == sessionID else { return }
             onTranscriptionError?(error)
         }
     }

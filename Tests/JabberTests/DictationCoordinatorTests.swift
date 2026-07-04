@@ -393,6 +393,30 @@ final class DictationCoordinatorTests: XCTestCase {
         XCTAssertTrue(typingService.outputs.isEmpty)
     }
 
+    func testCancelDuringTranscriptionDiscardsFailure() async {
+        audioCapture.storedSamples = makeLoudSamples()
+        transcriptionService.holdTranscribeUntilReleased = true
+        transcriptionService.ignoresCancellationAfterTranscribeHold = true
+        transcriptionService.transcribeResult = .failure(NSError(domain: "test", code: 42))
+
+        let transcribeStarted = XCTestExpectation(description: "transcription started")
+        transcriptionService.onTranscribeStarted = { transcribeStarted.fulfill() }
+
+        let noError = expectation(description: "no transcription error after cancel")
+        noError.isInverted = true
+        coordinator.onTranscriptionError = { _ in noError.fulfill() }
+
+        XCTAssertTrue(coordinator.start())
+        coordinator.stop()
+        await fulfillment(of: [transcribeStarted], timeout: 1.0)
+
+        coordinator.cancel()
+        XCTAssertTrue(coordinator.isIdle)
+
+        transcriptionService.releaseTranscribe()
+        await fulfillment(of: [noError], timeout: 1.0)
+    }
+
     func testCancelDuringTranscriptionReleasesActivitySlot() async {
         audioCapture.storedSamples = makeLoudSamples()
         transcriptionService.transcribeDelay = .milliseconds(500)
@@ -1119,6 +1143,7 @@ final class FakeTranscriptionService: TranscriptionProtocol, @unchecked Sendable
     private var _streamingRelease: CheckedContinuation<Void, Never>?
     private var _onStreamingStarted: (() -> Void)?
     private var _holdTranscribeUntilReleased = false
+    private var _ignoresCancellationAfterTranscribeHold = false
     private var _transcribeRelease: CheckedContinuation<Void, Never>?
     private var _onTranscribeStarted: (() -> Void)?
     private var _onTranscribeCompleted: (() -> Void)?
@@ -1194,6 +1219,11 @@ final class FakeTranscriptionService: TranscriptionProtocol, @unchecked Sendable
     var holdTranscribeUntilReleased: Bool {
         get { lock.withLock { _holdTranscribeUntilReleased } }
         set { lock.withLock { _holdTranscribeUntilReleased = newValue } }
+    }
+
+    var ignoresCancellationAfterTranscribeHold: Bool {
+        get { lock.withLock { _ignoresCancellationAfterTranscribeHold } }
+        set { lock.withLock { _ignoresCancellationAfterTranscribeHold = newValue } }
     }
 
     var onTranscribeStarted: (() -> Void)? {
@@ -1295,6 +1325,7 @@ final class FakeTranscriptionService: TranscriptionProtocol, @unchecked Sendable
                 delay: _transcribeDelay,
                 result: _transcribeResult,
                 hold: _holdTranscribeUntilReleased,
+                ignoresCancellationAfterHold: _ignoresCancellationAfterTranscribeHold,
                 onStarted: _onTranscribeStarted,
                 onCompleted: _onTranscribeCompleted
             )
@@ -1316,7 +1347,9 @@ final class FakeTranscriptionService: TranscriptionProtocol, @unchecked Sendable
                 }
             }
 
-            try Task.checkCancellation()
+            if !snapshot.ignoresCancellationAfterHold {
+                try Task.checkCancellation()
+            }
             let result = try snapshot.result.get()
             lock.withLock { _transcribeCompletionCount += 1 }
             snapshot.onCompleted?()

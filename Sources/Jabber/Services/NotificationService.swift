@@ -78,38 +78,42 @@ final class NotificationService {
             return
         }
 
-        if isAuthorized {
-            Task { @MainActor [weak self] in
-                await self?.sendNotificationRequest(title: title, message: message, center: center)
+        // Recheck authorization on every send. The cached `isAuthorized` flag
+        // is not trusted here: the user can revoke notification permission in
+        // System Settings after initially granting it, in which case
+        // `center.add` still succeeds but the system never displays the
+        // notification and all non-critical warnings vanish silently. Reading
+        // the current settings is async and cheap, so re-verify per send and
+        // fall back to an alert when revoked.
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            let settings = await center.notificationSettings()
+            let authorised = Self.isAuthorized(status: settings.authorizationStatus)
+            self.isAuthorized = authorised
+            guard authorised else {
+                self.logger.info("Notification permission not granted, using alert fallback: \(title)")
+                self.showAlert(
+                    title: title,
+                    message: message,
+                    style: .informational,
+                    permissionSection: permissionSection
+                )
+                return
             }
-            return
+
+            await self.sendNotificationRequest(title: title, message: message, center: center)
         }
+    }
 
-        center.getNotificationSettings { [weak self] settings in
-            let authorised: Bool
-            switch settings.authorizationStatus {
-            case .authorized, .provisional, .ephemeral:
-                authorised = true
-            default:
-                authorised = false
-            }
-
-            Task { @MainActor in
-                guard let self else { return }
-                self.isAuthorized = authorised
-                guard authorised else {
-                    self.logger.info("Notification permission not granted, using alert fallback: \(title)")
-                    self.showAlert(
-                        title: title,
-                        message: message,
-                        style: .informational,
-                        permissionSection: permissionSection
-                    )
-                    return
-                }
-
-                await self.sendNotificationRequest(title: title, message: message, center: center)
-            }
+    /// Maps a `UNAuthorizationStatus` to whether Jabber may post. Pure so the
+    /// authorization decision is testable without the `UNUserNotificationCenter`
+    /// singleton (which cannot be injected).
+    static func isAuthorized(status: UNAuthorizationStatus) -> Bool {
+        switch status {
+        case .authorized, .provisional, .ephemeral:
+            return true
+        default:
+            return false
         }
     }
 

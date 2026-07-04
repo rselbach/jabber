@@ -75,9 +75,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // replacement auto-downloaded out from under the prompt that's about
         // to ask them what to do. Skip the load task when a notice is
         // pending; presentation is still delayed for politeness.
+        let willShowOnboarding = shouldShowAutomaticOnboarding()
         let pendingNotice = pendingModelMigrationNotice()
 
-        if pendingNotice == nil {
+        // Onboarding owns model selection for new users; let it drive any
+        // download via its own model-download step. Starting the load task
+        // here would pull a multi-GB default model the user may not pick.
+        if !willShowOnboarding, pendingNotice == nil {
             startModelLoadingTask()
         }
         scheduleUIReadyFallbackIfNeeded()
@@ -657,6 +661,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         TypedSettings[.didShowFirstRunSetup] = true
         // windowWillClose refreshes the activation policy.
         onboardingWindow?.close()
+        // Now that onboarding has settled the user's model choice, kick off
+        // the load. It was intentionally skipped at launch (see
+        // applicationDidFinishLaunching) so the default model wouldn't
+        // auto-download during onboarding.
+        startModelLoadingTask()
     }
 
     @objc private func handleMainWindowRequest() {

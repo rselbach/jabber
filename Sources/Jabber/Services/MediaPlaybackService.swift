@@ -139,6 +139,7 @@ final class MediaPlaybackService: MediaPlaybackProtocol {
 @MainActor
 final class MediaRemoteClient: MediaRemoteControlling {
     private static let queryTimeout: DispatchTimeInterval = .milliseconds(500)
+    nonisolated private static let adapterCommandTimeout: DispatchTimeInterval = .seconds(5)
 
     private let processQueue = DispatchQueue(label: "com.rselbach.jabber.mediaremote-adapter", qos: .userInitiated)
     private let libraryURL: URL?
@@ -253,9 +254,33 @@ final class MediaRemoteClient: MediaRemoteControlling {
         libraryURL: URL,
         arguments: [String]
     ) -> AdapterCommandResult {
+        let run = runProcess(
+            executableURL: URL(fileURLWithPath: "/usr/bin/perl"),
+            arguments: [scriptURL.path, libraryURL.path] + arguments,
+            timeout: adapterCommandTimeout
+        )
+        return AdapterCommandResult(
+            output: run.output,
+            errorOutput: run.errorOutput,
+            terminationStatus: run.terminationStatus
+        )
+    }
+
+    /// Runs `executableURL` with `arguments`, draining stdout/stderr concurrently
+    /// before `waitUntilExit`. If the child writes more than the pipe buffer
+    /// (~64KB — track payloads can include artwork data), reading only after
+    /// `waitUntilExit` deadlocks: the child blocks on write, the parent blocks
+    /// in `waitUntilExit`, and the serial `processQueue` (every later
+    /// play/pause/isPlaying) hangs behind it with a zombie perl. Enforces
+    /// `timeout`: a stuck child is SIGTERM'd so the queue can't hang forever.
+    nonisolated static func runProcess(
+        executableURL: URL,
+        arguments: [String],
+        timeout: DispatchTimeInterval
+    ) -> (output: String, errorOutput: String, terminationStatus: Int32) {
         let process = Process()
-        process.executableURL = URL(fileURLWithPath: "/usr/bin/perl")
-        process.arguments = [scriptURL.path, libraryURL.path] + arguments
+        process.executableURL = executableURL
+        process.arguments = arguments
 
         let outputPipe = Pipe()
         let errorPipe = Pipe()
@@ -264,29 +289,49 @@ final class MediaRemoteClient: MediaRemoteControlling {
 
         do {
             try process.run()
-            process.waitUntilExit()
         } catch {
-            return AdapterCommandResult(
-                output: "",
-                errorOutput: error.localizedDescription,
+            return (output: "", errorOutput: error.localizedDescription, terminationStatus: -1)
+        }
+
+        // Drain both pipes on background threads before waiting for exit so a
+        // full pipe can't block the child's writes.
+        let outputReader = PipeReader(outputPipe.fileHandleForReading)
+        let errorReader = PipeReader(errorPipe.fileHandleForReading)
+        let readGroup = DispatchGroup()
+        readGroup.enter()
+        DispatchQueue.global().async {
+            outputReader.readToEnd()
+            readGroup.leave()
+        }
+        readGroup.enter()
+        DispatchQueue.global().async {
+            errorReader.readToEnd()
+            readGroup.leave()
+        }
+
+        // Hard timeout: SIGTERM a stuck child so the serial processQueue can't
+        // hang forever behind one misbehaving command.
+        let timeoutGuard = TimeoutGuard(process)
+        let timeoutWork = DispatchWorkItem { timeoutGuard.fireTimeout() }
+        DispatchQueue.global().asyncAfter(deadline: .now() + timeout, execute: timeoutWork)
+
+        process.waitUntilExit()
+        let didTimeOut = timeoutGuard.markFinished()
+        timeoutWork.cancel()
+        // The reads return at EOF (child exit, or terminate from the timeout).
+        readGroup.wait()
+
+        let output = String(data: outputReader.take(), encoding: .utf8) ?? ""
+        let errorOutput = String(data: errorReader.take(), encoding: .utf8) ?? ""
+
+        if didTimeOut {
+            return (
+                output: output,
+                errorOutput: "MediaRemoteAdapter command timed out and was terminated",
                 terminationStatus: -1
             )
         }
-
-        let output = String(
-            data: outputPipe.fileHandleForReading.readDataToEndOfFile(),
-            encoding: .utf8
-        ) ?? ""
-        let errorOutput = String(
-            data: errorPipe.fileHandleForReading.readDataToEndOfFile(),
-            encoding: .utf8
-        ) ?? ""
-
-        return AdapterCommandResult(
-            output: output,
-            errorOutput: errorOutput,
-            terminationStatus: process.terminationStatus
-        )
+        return (output: output, errorOutput: errorOutput, terminationStatus: process.terminationStatus)
     }
 
     /// Locates the loaded `libMediaRemoteAdapter.dylib` by scanning the process's dyld image list.
@@ -409,5 +454,59 @@ private final class SingleResumeBox<T: Sendable>: @unchecked Sendable {
         guard let continuation else { return false }
         continuation.resume(returning: value)
         return true
+    }
+}
+
+/// Thread-safe holder for a pipe's full contents, read to EOF on a background
+/// queue so the read can't block `waitUntilExit` (and vice versa). One reader,
+/// one taker after the read group reports completion.
+private final class PipeReader: @unchecked Sendable {
+    private let handle: FileHandle
+    private let lock = NSLock()
+    private var data = Data()
+
+    init(_ handle: FileHandle) {
+        self.handle = handle
+    }
+
+    func readToEnd() {
+        let read = handle.readDataToEndOfFile()
+        lock.withLock { data = read }
+    }
+
+    func take() -> Data {
+        lock.withLock { let d = data; data = Data(); return d }
+    }
+}
+
+/// Coordinates the hard timeout for `runProcess`: the waiting thread marks the
+/// process finished after `waitUntilExit` returns, the timeout thread SIGTERMs
+/// a still-running child. The lock decides who wins.
+private final class TimeoutGuard: @unchecked Sendable {
+    private let lock = NSLock()
+    private var finished = false
+    private var killedByTimeout = false
+    private let process: Process
+
+    init(_ process: Process) {
+        self.process = process
+    }
+
+    /// Called after `waitUntilExit` returns. Returns whether the timeout fired.
+    @discardableResult
+    func markFinished() -> Bool {
+        lock.withLock {
+            finished = true
+            return killedByTimeout
+        }
+    }
+
+    /// Called from the timeout work item. SIGTERMs the child only if it is still
+    /// running and no one has marked it finished yet.
+    func fireTimeout() {
+        let shouldKill = lock.withLock { !finished }
+        guard shouldKill, process.isRunning else { return }
+        lock.withLock { killedByTimeout = true }
+        process.terminate()
     }
 }

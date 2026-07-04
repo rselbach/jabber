@@ -99,6 +99,42 @@ final class MediaPlaybackServiceTests: XCTestCase {
         XCTAssertTrue(client.commands.isEmpty)
     }
 
+    // MARK: - runProcess pipe drain + timeout (deadlock regression)
+
+    /// 100_000 bytes far exceeds the ~64KB pipe buffer. With read-after-
+    /// waitUntilExit the child blocks on write, the parent blocks in
+    /// waitUntilExit, and the serial processQueue hangs forever. Concurrent
+    /// drain must complete and return the full payload.
+    func testRunProcessDrainsLargeOutputWithoutDeadlock() {
+        let result = MediaRemoteClient.runProcess(
+            executableURL: URL(fileURLWithPath: "/usr/bin/perl"),
+            arguments: ["-e", "print q{A} x 100000"],
+            timeout: .seconds(5)
+        )
+
+        XCTAssertEqual(result.terminationStatus, 0)
+        XCTAssertEqual(result.output.count, 100_000)
+        XCTAssertTrue(result.errorOutput.isEmpty)
+    }
+
+    /// A stuck child is SIGTERM'd at the timeout so the queue can't hang
+    /// forever. The failure is surfaced (status -1 + a timeout message), not
+    /// swallowed.
+    func testRunProcessTerminatesStuckChildOnTimeout() {
+        let start = Date()
+        let result = MediaRemoteClient.runProcess(
+            executableURL: URL(fileURLWithPath: "/usr/bin/perl"),
+            arguments: ["-e", "sleep 30"],
+            timeout: .milliseconds(200)
+        )
+        let elapsed = Date().timeIntervalSince(start)
+
+        XCTAssertEqual(result.terminationStatus, -1)
+        XCTAssertTrue(result.errorOutput.contains("timed out"))
+        // Returns promptly (not after the full 30s sleep), with slack for scheduling.
+        XCTAssertLessThan(elapsed, 5.0)
+    }
+
     private func makeService(isEnabled: Bool = true) -> MediaPlaybackService {
         MediaPlaybackService(
             client: client,

@@ -916,7 +916,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func refreshActivationPolicy(closing closingWindow: NSWindow? = nil) {
         let hasVisibleUserWindow = [mainWindow, onboardingWindow, modelMigrationNoticeWindow]
             .compactMap { $0 }
-            .contains { $0 !== closingWindow && $0.isVisible }
+            .contains { $0 !== closingWindow && ($0.isVisible || $0.isMiniaturized) }
         NSApp.setActivationPolicy(hasVisibleUserWindow ? .regular : .accessory)
     }
 

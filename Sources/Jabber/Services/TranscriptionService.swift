@@ -190,23 +190,31 @@ actor TranscriptionService {
     private func loadModel(desiredModelId capturedModelId: String) async throws {
         // The captured id may be stale by the time we wake from waitForModelLoad
         // (the user or a migration could have changed the selection). Re-read
-        // after the wait so queued callers converge on the current selection
-        // instead of unloading a model that was just loaded for the new
-        // selection. The `while` loop is not needed: every path below either
-        // returns or throws, so the body runs at most once.
+        // before claiming the load so queued callers converge on the current
+        // selection instead of unloading a model that was just loaded for the
+        // new selection.
         var desiredModelId = capturedModelId
 
-        if isLoading {
-            try await waitForModelLoad()
-            desiredModelId = await ModelManager.shared.selectedModelId()
-        }
+        while true {
+            while isLoading {
+                try await waitForModelLoad()
+            }
 
-        if resolveLoadedModel(desiredModelId: desiredModelId) {
-            return
+            desiredModelId = await ModelManager.shared.selectedModelId()
+
+            if isLoading {
+                continue
+            }
+
+            if resolveLoadedModel(desiredModelId: desiredModelId) {
+                return
+            }
+
+            isLoading = true
+            break
         }
 
         let currentLoadGeneration = loadGeneration
-        isLoading = true
         defer { isLoading = false }
 
         do {
@@ -266,6 +274,7 @@ actor TranscriptionService {
                 throw CancellationError()
             }
 
+            provider?.unload()
             provider = newProvider
             loadedModelId = modelIdToLoad
             setReady(true)

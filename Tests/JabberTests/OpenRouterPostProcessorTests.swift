@@ -204,6 +204,24 @@ final class OpenRouterPostProcessorTests: XCTestCase {
         }
     }
 
+    func testProcessMapsCancelledURLErrorToCancellationError() async {
+        // URLSession.data(for:) reacts to task cancellation by throwing
+        // URLError(.cancelled), not CancellationError. A cancelled dictation
+        // must surface as cancellation, not as a user-visible network failure.
+        let provider = OpenRouterPostProcessor(
+            apiKey: testKey,
+            transport: RequestCapture().transportThrowing(URLError(.cancelled))
+        )
+        do {
+            _ = try await provider.process("hello")
+            XCTFail("Expected CancellationError")
+        } catch is CancellationError {
+            // expected
+        } catch {
+            XCTFail("Expected CancellationError, got \(error)")
+        }
+    }
+
     // MARK: - error messages never leak the key
 
     func testErrorDescriptionsDoNotLeakApiKey() {

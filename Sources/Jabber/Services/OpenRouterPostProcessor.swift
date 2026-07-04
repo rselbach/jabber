@@ -130,6 +130,12 @@ struct OpenRouterPostProcessor: PostProcessingProvider {
             (data, response) = try await transport(request)
         } catch is CancellationError {
             throw CancellationError()
+        } catch let urlError as URLError where urlError.code == .cancelled {
+            // URLSession.data(for:) reacts to task cancellation by throwing
+            // URLError(.cancelled), not CancellationError. Map it so a
+            // cancelled dictation is not surfaced to the user as a spurious
+            // network failure.
+            throw CancellationError()
         } catch {
             throw OpenRouterPostProcessingError.networkError(error.localizedDescription)
         }

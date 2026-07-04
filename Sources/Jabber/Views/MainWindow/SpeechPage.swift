@@ -56,7 +56,6 @@ struct SpeechPage: View {
         }
         .formStyle(.grouped)
         .onAppear {
-            _ = modelManager.migrateSelectedModelIfNeeded()
             modelManager.refreshModels()
         }
         .alert("Error", isPresented: $showError, presenting: errorMessage) { _ in

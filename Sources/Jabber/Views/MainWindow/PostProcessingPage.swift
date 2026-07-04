@@ -67,7 +67,13 @@ struct PostProcessingPage: View {
         }
         // The main window is retained when closed, so onDisappear is not
         // guaranteed to fire; persist the key on window close as well.
-        .onReceive(NotificationCenter.default.publisher(for: NSWindow.willCloseNotification)) { _ in
+        // Filter to the main window only — willCloseNotification fires for
+        // every window (onboarding, migration notice, etc.) and acting on
+        // those would clobber the SecureField mid-typing and could silently
+        // delete a saved key.
+        .onReceive(NotificationCenter.default.publisher(for: NSWindow.willCloseNotification)) { notification in
+            guard let window = notification.object as? NSWindow,
+                  window.identifier == NSUserInterfaceItemIdentifier("com.rselbach.jabber.main") else { return }
             saveOpenRouterAPIKey()
         }
     }

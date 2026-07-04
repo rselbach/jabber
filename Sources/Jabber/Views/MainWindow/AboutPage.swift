@@ -33,8 +33,10 @@ struct AboutPage: View {
                         Text(def.attribution)
                             .font(.caption)
                             .foregroundStyle(.secondary)
-                        Link(def.license, destination: URL(string: def.licenseUrl)!)
-                            .font(.caption)
+                        if let url = URL(string: def.licenseUrl) {
+                            Link(def.license, destination: url)
+                                .font(.caption)
+                        }
                     }
                     .padding(.vertical, 4)
                 }

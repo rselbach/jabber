@@ -576,10 +576,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func stopOrAbortDictationFromHotkey() {
         if dictationCoordinator.isRecording {
             dictationCoordinator.stop()
-        } else {
+        } else if let pendingID = pendingHotkeyStartID {
             // Release arrived before recording began (e.g. during the permission
-            // await). Mark the in-flight press aborted so it does not start.
-            abortedHotkeyPressIDs.insert(pendingHotkeyStartID ?? currentHotkeyPressID)
+            // await). Mark the in-flight press aborted so it does not start
+            // after release. Guard on `pendingHotkeyStartID` so we only abort
+            // when there is actually a pending start this release applies to —
+            // otherwise (e.g. hold-mode key released while state is
+            // .transcribing) the press already returned and its defer cleared
+            // `pendingHotkeyStartID`, so inserting `currentHotkeyPressID` would
+            // add an ID that nothing ever removes and the set would grow
+            // unboundedly over a long session.
+            abortedHotkeyPressIDs.insert(pendingID)
         }
     }
 

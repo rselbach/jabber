@@ -88,15 +88,20 @@ final class AudioCaptureService {
     }
 
     func stopCapture() {
-        let wasCapturing = queue.sync {
-            guard _isCapturing else { return false }
-            _isCapturing = false
-            return true
-        }
+        let wasCapturing = queue.sync { _isCapturing }
         guard wasCapturing else { return }
-        guard let engine = engineStorage as? AVAudioEngine else { return }
+        guard let engine = engineStorage as? AVAudioEngine else {
+            queue.sync {
+                _isCapturing = false
+            }
+            setConverter(nil)
+            return
+        }
         engine.inputNode.removeTap(onBus: 0)
         engine.stop()
+        queue.sync {
+            _isCapturing = false
+        }
         setConverter(nil)
     }
 

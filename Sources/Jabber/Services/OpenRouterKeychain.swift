@@ -69,7 +69,10 @@ enum OpenRouterKeychain {
         ]
         let updateStatus = SecItemUpdate(
             query as CFDictionary,
-            [kSecValueData as String: data] as CFDictionary
+            [
+                kSecValueData as String: data,
+                kSecAttrAccessible as String: kSecAttrAccessibleAfterFirstUnlock
+            ] as CFDictionary
         )
         switch updateStatus {
         case errSecSuccess:

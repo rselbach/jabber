@@ -1,3 +1,4 @@
+import Security
 import XCTest
 @testable import Jabber
 
@@ -42,6 +43,22 @@ final class OpenRouterKeychainTests: XCTestCase {
         XCTAssertEqual(try OpenRouterKeychain.readKey(service: service, account: account), "new-key")
     }
 
+    func testSaveUpdatesAccessibilityForExistingKey() throws {
+        let addQuery: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: service,
+            kSecAttrAccount as String: account,
+            kSecValueData as String: Data("old-key".utf8),
+            kSecAttrAccessible as String: kSecAttrAccessibleWhenUnlocked
+        ]
+        XCTAssertEqual(SecItemAdd(addQuery as CFDictionary, nil), errSecSuccess)
+
+        try OpenRouterKeychain.saveKey("new-key", service: service, account: account)
+
+        XCTAssertEqual(try OpenRouterKeychain.readKey(service: service, account: account), "new-key")
+        XCTAssertEqual(accessibilityMatchStatus(), errSecSuccess)
+    }
+
     func testDeleteRemovesStoredKey() throws {
         try OpenRouterKeychain.saveKey("troy-barnes", service: service, account: account)
         try OpenRouterKeychain.deleteKey(service: service, account: account)
@@ -50,5 +67,16 @@ final class OpenRouterKeychainTests: XCTestCase {
 
     func testDeleteWhenAbsentDoesNotThrow() {
         XCTAssertNoThrow(try OpenRouterKeychain.deleteKey(service: service, account: account))
+    }
+
+    private func accessibilityMatchStatus() -> OSStatus {
+        let query: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: service,
+            kSecAttrAccount as String: account,
+            kSecAttrAccessible as String: kSecAttrAccessibleAfterFirstUnlock,
+            kSecMatchLimit as String: kSecMatchLimitOne
+        ]
+        return SecItemCopyMatching(query as CFDictionary, nil)
     }
 }

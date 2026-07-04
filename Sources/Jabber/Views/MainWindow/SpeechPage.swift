@@ -8,6 +8,7 @@ struct SpeechPage: View {
     @State private var modelManager = ModelManager.shared
     @State private var errorMessage: String?
     @State private var showError = false
+    @State private var pendingErrorMessage: String?
     @State private var pendingDeleteModelId: String?
     @State private var pendingDeleteModelName: String?
 
@@ -63,6 +64,10 @@ struct SpeechPage: View {
         } message: { message in
             Text(message)
         }
+        .onChange(of: showError) { _, isPresented in
+            guard !isPresented else { return }
+            presentPendingErrorIfNeeded()
+        }
         .onReceive(NotificationCenter.default.publisher(for: Constants.Notifications.modelDownloadStateDidChange)) { notification in
             guard let state = notification.object as? ModelDownloadState else { return }
             guard state.phase == .failed, !state.isCancelled else { return }
@@ -104,7 +109,17 @@ struct SpeechPage: View {
     }
 
     private func presentError(_ message: String) {
+        guard !showError else {
+            pendingErrorMessage = message
+            return
+        }
         errorMessage = message
         showError = true
+    }
+
+    private func presentPendingErrorIfNeeded() {
+        guard let pendingErrorMessage else { return }
+        self.pendingErrorMessage = nil
+        presentError(pendingErrorMessage)
     }
 }

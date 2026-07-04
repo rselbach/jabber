@@ -1042,13 +1042,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         switch state.phase {
         case .started, .progress:
             downloadStatesByModelId[state.modelId] = state
-            activeDownloadModelId = state.modelId
+            if activeDownloadModelId.flatMap({ downloadStatesByModelId[$0] }) == nil {
+                activeDownloadModelId = nextActiveDownloadModelId()
+            }
         case .finished, .failed:
             downloadStatesByModelId[state.modelId] = nil
             if activeDownloadModelId == state.modelId {
-                activeDownloadModelId = downloadStatesByModelId.keys.first
+                activeDownloadModelId = nextActiveDownloadModelId()
             }
         }
+    }
+
+    private func nextActiveDownloadModelId() -> String? {
+        downloadStatesByModelId.keys.sorted().first
     }
 
     private var selectedModelId: String? {
@@ -1064,7 +1070,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
            let state = downloadStatesByModelId[activeDownloadModelId] {
             return state
         }
-        return downloadStatesByModelId.values.first
+        return nextActiveDownloadModelId().flatMap { downloadStatesByModelId[$0] }
     }
 
     private func syncNonDictationUI(forceLoading: Bool = false) {

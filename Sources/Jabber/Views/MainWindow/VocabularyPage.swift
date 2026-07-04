@@ -17,11 +17,24 @@ struct VocabularyPage: View {
         .formStyle(.grouped)
         .onAppear { loadState() }
         // The main window is retained when closed, so onDisappear is not
-        // guaranteed to fire; persist on window close as well. Filter to the
-        // main window only — willCloseNotification fires for every window.
+        // guaranteed to fire on window close; persist on window close as well.
+        // Filter to the main window only — willCloseNotification fires for every
+        // window.
         .onReceive(NotificationCenter.default.publisher(for: NSWindow.willCloseNotification)) { notification in
             guard let window = notification.object as? NSWindow,
                   window.identifier == NSUserInterfaceItemIdentifier("com.rselbach.jabber.main") else { return }
+            persistAll()
+        }
+        // Quitting (Cmd-Q) within the 500ms debounce window bypasses both the
+        // debounce task (it dies with the process) and willCloseNotification
+        // (applicationWillTerminate doesn't guarantee it for still-open
+        // windows). Flush on app termination so a last keystroke isn't lost.
+        .onReceive(NotificationCenter.default.publisher(for: NSApplication.willTerminateNotification)) { _ in
+            persistAll()
+        }
+        // Sidebar switches remove this view from the hierarchy; flush there too
+        // so navigating away during the debounce window isn't lost.
+        .onDisappear {
             persistAll()
         }
     }

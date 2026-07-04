@@ -137,7 +137,7 @@ final class AppleSpeechProvider: TranscriptionProvider, @unchecked Sendable {
 
     // MARK: - Locale Resolution
 
-    private static let localeMap: [String: String] = [
+    static let localeMap: [String: String] = [
         "en": "en-US",
         "es": "es-ES",
         "fr": "fr-FR",
@@ -162,10 +162,16 @@ final class AppleSpeechProvider: TranscriptionProvider, @unchecked Sendable {
         "el": "el-GR",
         "hu": "hu-HU",
         "ro": "ro-RO",
-        "uk": "uk-UA"
+        "uk": "uk-UA",
+        "fa": "fa-IR",
+        "id": "id-ID",
+        "ms": "ms-MY",
+        "mk": "mk-MK",
+        "fil": "fil-PH",
+        "yue": "yue-CN"
     ]
 
-    private static func locale(for languageCode: String?) -> Locale {
+    static func locale(for languageCode: String?) -> Locale {
         let code = languageCode ?? "auto"
         if code == "auto" {
             return Locale.current
@@ -174,7 +180,7 @@ final class AppleSpeechProvider: TranscriptionProvider, @unchecked Sendable {
         return Locale(identifier: identifier)
     }
 
-    private static func normalized(_ locale: Locale) -> String {
+    static func normalized(_ locale: Locale) -> String {
         locale.identifier(.bcp47).replacingOccurrences(of: "_", with: "-")
     }
 

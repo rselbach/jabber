@@ -230,19 +230,22 @@ final class MediaRemoteClient: MediaRemoteControlling {
         await withCheckedContinuation { continuation in
             let box = SingleResumeBox(continuation)
             let logger = logger
+            let timeoutWork = CancellableWorkItem { [logger] in
+                if box.resume(returning: nil) {
+                    logger.notice("Timed out while querying MediaRemoteAdapter track info")
+                }
+            }
             processQueue.async {
                 let snapshot = Self.loadTrackSnapshot(
                     scriptURL: scriptURL,
                     libraryURL: libraryURL,
                     logger: logger
                 )
-                box.resume(returning: snapshot)
-            }
-            DispatchQueue.main.asyncAfter(deadline: .now() + Self.queryTimeout) { [logger] in
-                if box.resume(returning: nil) {
-                    logger.notice("Timed out while querying MediaRemoteAdapter track info")
+                if box.resume(returning: snapshot) {
+                    timeoutWork.cancel()
                 }
             }
+            timeoutWork.schedule(on: .main, deadline: .now() + Self.queryTimeout)
         }
     }
 
@@ -477,6 +480,22 @@ private final class SingleResumeBox<T: Sendable>: @unchecked Sendable {
         guard let continuation else { return false }
         continuation.resume(returning: value)
         return true
+    }
+}
+
+private final class CancellableWorkItem: @unchecked Sendable {
+    private let workItem: DispatchWorkItem
+
+    init(_ block: @escaping @Sendable () -> Void) {
+        workItem = DispatchWorkItem(block: block)
+    }
+
+    func cancel() {
+        workItem.cancel()
+    }
+
+    func schedule(on queue: DispatchQueue, deadline: DispatchTime) {
+        queue.asyncAfter(deadline: deadline, execute: workItem)
     }
 }
 

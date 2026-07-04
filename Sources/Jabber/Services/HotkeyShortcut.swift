@@ -295,9 +295,13 @@ enum HotkeyActivationMode: String, CaseIterable, Sendable {
 extension SettingsStore {
     var hotkeyShortcut: HotkeyShortcut {
         get {
+            // Clamp both sides: a corrupt/out-of-range persisted value (e.g.
+            // `defaults write Jabber hotkeyKeyCode -int 5000000000`) must not
+            // crash on the UInt32 cast at launch. `max(0, ...)` only guarded the
+            // negative side; `UInt32(clamping:)` bounds to [0, UInt32.max].
             let shortcut = HotkeyShortcut(
-                keyCode: UInt32(max(0, self[.hotkeyKeyCode])),
-                modifiers: UInt32(max(0, self[.hotkeyModifiers]))
+                keyCode: UInt32(clamping: self[.hotkeyKeyCode]),
+                modifiers: UInt32(clamping: self[.hotkeyModifiers])
             )
             guard shortcut.validationError == nil else {
                 return .defaultShortcut

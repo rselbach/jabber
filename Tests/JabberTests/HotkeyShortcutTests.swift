@@ -145,4 +145,52 @@ final class HotkeyShortcutTests: XCTestCase {
         XCTAssertEqual(HotkeyShortcut.cgEventFlag(forKeyCode: UInt32(kVK_RightControl)), .maskControl)
         XCTAssertNil(HotkeyShortcut.cgEventFlag(forKeyCode: UInt32(kVK_Space)))
     }
+
+    @MainActor
+    func testHotkeyShortcutClampsOutOfRangePersistedValues() throws {
+        // A corrupt persisted hotkey value (negative or over UInt32.max) must
+        // not crash the launch-time cast. `UInt32(clamping:)` bounds both sides;
+        // the getter then re-validates and returns the (valid) clamped shortcut.
+        let suiteName = "JabberTests.HotkeyShortcut.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
+        defaults.removePersistentDomain(forName: suiteName)
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+
+        let store = SettingsStore(userDefaults: defaults)
+
+        let tests: [String: (keyCode: Int, modifiers: Int, wantKeyCode: UInt32, wantModifiers: UInt32)] = [
+            "negative keyCode clamps to 0": (
+                keyCode: -5,
+                modifiers: Int(optionKey),
+                wantKeyCode: 0,
+                wantModifiers: UInt32(optionKey)
+            ),
+            "over-max keyCode clamps to UInt32.max": (
+                keyCode: 5_000_000_000,
+                modifiers: Int(optionKey),
+                wantKeyCode: UInt32.max,
+                wantModifiers: UInt32(optionKey)
+            ),
+            "negative modifiers clamps to 0": (
+                keyCode: Int(kVK_RightOption),
+                modifiers: -1,
+                wantKeyCode: UInt32(kVK_RightOption),
+                wantModifiers: 0
+            ),
+            "over-max modifiers clamps to UInt32.max": (
+                keyCode: Int(kVK_Space),
+                modifiers: 5_000_000_000,
+                wantKeyCode: UInt32(kVK_Space),
+                wantModifiers: UInt32.max
+            )
+        ]
+
+        for (name, tc) in tests {
+            defaults.set(tc.keyCode, forKey: AppSettingKey.hotkeyKeyCode)
+            defaults.set(tc.modifiers, forKey: AppSettingKey.hotkeyModifiers)
+            let shortcut = store.hotkeyShortcut
+            XCTAssertEqual(shortcut.keyCode, tc.wantKeyCode, name)
+            XCTAssertEqual(shortcut.modifiers, tc.wantModifiers, name)
+        }
+    }
 }

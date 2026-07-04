@@ -6,8 +6,11 @@ import os
 enum OpenRouterPostProcessingError: LocalizedError, Equatable {
     /// No API key is stored / the stored key is blank.
     case missingApiKey
-    /// The API returned a non-2xx status.
-    case httpFailure(Int)
+    /// The API returned a non-2xx status. Carries the status code and, when
+    /// best-effort parsing of OpenRouter's `{"error":{"message":...}}` body
+    /// succeeds, a truncated copy of that message. The API key is never present
+    /// in response bodies and thus never appears here.
+    case httpFailure(Int, String?)
     /// The response JSON did not match the expected OpenAI shape.
     case malformedResponse
     /// The response parsed but contained no usable choice/message content.
@@ -20,8 +23,12 @@ enum OpenRouterPostProcessingError: LocalizedError, Equatable {
         switch self {
         case .missingApiKey:
             "OpenRouter API key is not set."
-        case let .httpFailure(code):
-            "OpenRouter returned HTTP \(code)."
+        case let .httpFailure(code, message):
+            if let message {
+                "OpenRouter returned HTTP \(code): \(message)"
+            } else {
+                "OpenRouter returned HTTP \(code)."
+            }
         case .malformedResponse:
             "OpenRouter response could not be parsed."
         case .emptyResponse:
@@ -98,6 +105,27 @@ struct OpenRouterPostProcessor: PostProcessingProvider {
         !apiKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
 
+    /// Best-effort extraction of OpenRouter's `{"error":{"message":...}}` body
+    /// for inclusion in an `httpFailure` error. Returns `nil` for any shape that
+    /// does not match (including a flat string error or non-JSON body), so the
+    /// caller falls back to a status-only message. The API key is never present
+    /// in response bodies. Truncated so a long provider message cannot produce
+    /// an unreadable alert.
+    private static func openRouterErrorMessage(from data: Data) -> String? {
+        do {
+            let json = try JSONSerialization.jsonObject(with: data) as? [String: Any]
+            guard let error = json?["error"] as? [String: Any],
+                  let message = error["message"] as? String else {
+                return nil
+            }
+            return String(message.prefix(Self.maxHttpFailureMessageLength))
+        } catch {
+            return nil
+        }
+    }
+
+    private static let maxHttpFailureMessageLength = 200
+
     func process(_ transcript: String) async throws -> String {
         guard isAvailable else {
             throw OpenRouterPostProcessingError.missingApiKey
@@ -144,7 +172,10 @@ struct OpenRouterPostProcessor: PostProcessingProvider {
             throw OpenRouterPostProcessingError.malformedResponse
         }
         guard (200 ..< 300).contains(http.statusCode) else {
-            throw OpenRouterPostProcessingError.httpFailure(http.statusCode)
+            throw OpenRouterPostProcessingError.httpFailure(
+                http.statusCode,
+                Self.openRouterErrorMessage(from: data)
+            )
         }
 
         guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {

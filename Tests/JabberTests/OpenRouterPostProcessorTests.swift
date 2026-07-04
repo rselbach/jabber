@@ -125,6 +125,8 @@ final class OpenRouterPostProcessorTests: XCTestCase {
     }
 
     func testProcessThrowsHTTPFailureOnNon2xx() async {
+        // Flat string error (not OpenRouter's structured shape) → no message
+        // extracted, status-only failure.
         let provider = OpenRouterPostProcessor(
             apiKey: testKey,
             transport: RequestCapture().transportReturning(body: #"{"error":"rate limited"}"#, status: 429)
@@ -133,7 +135,48 @@ final class OpenRouterPostProcessorTests: XCTestCase {
             _ = try await provider.process("hello")
             XCTFail("Expected httpFailure")
         } catch let error as OpenRouterPostProcessingError {
-            XCTAssertEqual(error, .httpFailure(429))
+            XCTAssertEqual(error, .httpFailure(429, nil))
+        } catch {
+            XCTFail("Unexpected error: \(error)")
+        }
+    }
+
+    func testProcessHTTPFailureIncludesAPIErrorMessage() async {
+        // OpenRouter returns a structured `{"error":{"message":...}}` body; the
+        // message must be carried alongside the status code and surface in the
+        // human-readable description so the user knows *why* it failed.
+        let body = #"{"error":{"message":"No more credits, Troy."}}"#
+        let provider = OpenRouterPostProcessor(
+            apiKey: testKey,
+            transport: RequestCapture().transportReturning(body: body, status: 402)
+        )
+        do {
+            _ = try await provider.process("hello")
+            XCTFail("Expected httpFailure")
+        } catch let error as OpenRouterPostProcessingError {
+            XCTAssertEqual(error, .httpFailure(402, "No more credits, Troy."))
+            let desc = error.errorDescription ?? ""
+            XCTAssertTrue(desc.contains("402"), "status code must remain in the description: \(desc)")
+            XCTAssertTrue(desc.contains("No more credits, Troy."), "API message must be in the description: \(desc)")
+        } catch {
+            XCTFail("Unexpected error: \(error)")
+        }
+    }
+
+    func testProcessHTTPFailureTruncatesLongAPIErrorMessage() async {
+        let longMessage = String(repeating: "a", count: 600)
+        let body = #"{"error":{"message":"\#(longMessage)"}}"#
+        let provider = OpenRouterPostProcessor(
+            apiKey: testKey,
+            transport: RequestCapture().transportReturning(body: body, status: 500)
+        )
+        do {
+            _ = try await provider.process("hello")
+            XCTFail("Expected httpFailure")
+        } catch let error as OpenRouterPostProcessingError {
+            let message = extractHttpFailureMessage(error)
+            XCTAssertNotNil(message, "expected httpFailure with a message")
+            XCTAssertEqual(message?.count, 200, "API message must be truncated to 200 characters")
         } catch {
             XCTFail("Unexpected error: \(error)")
         }
@@ -228,7 +271,8 @@ final class OpenRouterPostProcessorTests: XCTestCase {
         let key = "sk-super-secret-greendale"
         let cases: [OpenRouterPostProcessingError] = [
             .missingApiKey,
-            .httpFailure(500),
+            .httpFailure(500, nil),
+            .httpFailure(402, "No more credits, Troy."),
             .malformedResponse,
             .emptyResponse,
             .networkError("connection reset")
@@ -241,6 +285,13 @@ final class OpenRouterPostProcessorTests: XCTestCase {
 }
 
 // MARK: - Request capture helper
+
+private func extractHttpFailureMessage(_ error: OpenRouterPostProcessingError) -> String? {
+    if case let .httpFailure(_, message) = error {
+        return message
+    }
+    return nil
+}
 
 private final class RequestCapture: @unchecked Sendable {
     private let lock = NSLock()

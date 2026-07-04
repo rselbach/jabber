@@ -60,7 +60,7 @@ struct PostProcessingPage: View {
             // Reading the keychain can surface an auth prompt that deactivates
             // Jabber; bring it back to the front once the prompt resolves so
             // the main window doesn't end up stranded behind other apps.
-            NSApp.activate()
+            NSApp.activate(ignoringOtherApps: false)
         }
         .onDisappear {
             saveOpenRouterAPIKey()

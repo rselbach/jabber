@@ -74,15 +74,14 @@ actor TranscriptionService {
     private var selectedLanguage: String = Constants.defaultLanguage
 
     func setVocabularyPrompt(_ prompt: String) {
-        vocabularyPrompt = String(prompt.prefix(500))
+        vocabularyPrompt = Self.truncateVocabularyPrompt(prompt)
     }
 
     func setLanguage(_ language: String) {
-        if language == "auto" || Constants.validLanguageCodes.contains(language) {
-            selectedLanguage = language
-        } else {
+        let resolved = Self.resolveLanguage(language)
+        selectedLanguage = resolved
+        if resolved != language {
             logger.warning("Invalid language code '\(language)' - falling back to auto-detect")
-            selectedLanguage = "auto"
 
             Task { @MainActor in
                 TypedSettings[.selectedLanguage] = "auto"
@@ -130,7 +129,7 @@ actor TranscriptionService {
             throw TranscriptionError.loadFailed
         }
 
-        let lang = selectedLanguage == "auto" ? nil : selectedLanguage
+        let lang = Self.resolveLanguageForProvider(selectedLanguage)
         let prompt = vocabularyPrompt.isEmpty ? nil : vocabularyPrompt
         return try await provider.transcribe(samples: samples, language: lang, vocabularyPrompt: prompt)
     }
@@ -146,7 +145,7 @@ actor TranscriptionService {
             throw TranscriptionError.loadFailed
         }
 
-        let lang = selectedLanguage == "auto" ? nil : selectedLanguage
+        let lang = Self.resolveLanguageForProvider(selectedLanguage)
         let prompt = vocabularyPrompt.isEmpty ? nil : vocabularyPrompt
         return try await provider.transcribeStreaming(samples: samples, language: lang, vocabularyPrompt: prompt)
     }
@@ -281,6 +280,25 @@ actor TranscriptionService {
 
             backoffDelay = min(backoffDelay * 2, maxBackoff)
         }
+    }
+
+    // MARK: - Pure resolution helpers (testable without the actor)
+
+    /// Returns the language code if valid, otherwise "auto". Valid codes are
+    /// "auto" and any code in `Constants.validLanguageCodes`.
+    nonisolated static func resolveLanguage(_ code: String) -> String {
+        code == "auto" || Constants.validLanguageCodes.contains(code) ? code : "auto"
+    }
+
+    /// Returns nil for "auto" (provider auto-detects), otherwise the code.
+    nonisolated static func resolveLanguageForProvider(_ code: String) -> String? {
+        code == "auto" ? nil : code
+    }
+
+    /// Truncates the vocabulary prompt to the maximum length the ASR model
+    /// accepts as context.
+    nonisolated static func truncateVocabularyPrompt(_ prompt: String) -> String {
+        String(prompt.prefix(500))
     }
 }
 

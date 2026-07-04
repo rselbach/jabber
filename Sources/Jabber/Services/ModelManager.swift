@@ -350,15 +350,32 @@ final class ModelManager {
             throw ModelError.cannotDeleteActiveModel
         }
 
-        guard let modelPath = modelFolder(for: modelId) else {
+        guard modelFolder(for: modelId) != nil else {
             throw ModelError.modelNotFound(modelId: modelId)
         }
 
-        guard FileManager.default.fileExists(atPath: modelPath.path) else {
+        let fm = FileManager.default
+        let existingModelPaths = modelFolderCandidates(for: modelId).filter {
+            fm.fileExists(atPath: $0.path)
+        }
+
+        guard !existingModelPaths.isEmpty else {
             throw ModelError.modelNotFound(modelId: modelId)
         }
 
-        try FileManager.default.removeItem(at: modelPath)
+        var removalError: Error?
+        for modelPath in existingModelPaths {
+            do {
+                try fm.removeItem(at: modelPath)
+            } catch {
+                logger.error("Failed to delete model folder for \(modelId) at \(modelPath.path): \(error.localizedDescription)")
+                removalError = removalError ?? error
+            }
+        }
+
+        if let removalError {
+            throw removalError
+        }
 
         let didSwitchSelection: Bool
         if currentModel == modelId {
@@ -399,12 +416,7 @@ final class ModelManager {
     private func modelFolder(for modelId: String) -> URL? {
         guard let def = AppMode.modelDefinition(for: modelId) else { return nil }
 
-        let candidates = [
-            cacheFolder(for: def.huggingFaceModelId),
-            oldCacheFolder(for: def.huggingFaceModelId)
-        ]
-
-        for folder in candidates {
+        for folder in modelFolderCandidates(for: modelId) {
             let validation = ModelInstallationValidator.validate(folder: folder, for: def.family)
             guard validation.folderExists else { continue }
             if validation.isComplete {
@@ -414,6 +426,15 @@ final class ModelManager {
         }
 
         return nil
+    }
+
+    private func modelFolderCandidates(for modelId: String) -> [URL] {
+        guard let def = AppMode.modelDefinition(for: modelId) else { return [] }
+
+        return [
+            cacheFolder(for: def.huggingFaceModelId),
+            oldCacheFolder(for: def.huggingFaceModelId)
+        ]
     }
 
     /// Resolve the on-disk download folder for a model. Centralized so the

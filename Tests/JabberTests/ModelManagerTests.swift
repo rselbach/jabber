@@ -1,4 +1,5 @@
 import XCTest
+import AudioCommon
 @testable import Jabber
 
 @MainActor
@@ -93,6 +94,37 @@ final class ModelManagerTests: XCTestCase {
             modelManager.models.first { $0.id == AppMode.qwen3ModelId }
         )
         XCTAssertTrue(qwenModel.isDownloaded)
+    }
+
+    func testDeleteModelRemovesNewAndLegacyCacheFolders() throws {
+        let newModelFolder = cacheBaseURL
+            .appendingPathComponent("models", isDirectory: true)
+            .appendingPathComponent("aufklarer", isDirectory: true)
+            .appendingPathComponent("Qwen3-ASR-1.7B-MLX-8bit", isDirectory: true)
+        try createCompleteQwenModelFolder(at: newModelFolder)
+
+        let legacyModelFolder = cacheBaseURL
+            .appendingPathComponent(
+                HuggingFaceDownloader.sanitizedCacheKey(for: "aufklarer/Qwen3-ASR-1.7B-MLX-8bit"),
+                isDirectory: true
+            )
+        try createCompleteQwenModelFolder(at: legacyModelFolder)
+
+        try modelManager.deleteModel(AppMode.qwen3ModelId)
+
+        XCTAssertFalse(
+            FileManager.default.fileExists(atPath: newModelFolder.path),
+            "New cache layout folder should be removed"
+        )
+        XCTAssertFalse(
+            FileManager.default.fileExists(atPath: legacyModelFolder.path),
+            "Legacy cache layout folder should be removed"
+        )
+
+        let qwenModel = try XCTUnwrap(
+            modelManager.models.first { $0.id == AppMode.qwen3ModelId }
+        )
+        XCTAssertFalse(qwenModel.isDownloaded)
     }
 
     func testMigrateLegacyUnavailableModelIds() {

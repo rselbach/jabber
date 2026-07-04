@@ -114,7 +114,10 @@ final class TypingService {
     }
 
     private func outputViaDirectTyping(_ text: String, targetProcessID: pid_t?) {
-        if permissionService.hasAccessibilityPermission() {
+        switch DirectTypingFallback.resolve(
+            hasAccessibilityPermission: permissionService.hasAccessibilityPermission()
+        ) {
+        case .pasteWithRestore:
             if let targetProcessID,
                insertUnicodeText(text, targetProcessID: targetProcessID) {
                 return
@@ -127,11 +130,20 @@ final class TypingService {
             if insertUnicodeTextViaHID(text) {
                 return
             }
-        } else {
-            logger.warning("Accessibility permission not granted, using clipboard fallback")
-        }
 
-        pasteViaClipboard(text)
+            pasteViaClipboard(text)
+        case .copyOnlyWithNotice:
+            // Accessibility not granted: a synthetic Cmd+V is silently dropped
+            // by macOS for untrusted processes, and the scheduled clipboard
+            // restore would then overwrite the transcript with the prior
+            // clipboard contents. Copy without restoring and tell the user.
+            logger.warning("Accessibility permission not granted; copying transcript without paste")
+            copyOnly(text)
+            NotificationService.shared.showWarning(
+                title: "Transcript Copied to Clipboard",
+                message: "Grant Accessibility permission in Privacy & Security to enable direct typing into apps."
+            )
+        }
     }
 
     private func copyOnly(_ text: String) {
@@ -423,4 +435,28 @@ struct PasteboardSnapshot: Equatable {
 
 private enum KeyCode {
     static let v: CGKeyCode = 0x09
+}
+
+/// Decides how `outputViaDirectTyping` delivers text once the preferred
+/// Accessibility-based insertion methods are off the table.
+///
+/// When Accessibility isn't granted, the previous behavior fell through to
+/// `pasteViaClipboard`, which posts a synthetic Cmd+V. macOS silently drops
+/// that event for untrusted processes, and ~500ms later the clipboard restore
+/// overwrites the transcript with the prior clipboard contents — net effect:
+/// nothing typed, transcript lost, no feedback. The copy-only path copies
+/// without scheduling a restore, so the transcript survives in the clipboard
+/// and the user is told why direct typing didn't happen.
+enum DirectTypingFallback {
+    enum Delivery: Equatable {
+        /// Post a synthetic Cmd+V and restore the previous clipboard.
+        case pasteWithRestore
+        /// Copy to the clipboard without restoring, and surface a
+        /// user-visible notification explaining what happened.
+        case copyOnlyWithNotice
+    }
+
+    static func resolve(hasAccessibilityPermission hasPermission: Bool) -> Delivery {
+        hasPermission ? .pasteWithRestore : .copyOnlyWithNotice
+    }
 }

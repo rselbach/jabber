@@ -98,4 +98,24 @@ final class TypingServiceTests: XCTestCase {
         XCTAssertTrue(snapshot.restore(to: pasteboard))
         XCTAssertNil(pasteboard.string(forType: .string))
     }
+
+    // Regression: when Accessibility is missing, direct typing must NOT fall
+    // through to pasteViaClipboard — macOS drops the synthetic Cmd+V for
+    // untrusted processes and the clipboard restore then overwrites the
+    // transcript. The fallback must copy without restoring and notify.
+    func testDirectTypingFallbackCopiesOnlyWhenAccessibilityMissing() {
+        let tests: [String: (hasPermission: Bool, want: DirectTypingFallback.Delivery)] = [
+            "granted: paste and restore": (
+                hasPermission: true, want: .pasteWithRestore
+            ),
+            "missing: copy and notify, never paste": (
+                hasPermission: false, want: .copyOnlyWithNotice
+            )
+        ]
+
+        for (name, tc) in tests {
+            let got = DirectTypingFallback.resolve(hasAccessibilityPermission: tc.hasPermission)
+            XCTAssertEqual(got, tc.want, name)
+        }
+    }
 }

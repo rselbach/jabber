@@ -26,6 +26,19 @@ final class AppleSpeechProvider: TranscriptionProvider, @unchecked Sendable {
         let languageCode = await MainActor.run { TypedSettings[.selectedLanguage] }
         let locale = Self.locale(for: languageCode)
 
+        try await prepareForLocale(locale, progressHandler: progressHandler)
+        ready = true
+        progressHandler?(1.0, "Ready")
+    }
+
+    /// Ensures the speech asset for `locale` is installed and rebuilds the
+    /// converter/analyzerFormat for it. Shared by `load()` and `transcribe()`
+    /// so a language switch without a model switch re-preares the provider
+    /// instead of transcribing in the stale locale.
+    private func prepareForLocale(
+        _ locale: Locale,
+        progressHandler: ((Double, String) -> Void)?
+    ) async throws {
         let transcriber = SpeechTranscriber(
             locale: locale,
             transcriptionOptions: [],
@@ -45,7 +58,9 @@ final class AppleSpeechProvider: TranscriptionProvider, @unchecked Sendable {
                 // progressHandler's type comes from the TranscriptionProvider protocol as a
                 // non-Sendable closure, so it cannot cross a Task boundary by default. It is
                 // only invoked from this single monitor Task, preserving the pre-existing
-                // timing/behavior, so we opt out of the check here rather than add sync.
+                // timing/behavior, so we opt out of the check here rather than add sync. When
+                // transcribe() re-prepares for a new locale it passes nil, making the monitor
+                // a no-op loop.
                 nonisolated(unsafe) let onProgress = progressHandler
                 let monitorTask = Task {
                     while !Task.isCancelled, !progress.isFinished, !progress.isCancelled {
@@ -67,14 +82,22 @@ final class AppleSpeechProvider: TranscriptionProvider, @unchecked Sendable {
             converter = AVAudioConverter(from: Self.inputFormat, to: analyzerFormat)
         }
         preparedLocale = locale
-        ready = true
-        progressHandler?(1.0, "Ready")
     }
 
     func transcribe(samples: [Float], language: String?, vocabularyPrompt: String?) async throws -> String {
         guard ready else { throw TranscriptionError.loadFailed }
 
-        let locale = preparedLocale ?? Self.locale(for: language)
+        // Prefer the freshly-passed language over the locale captured at load()
+        // time. TranscriptionService only reloads when the model id changes, so
+        // a language switch without a model switch would otherwise leave Apple
+        // Speech transcribing in the old language until app restart. When the
+        // resolved locale differs from the one the converter was built for,
+        // re-prepare (installing the new locale's asset if needed and
+        // rebuilding the audio path) so transcription matches.
+        let locale = Self.resolveLocale(language: language, preparedLocale: preparedLocale)
+        if locale != preparedLocale {
+            try await prepareForLocale(locale, progressHandler: nil)
+        }
 
         let transcriber = SpeechTranscriber(
             locale: locale,
@@ -178,6 +201,18 @@ final class AppleSpeechProvider: TranscriptionProvider, @unchecked Sendable {
         }
         let identifier = localeMap[code] ?? code
         return Locale(identifier: identifier)
+    }
+
+    /// Resolves the locale for a transcription call, preferring the freshly
+    /// passed `language` over the locale captured at `load()` time. When
+    /// `language` is nil (auto-detect), keeps the prepared locale (or falls
+    /// back to the current locale) so auto-detect doesn't drift mid-session.
+    /// Pure so the decision is testable without the Speech framework.
+    static func resolveLocale(language: String?, preparedLocale: Locale?) -> Locale {
+        if let language {
+            return locale(for: language)
+        }
+        return preparedLocale ?? locale(for: nil)
     }
 
     static func normalized(_ locale: Locale) -> String {

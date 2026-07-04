@@ -48,4 +48,43 @@ final class AppleSpeechProviderTests: XCTestCase {
             )
         }
     }
+
+    // MARK: - Bug: transcribe must honor the passed language over the stale
+
+    // preparedLocale. The Speech-API path needs a real device, so this guards
+    // the pure locale-resolution decision that drives it.
+
+    func testResolveLocalePrefersPassedLanguageOverPreparedLocale() {
+        // User switched English -> German without switching models: the passed
+        // language must win over the locale captured at load() time.
+        let prepared = Locale(identifier: "en-US")
+        XCTAssertEqual(
+            AppleSpeechProvider.resolveLocale(language: "de", preparedLocale: prepared),
+            Locale(identifier: "de-DE")
+        )
+    }
+
+    func testResolveLocaleKeepsPreparedLocaleForAutoDetect() {
+        // Auto-detect (nil language) must keep the prepared locale instead of
+        // drifting to Locale.current mid-session.
+        let prepared = Locale(identifier: "es-ES")
+        XCTAssertEqual(
+            AppleSpeechProvider.resolveLocale(language: nil, preparedLocale: prepared),
+            prepared
+        )
+    }
+
+    func testResolveLocaleFallsBackToCurrentWhenNothingPrepared() {
+        XCTAssertEqual(
+            AppleSpeechProvider.resolveLocale(language: nil, preparedLocale: nil),
+            Locale.current
+        )
+    }
+
+    func testResolveLocaleUsesCodeDirectlyWhenUnmapped() {
+        XCTAssertEqual(
+            AppleSpeechProvider.resolveLocale(language: "xx", preparedLocale: Locale(identifier: "en-US")),
+            Locale(identifier: "xx")
+        )
+    }
 }

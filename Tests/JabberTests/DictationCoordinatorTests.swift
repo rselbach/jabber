@@ -314,6 +314,10 @@ final class DictationCoordinatorTests: XCTestCase {
         transcriptionService.transcribeDelay = .milliseconds(200)
         transcriptionService.transcribeResult = .success("ignored")
 
+        let noOutput = expectation(description: "no output after cancel")
+        noOutput.isInverted = true
+        typingService.onOutput = { _ in noOutput.fulfill() }
+
         XCTAssertTrue(coordinator.start())
         coordinator.stop()
         XCTAssertTrue(coordinator.isTranscribing)
@@ -321,8 +325,7 @@ final class DictationCoordinatorTests: XCTestCase {
         coordinator.cancel()
         XCTAssertTrue(coordinator.isIdle)
 
-        // Give the cancelled task time to finish and verify it did not output.
-        try? await Task.sleep(for: .milliseconds(300))
+        await fulfillment(of: [noOutput], timeout: 1.0)
         XCTAssertTrue(typingService.outputs.isEmpty)
     }
 
@@ -330,6 +333,10 @@ final class DictationCoordinatorTests: XCTestCase {
         audioCapture.storedSamples = makeLoudSamples()
         transcriptionService.transcribeDelay = .milliseconds(500)
         transcriptionService.transcribeResult = .success("ignored")
+
+        let noOutput = expectation(description: "no output after cancel")
+        noOutput.isInverted = true
+        typingService.onOutput = { _ in noOutput.fulfill() }
 
         XCTAssertTrue(coordinator.start())
         coordinator.stop()
@@ -342,8 +349,7 @@ final class DictationCoordinatorTests: XCTestCase {
         // inference to finish. This is the cancel-activity-leak regression.
         XCTAssertTrue(coordinator.canStart)
 
-        // Let the abandoned task finish so it does not outlive tearDown.
-        try? await Task.sleep(for: .milliseconds(600))
+        await fulfillment(of: [noOutput], timeout: 1.0)
         XCTAssertTrue(typingService.outputs.isEmpty)
     }
 
@@ -372,12 +378,19 @@ final class DictationCoordinatorTests: XCTestCase {
         coordinator.cancel()
         XCTAssertTrue(coordinator.isIdle)
 
+        let noOutput = expectation(description: "no output after cancel")
+        noOutput.isInverted = true
+        typingService.onOutput = { _ in noOutput.fulfill() }
+
+        let noSave = expectation(description: "no history save after cancel")
+        noSave.isInverted = true
+        dictationHistoryStore.onSaveSession = { _ in noSave.fulfill() }
+
         // Release the parked (uncancellable) post-processing so the stale task
         // races forward into the save/output section.
         postProcessor.releaseProcess()
 
-        // Let the abandoned task finish.
-        try? await Task.sleep(for: .milliseconds(200))
+        await fulfillment(of: [noOutput, noSave], timeout: 1.0)
 
         // The stale task must NOT save history or type output after cancel().
         XCTAssertTrue(typingService.outputs.isEmpty)
@@ -1098,10 +1111,12 @@ final class FakeTranscriptionService: TranscriptionProtocol, @unchecked Sendable
 final class FakeTypingService: OutputProtocol, @unchecked Sendable {
     private(set) var outputs: [String] = []
     private(set) var targetProcessIDs: [pid_t?] = []
+    var onOutput: ((String) -> Void)?
 
     func output(_ text: String, targetProcessID: pid_t?) {
         outputs.append(text)
         targetProcessIDs.append(targetProcessID)
+        onOutput?(text)
     }
 }
 
@@ -1120,9 +1135,11 @@ final class FakeMediaPlaybackService: MediaPlaybackProtocol, @unchecked Sendable
 
 final class FakeDictationHistoryStore: DictationHistoryProtocol, @unchecked Sendable {
     private(set) var sessions: [DictationHistorySession] = []
+    var onSaveSession: ((DictationHistorySession) -> Void)?
 
     func saveSession(_ session: DictationHistorySession) async {
         sessions.append(session)
+        onSaveSession?(session)
     }
 }
 

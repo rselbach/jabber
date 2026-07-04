@@ -12,7 +12,7 @@ final class AppReadinessGateTests: XCTestCase {
             didResume = true
         }
 
-        try await Task.sleep(for: .milliseconds(20))
+        try await Task.sleep(for: .milliseconds(50))
         XCTAssertFalse(didResume)
 
         gate.markUIReady()

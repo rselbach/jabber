@@ -172,23 +172,27 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
-    private func startModelLoadingTask() {
-        modelLoadTask = Task { [weak self] in
+    private func startModelLoadingTask(
+        operation: @escaping @MainActor @Sendable (AppDelegate) async -> Void = { appDelegate in
+            await appDelegate.loadModel()
+        }
+    ) {
+        modelLoadTask?.cancel()
+        modelLoadTask = Task { @MainActor [weak self] in
             guard let self else { return }
-            await loadModel()
+            await operation(self)
         }
     }
 
     @objc private func handleModelChange() {
         TypedSettings.remove(.declinedModelMigrationNoticeKey)
-        modelLoadTask?.cancel()
         dictationCoordinator.cancel()
-        modelLoadTask = Task { [weak self] in
-            guard let self else { return }
+        startModelLoadingTask { appDelegate in
+            let transcriptionService = appDelegate.transcriptionService
             await transcriptionService.setSessionModelOverride(nil)
             await transcriptionService.unloadModel()
             if Task.isCancelled { return }
-            await loadModel()
+            await appDelegate.loadModel()
         }
     }
 
@@ -227,7 +231,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         let response = alert.runModal()
         if response == .alertFirstButtonReturn {
-            modelLoadTask?.cancel()
             startModelLoadingTask()
         }
     }
@@ -763,10 +766,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             return true
         }
 
-        modelLoadTask = Task { [weak self] in
-            guard let self else { return }
+        startModelLoadingTask { appDelegate in
+            let transcriptionService = appDelegate.transcriptionService
             await transcriptionService.setSessionModelOverride(fallbackModelId)
-            await loadModel()
+            await appDelegate.loadModel()
         }
         return true
     }

@@ -4,7 +4,8 @@ import SwiftUI
 
 @MainActor
 final class WaveformView: ObservableObject {
-    @Published private var circularBuffer: [Float] = []
+    private var circularBuffer: [Float] = []
+    @Published private(set) var cachedLevels: [Float] = []
     @Published private(set) var isProcessing = false
     @Published private(set) var processingLabel = "Transcribing..."
     @Published private(set) var partialTranscription = ""
@@ -31,11 +32,7 @@ final class WaveformView: ObservableObject {
     }
 
     var levels: [Float] {
-        guard isFull else {
-            return circularBuffer
-        }
-        // Return levels in chronological order (oldest to newest)
-        return Array(circularBuffer[writeIndex...]) + Array(circularBuffer[..<writeIndex])
+        cachedLevels
     }
 
     func addLevel(_ level: Float) {
@@ -47,10 +44,20 @@ final class WaveformView: ObservableObject {
             circularBuffer[writeIndex] = level
             writeIndex = (writeIndex + 1) % maxSamples
         }
+        cachedLevels = computeLevels()
+    }
+
+    private func computeLevels() -> [Float] {
+        guard isFull else {
+            return circularBuffer
+        }
+        // Return levels in chronological order (oldest to newest)
+        return Array(circularBuffer[writeIndex...]) + Array(circularBuffer[..<writeIndex])
     }
 
     func reset() {
         circularBuffer.removeAll()
+        cachedLevels.removeAll()
         writeIndex = 0
         isFull = false
         isProcessing = false

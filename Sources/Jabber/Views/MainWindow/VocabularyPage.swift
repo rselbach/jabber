@@ -7,6 +7,7 @@ struct VocabularyPage: View {
 
     @State private var wordRows: [VocabularyWordRow] = []
     @State private var entries: [ReplacementEntry] = []
+    @State private var persistDebounceTask: Task<Void, Never>?
 
     var body: some View {
         Form {
@@ -39,7 +40,7 @@ struct VocabularyPage: View {
                     deleteEntry(entry)
                 }
                 .onChange(of: entry) { _, _ in
-                    persistEntries()
+                    schedulePersist()
                 }
             }
             Button {
@@ -69,7 +70,7 @@ struct VocabularyPage: View {
                     TextField("Word or phrase", text: $row.text)
                         .textFieldStyle(.roundedBorder)
                         .onChange(of: row.text) { _, _ in
-                            persistWords()
+                            schedulePersist()
                         }
                     Button {
                         deleteWordRow(row)
@@ -105,6 +106,28 @@ struct VocabularyPage: View {
     }
 
     private func persistAll() {
+        flushPersist()
+    }
+
+    private func schedulePersist() {
+        persistDebounceTask?.cancel()
+        persistDebounceTask = Task { @MainActor in
+            do {
+                try await Task.sleep(for: .milliseconds(500))
+            } catch is CancellationError {
+                return
+            } catch {
+                return
+            }
+            guard !Task.isCancelled else { return }
+            persistEntries()
+            persistWords()
+        }
+    }
+
+    private func flushPersist() {
+        persistDebounceTask?.cancel()
+        persistDebounceTask = nil
         persistEntries()
         persistWords()
     }

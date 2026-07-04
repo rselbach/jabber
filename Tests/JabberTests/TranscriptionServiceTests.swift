@@ -339,7 +339,7 @@ private final class FakeTranscriptionProvider: TranscriptionProvider, @unchecked
         }
     }
 
-    func load(from _: URL, progressHandler _: ((Double, String) -> Void)?) async throws {
+    func load(from _: URL, progressHandler _: (@Sendable (Double, String) -> Void)?) async throws {
         let holds = state.withLock { state in
             state.loadCallCount += 1
             return (started: state.loadStarted, release: state.releaseLoad)

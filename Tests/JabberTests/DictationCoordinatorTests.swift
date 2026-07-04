@@ -266,6 +266,51 @@ final class DictationCoordinatorTests: XCTestCase {
         XCTAssertEqual(typingService.outputs, ["final"])
     }
 
+    func testStopWithHungStreamingPreviewStillRunsFinalTranscription() async throws {
+        coordinator = DictationCoordinator(
+            audioCapture: audioCapture,
+            transcriptionService: transcriptionService,
+            typingService: typingService,
+            mediaPlaybackService: mediaPlaybackService,
+            dictationHistoryStore: dictationHistoryStore,
+            postProcessingProvider: postProcessor,
+            streamingPreviewInterval: .milliseconds(10),
+            minimumStreamingPreviewSampleCount: 16_000,
+            streamingPreviewStopTimeout: .milliseconds(30),
+            isPostProcessingEnabled: { [weak self] in self?.postProcessingEnabled ?? false },
+            replacementEntriesProvider: { [weak self] in self?.replacementEntries ?? [] }
+        )
+
+        audioCapture.storedSamples = makeLoudSamples()
+        transcriptionService.streamingResult = .success("preview")
+        transcriptionService.holdStreamingUntilReleased = true
+        transcriptionService.transcribeResult = .success("final")
+
+        let partialStartedExpectation = XCTestExpectation(description: "streaming preview started")
+        transcriptionService.onStreamingStarted = {
+            partialStartedExpectation.fulfill()
+        }
+
+        let idleExpectation = XCTestExpectation(description: "coordinator returns to idle")
+        coordinator.onStateChange = { state in
+            if state == .idle {
+                idleExpectation.fulfill()
+            }
+        }
+
+        XCTAssertTrue(coordinator.start())
+        await fulfillment(of: [partialStartedExpectation], timeout: 1.0)
+
+        coordinator.stop()
+        await fulfillment(of: [idleExpectation], timeout: 1.0)
+
+        XCTAssertEqual(transcriptionService.callOrder, [.streaming, .final])
+        XCTAssertEqual(typingService.outputs, ["final"])
+
+        transcriptionService.releaseStreaming()
+        try await Task.sleep(for: .milliseconds(20))
+    }
+
     func testStreamingPreviewCanBeDisabledByTranscriptionService() async throws {
         transcriptionService.supportsStreamingTranscription = false
         audioCapture.storedSamples = makeLoudSamples()

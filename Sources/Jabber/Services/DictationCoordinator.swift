@@ -159,6 +159,7 @@ final class DictationCoordinator {
     private let streamingPreviewInterval: Duration
     private let minimumStreamingPreviewSampleCount: Int
     private let streamingPreviewWindowSamples: Int
+    private let streamingPreviewStopTimeout: Duration
     private let maxRecordingDuration: Duration
     private var recordingLimitTask: Task<Void, Never>?
     private let isPostProcessingEnabled: @MainActor () -> Bool
@@ -175,6 +176,7 @@ final class DictationCoordinator {
         streamingPreviewInterval: Duration = .milliseconds(500),
         minimumStreamingPreviewSampleCount: Int = 16_000,
         streamingPreviewWindowSamples: Int = 16_000 * 15,
+        streamingPreviewStopTimeout: Duration = .seconds(5),
         maxRecordingDuration: Duration = .seconds(900),
         isPostProcessingEnabled: @escaping @MainActor () -> Bool = { TypedSettings[.postProcessingEnabled] },
         replacementEntriesProvider: @escaping @MainActor () -> [ReplacementEntry] = { TypedSettings.replacementEntries }
@@ -188,6 +190,7 @@ final class DictationCoordinator {
         self.streamingPreviewInterval = streamingPreviewInterval
         self.minimumStreamingPreviewSampleCount = minimumStreamingPreviewSampleCount
         self.streamingPreviewWindowSamples = streamingPreviewWindowSamples
+        self.streamingPreviewStopTimeout = streamingPreviewStopTimeout
         self.maxRecordingDuration = maxRecordingDuration
         self.isPostProcessingEnabled = isPostProcessingEnabled
         self.replacementEntriesProvider = replacementEntriesProvider
@@ -260,7 +263,7 @@ final class DictationCoordinator {
 
         transcriptionTask = Task { [weak self] in
             if let pendingStreamingTask {
-                await pendingStreamingTask.value
+                await self?.waitForStreamingPreviewToStop(pendingStreamingTask)
             }
             await self?.transcribeAndOutput(samples: samples, sessionID: sessionID)
         }
@@ -316,6 +319,32 @@ final class DictationCoordinator {
         streamingTask = nil
         task?.cancel()
         return task
+    }
+
+    private func waitForStreamingPreviewToStop(_ task: Task<Void, Never>) async {
+        let timeout = streamingPreviewStopTimeout
+        await withCheckedContinuation { continuation in
+            let box = OneShotContinuation(continuation)
+            Task {
+                await task.value
+                box.resume()
+            }
+            Task { [logger] in
+                do {
+                    try await Task.sleep(for: timeout)
+                } catch is CancellationError {
+                    return
+                } catch {
+                    logger.error("Streaming preview stop timeout sleep failed: \(error.localizedDescription)")
+                    return
+                }
+
+                task.cancel()
+                if box.resume() {
+                    logger.warning("Timed out waiting for streaming preview to stop; proceeding with final transcription")
+                }
+            }
+        }
     }
 
     /// Enforce the max session duration. When the limit elapses while still
@@ -696,5 +725,27 @@ final class DictationCoordinator {
         state = .idle
         onStateChange?(.idle)
         mediaPlaybackService.resumeAfterDictationIfNeeded()
+    }
+}
+
+private final class OneShotContinuation: @unchecked Sendable {
+    private let lock = NSLock()
+    private var continuation: CheckedContinuation<Void, Never>?
+
+    init(_ continuation: CheckedContinuation<Void, Never>) {
+        self.continuation = continuation
+    }
+
+    @discardableResult
+    func resume() -> Bool {
+        let continuation = lock.withLock {
+            let continuation = self.continuation
+            self.continuation = nil
+            return continuation
+        }
+
+        guard let continuation else { return false }
+        continuation.resume()
+        return true
     }
 }

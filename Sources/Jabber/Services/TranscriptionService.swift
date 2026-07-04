@@ -96,6 +96,7 @@ actor TranscriptionService {
 
     private var provider: TranscriptionProvider?
     private let providerCallGate = ProviderCallGate()
+    private let streamingProviderCallGate = ProviderCallGate()
     private let loadDependencies: LoadDependencies
     private var isLoading = false
     private var loadedModelId: String?
@@ -225,7 +226,7 @@ actor TranscriptionService {
 
         let lang = Self.resolveLanguageForProvider(selectedLanguage)
         let prompt = vocabularyPrompt.isEmpty ? nil : vocabularyPrompt
-        let text = try await providerCallGate.run {
+        let text = try await streamingProviderCallGate.run {
             try await provider.transcribeStreaming(samples: samples, language: lang, vocabularyPrompt: prompt)
         }
         try Task.checkCancellation()
@@ -235,7 +236,7 @@ actor TranscriptionService {
     func resetStreamingTranscription() async {
         guard let provider else { return }
         do {
-            try await providerCallGate.run {
+            try await streamingProviderCallGate.run {
                 provider.resetStreamingTranscription()
             }
         } catch is CancellationError {

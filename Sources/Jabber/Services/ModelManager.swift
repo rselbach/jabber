@@ -589,7 +589,9 @@ final class ModelManager {
                 .appendingPathComponent("qwen3-speech", isDirectory: true)
         }
 
-        let caches = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first!
+        guard let caches = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first else {
+            fatalError("Unable to resolve user caches directory for model cache")
+        }
         return caches.appendingPathComponent("qwen3-speech", isDirectory: true)
     }
 

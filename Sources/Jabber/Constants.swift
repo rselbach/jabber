@@ -15,12 +15,6 @@ enum Constants {
         /// global hotkey.
         static let hotkeyShortcutDidChange = Notification.Name("com.rselbach.jabber.hotkeyShortcutDidChange")
 
-        /// Posted when the hotkey activation mode changes. `object` is the new
-        /// `HotkeyActivationMode`. Read at key-down time, so no re-registration
-        /// is needed — kept distinct from `hotkeyShortcutDidChange` so observers
-        /// don't have to type-sniff the payload.
-        static let hotkeyActivationModeDidChange = Notification.Name("com.rselbach.jabber.hotkeyActivationModeDidChange")
-
         /// Posted while the Settings UI is recording a new hotkey
         static let hotkeyCaptureDidBegin = Notification.Name("com.rselbach.jabber.hotkeyCaptureDidBegin")
         static let hotkeyCaptureDidEnd = Notification.Name("com.rselbach.jabber.hotkeyCaptureDidEnd")

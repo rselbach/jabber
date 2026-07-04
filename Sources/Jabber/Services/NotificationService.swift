@@ -10,7 +10,6 @@ final class NotificationService: NSObject {
     private let logger = Logger(subsystem: "com.rselbach.jabber", category: "NotificationService")
     private let notificationCenter: UNUserNotificationCenter?
     private let isValidBundle: Bool
-    private var isAuthorized = false
 
     private override init() {
         isValidBundle = Bundle.main.bundleIdentifier != nil
@@ -41,7 +40,6 @@ final class NotificationService: NSObject {
             }
             Task { @MainActor in
                 guard let self else { return }
-                self.isAuthorized = granted
                 if !granted {
                     logger.info("User denied notification permissions, will use alert fallback")
                 }
@@ -85,10 +83,9 @@ final class NotificationService: NSObject {
             return
         }
 
-        // Recheck authorization on every send. The cached `isAuthorized` flag
-        // is not trusted here: the user can revoke notification permission in
-        // System Settings after initially granting it, in which case
-        // `center.add` still succeeds but the system never displays the
+        // Recheck authorization on every send. The user can revoke notification
+        // permission in System Settings after initially granting it, in which
+        // case `center.add` still succeeds but the system never displays the
         // notification and all non-critical warnings vanish silently. Reading
         // the current settings is async and cheap, so re-verify per send and
         // fall back to an alert when revoked.
@@ -96,7 +93,6 @@ final class NotificationService: NSObject {
             guard let self else { return }
             let settings = await center.notificationSettings()
             let authorised = Self.isAuthorized(status: settings.authorizationStatus)
-            self.isAuthorized = authorised
             guard authorised else {
                 self.logger.info("Notification permission not granted, using alert fallback: \(title)")
                 self.showAlert(

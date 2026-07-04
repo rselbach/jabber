@@ -733,8 +733,8 @@ struct OnboardingView: View {
 
     private var hotkeyKeycapLabels: [String] {
         HotkeyShortcut(
-            keyCode: UInt32(max(0, hotkeyKeyCode)),
-            modifiers: UInt32(max(0, hotkeyModifiers))
+            keyCode: UInt32(clamping: hotkeyKeyCode),
+            modifiers: UInt32(clamping: hotkeyModifiers)
         ).keycapLabels
     }
 

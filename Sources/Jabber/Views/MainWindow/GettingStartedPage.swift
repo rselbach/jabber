@@ -92,8 +92,8 @@ struct GettingStartedPage: View {
 
     private var hotkeyShortcut: HotkeyShortcut {
         HotkeyShortcut(
-            keyCode: UInt32(max(0, hotkeyKeyCode)),
-            modifiers: UInt32(max(0, hotkeyModifiers))
+            keyCode: UInt32(clamping: hotkeyKeyCode),
+            modifiers: UInt32(clamping: hotkeyModifiers)
         )
     }
 

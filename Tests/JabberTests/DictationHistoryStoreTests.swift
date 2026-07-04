@@ -251,6 +251,55 @@ final class DictationHistoryStoreTests: XCTestCase {
         XCTAssertEqual(entries.map(\.transcript), ["Greendale Community College"])
     }
 
+    // MARK: - Bug 3: corrupt metadata.json must be pruned, not just missing
+
+    func testRetentionPrunesCorruptMetadataEntryDirectories() async throws {
+        let store = makeStore()
+
+        // Plant a corrupt entry: valid audio.wav but metadata.json is garbage
+        // JSON. loadEntries() skips it (decode fails) but totalHistoryByteCount
+        // still counts its audio, so without pruning it survives forever.
+        let corruptDir = historyDirectoryURL
+            .appendingPathComponent("2024-01-01T00-00-00Z-corrupt", isDirectory: true)
+        try FileManager.default.createDirectory(at: corruptDir, withIntermediateDirectories: true)
+        try Data([0xDE, 0xAD, 0xBE, 0xEF]).write(to: corruptDir.appendingPathComponent("audio.wav"))
+        try Data("{ not valid json".utf8).write(to: corruptDir.appendingPathComponent("metadata.json"))
+
+        // Saving a real session triggers enforceRetentionLimit, which should
+        // sweep the corrupt entry before applying count/byte limits.
+        _ = try await store.save(session(
+            transcript: "Troy and Abed in the morning",
+            timestamp: Date(timeIntervalSince1970: 100)
+        ))
+
+        XCTAssertFalse(FileManager.default.fileExists(atPath: corruptDir.path), "corrupt entry directory should be pruned")
+        let entries = await store.entries()
+        XCTAssertEqual(entries.map(\.transcript), ["Troy and Abed in the morning"])
+    }
+
+    func testCorruptMetadataBytesDoNotEvictValidEntries() async throws {
+        // Tight byte budget that the corrupt entry alone exceeds, but a single
+        // valid entry fits within. Before the fix the corrupt entry's bytes
+        // counted against the budget (loadEntries skipped it but
+        // totalHistoryByteCount did not), evicting the only valid entry.
+        let store = makeStore(maxByteCount: 4096)
+
+        let corruptDir = historyDirectoryURL
+            .appendingPathComponent("2024-01-01T00-00-00Z-corrupt", isDirectory: true)
+        try FileManager.default.createDirectory(at: corruptDir, withIntermediateDirectories: true)
+        try Data(repeating: 0xAA, count: 8192).write(to: corruptDir.appendingPathComponent("audio.wav"))
+        try Data("{ not valid json".utf8).write(to: corruptDir.appendingPathComponent("metadata.json"))
+
+        _ = try await store.save(session(
+            transcript: "Señor Chang's Spanish class",
+            timestamp: Date(timeIntervalSince1970: 100)
+        ))
+
+        XCTAssertFalse(FileManager.default.fileExists(atPath: corruptDir.path), "corrupt entry should be pruned first")
+        let entries = await store.entries()
+        XCTAssertEqual(entries.map(\.transcript), ["Señor Chang's Spanish class"])
+    }
+
     private func makeStore(
         maxEntryCount: Int = 50,
         maxByteCount: Int64 = 500 * 1024 * 1024,

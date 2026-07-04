@@ -249,22 +249,32 @@ actor DictationHistoryStore: DictationHistoryProtocol {
         )
 
         var entries: [DictationHistoryEntry] = []
-        let decoder = JSONDecoder()
-        decoder.dateDecodingStrategy = .iso8601
 
         for entryDirectory in entryDirectories {
             let metadataURL = entryDirectory.appendingPathComponent(Self.metadataFilename)
             guard fileManager.fileExists(atPath: metadataURL.path) else { continue }
-
-            do {
-                let metadataData = try Data(contentsOf: metadataURL)
-                try entries.append(decoder.decode(DictationHistoryEntry.self, from: metadataData))
-            } catch {
-                logger.error("Failed to read dictation history metadata at \(metadataURL.path): \(error.localizedDescription)")
+            if let entry = decodeEntry(at: metadataURL) {
+                entries.append(entry)
             }
         }
 
         return entries.sorted { $0.timestamp > $1.timestamp }
+    }
+
+    /// Decodes a single entry's `metadata.json`, logging (not swallowing) the
+    /// failure. Shared by `loadEntries` (which skips corrupt entries) and
+    /// `pruneOrphanEntryDirectories` (which removes them) so the two passes
+    /// agree on what "corrupt" means.
+    private func decodeEntry(at metadataURL: URL) -> DictationHistoryEntry? {
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        do {
+            let metadataData = try Data(contentsOf: metadataURL)
+            return try decoder.decode(DictationHistoryEntry.self, from: metadataData)
+        } catch {
+            logger.error("Failed to read dictation history metadata at \(metadataURL.path): \(error.localizedDescription)")
+            return nil
+        }
     }
 
     private func enforceRetentionLimit() throws {
@@ -282,10 +292,15 @@ actor DictationHistoryStore: DictationHistoryProtocol {
         }
     }
 
-    /// Removes entry directories that lack `metadata.json`. Such orphans are
-    /// invisible to `loadEntries()` (which skips them) but still counted by
-    /// `totalHistoryByteCount()`, so they would otherwise consume the retention
-    /// byte budget and starve valid history.
+    /// Removes entry directories that are invisible to `loadEntries()` but
+    /// still counted by `totalHistoryByteCount()`, so they cannot consume the
+    /// retention byte budget and starve valid history. Two cases:
+    /// - `metadata.json` missing (a partial write left an orphan).
+    /// - `metadata.json` present but fails to decode (corrupt). `loadEntries`
+    ///   skips these, so without pruning their audio (potentially large WAVs)
+    ///   would count against the budget forever and the retention loop would
+    ///   delete valid entries trying to satisfy a budget the corrupt dirs keep
+    ///   blown.
     private func pruneOrphanEntryDirectories() throws {
         guard fileManager.fileExists(atPath: directoryURL.path) else { return }
 
@@ -301,9 +316,16 @@ actor DictationHistoryStore: DictationHistoryProtocol {
                   isDirectory.boolValue else { continue }
 
             let metadataURL = entryDirectory.appendingPathComponent(Self.metadataFilename)
-            guard !fileManager.fileExists(atPath: metadataURL.path) else { continue }
-
-            try fileManager.removeItem(at: entryDirectory)
+            guard fileManager.fileExists(atPath: metadataURL.path) else {
+                try fileManager.removeItem(at: entryDirectory)
+                continue
+            }
+            // metadata.json present but corrupt — remove so its audio stops
+            // counting toward the byte budget. Reuses the same decode path as
+            // loadEntries so the two passes agree.
+            if decodeEntry(at: metadataURL) == nil {
+                try fileManager.removeItem(at: entryDirectory)
+            }
         }
     }
 

@@ -406,6 +406,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             self.logger.notice("Post-processing fell back to raw transcript after guardrail rejection")
             self.overlayWindow.showFallbackNotice("Post-processing looked wrong — used raw transcript")
         }
+
+        dictationCoordinator.onRecordingLimitReached = { [weak self] in
+            guard let self else { return }
+            self.logger.notice("Recording stopped at the 15-minute session limit")
+            NotificationService.shared.showWarning(
+                title: "Recording Limit Reached",
+                message: "Jabber stopped recording at the 15-minute limit and is transcribing what was captured. Start a new dictation to continue."
+            )
+        }
     }
 
     private func setupModelStateCallback() {

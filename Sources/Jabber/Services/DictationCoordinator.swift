@@ -10,6 +10,8 @@ protocol AudioCaptureProtocol: AnyObject {
     func startCapture() throws
     func stopCapture()
     func currentSamples() -> [Float]
+    func sampleCount() -> Int
+    func recentSamples(maxCount: Int) -> [Float]
 }
 
 extension AudioCaptureService: AudioCaptureProtocol {}
@@ -135,6 +137,12 @@ final class DictationCoordinator {
     /// click-to-dismiss alert. Not invoked for true provider failures.
     var onPostProcessingFallback: (() -> Void)?
 
+    /// Invoked when recording hits the max session duration. The coordinator
+    /// then stops and transcribes whatever was captured (the full buffer, not
+    /// a truncated slice), so the user keeps their dictation; this callback is
+    /// the user-visible warning that the auto-stop happened (never silent).
+    var onRecordingLimitReached: (() -> Void)?
+
     private let audioCapture: any AudioCaptureProtocol
     private let transcriptionService: any TranscriptionProtocol
     private let typingService: any OutputProtocol
@@ -150,6 +158,9 @@ final class DictationCoordinator {
     private var lastStreamingPreviewText = ""
     private let streamingPreviewInterval: Duration
     private let minimumStreamingPreviewSampleCount: Int
+    private let streamingPreviewWindowSamples: Int
+    private let maxRecordingDuration: Duration
+    private var recordingLimitTask: Task<Void, Never>?
     private let isPostProcessingEnabled: @MainActor () -> Bool
     private let replacementEntriesProvider: @MainActor () -> [ReplacementEntry]
     private let logger = Logger(subsystem: "com.rselbach.jabber", category: "DictationCoordinator")
@@ -163,6 +174,8 @@ final class DictationCoordinator {
         postProcessingProvider: (any PostProcessingProvider)? = RoutedPostProcessor(),
         streamingPreviewInterval: Duration = .milliseconds(500),
         minimumStreamingPreviewSampleCount: Int = 16_000,
+        streamingPreviewWindowSamples: Int = 16_000 * 15,
+        maxRecordingDuration: Duration = .seconds(900),
         isPostProcessingEnabled: @escaping @MainActor () -> Bool = { TypedSettings[.postProcessingEnabled] },
         replacementEntriesProvider: @escaping @MainActor () -> [ReplacementEntry] = { TypedSettings.replacementEntries }
     ) {
@@ -174,6 +187,8 @@ final class DictationCoordinator {
         self.postProcessingProvider = postProcessingProvider
         self.streamingPreviewInterval = streamingPreviewInterval
         self.minimumStreamingPreviewSampleCount = minimumStreamingPreviewSampleCount
+        self.streamingPreviewWindowSamples = streamingPreviewWindowSamples
+        self.maxRecordingDuration = maxRecordingDuration
         self.isPostProcessingEnabled = isPostProcessingEnabled
         self.replacementEntriesProvider = replacementEntriesProvider
 
@@ -202,6 +217,7 @@ final class DictationCoordinator {
             state = .recording
             onStateChange?(.recording)
             startStreamingPreview(sessionID: sessionID)
+            scheduleRecordingLimit(sessionID: sessionID)
             return true
         } catch {
             logger.error("Failed to start audio capture: \(error.localizedDescription)")
@@ -217,6 +233,8 @@ final class DictationCoordinator {
     func stop() {
         guard case .recording = state, let sessionID = currentSessionID else { return }
 
+        recordingLimitTask?.cancel()
+        recordingLimitTask = nil
         audioCapture.stopCapture()
 
         let samples = audioCapture.currentSamples()
@@ -253,6 +271,8 @@ final class DictationCoordinator {
     func cancel() {
         guard state != .idle || activity.isActive else { return }
 
+        recordingLimitTask?.cancel()
+        recordingLimitTask = nil
         audioCapture.stopCapture()
 
         // Invalidate the session so stale transcription tasks cannot touch state.
@@ -298,6 +318,36 @@ final class DictationCoordinator {
         return task
     }
 
+    /// Enforce the max session duration. When the limit elapses while still
+    /// recording, the coordinator stops and transcribes the full captured
+    /// buffer (not a truncated slice) and fires `onRecordingLimitReached` so
+    /// the UI can warn the user — the auto-stop is never silent. A pocket-dial
+    /// recording left running can no longer grow `capturedSamples` without
+    /// bound (~230MB/hour otherwise); the 15-minute default caps it at ~57MB.
+    private func scheduleRecordingLimit(sessionID: UUID) {
+        let duration = maxRecordingDuration
+        recordingLimitTask = Task { [weak self] in
+            do {
+                try await Task.sleep(for: duration)
+            } catch is CancellationError {
+                return
+            } catch {
+                self?.logger.error("Recording limit sleep failed: \(error.localizedDescription)")
+                return
+            }
+            guard !Task.isCancelled else { return }
+            self?.handleRecordingLimitReached(sessionID: sessionID)
+        }
+    }
+
+    private func handleRecordingLimitReached(sessionID: UUID) {
+        guard currentSessionID == sessionID, state == .recording else { return }
+        let limitSeconds = Int(maxRecordingDuration.components.seconds)
+        logger.notice("Recording reached the \(limitSeconds, privacy: .public)-second session limit; stopping and transcribing")
+        onRecordingLimitReached?()
+        stop()
+    }
+
     private func runStreamingPreviewLoop(sessionID: UUID) async {
         await transcriptionService.resetStreamingTranscription()
         await applyCurrentTranscriptionSettings()
@@ -319,18 +369,28 @@ final class DictationCoordinator {
     }
 
     private func publishStreamingPreviewIfAvailable(sessionID: UUID) async {
-        let samples = audioCapture.currentSamples()
-        guard samples.count >= minimumStreamingPreviewSampleCount else { return }
-        guard samples.count > lastStreamingPreviewSampleCount else { return }
-        guard AudioSpeechDetector.assess(samples: samples).shouldTranscribe else { return }
+        // Use the cheap count for the "skip when no new audio arrived" guard,
+        // then transcribe only a bounded recent window — not the full buffer —
+        // so per-tick preview cost is constant instead of O(n) in session
+        // length. The streaming provider resets when the windowed slice stops
+        // growing (stateful providers) or re-transcribes the slice (fallback),
+        // so the preview reflects a rolling recent window. The FINAL
+        // transcription (stop()) still reads the full buffer via
+        // `currentSamples()`, so nothing is lost.
+        let totalCount = audioCapture.sampleCount()
+        guard totalCount >= minimumStreamingPreviewSampleCount else { return }
+        guard totalCount > lastStreamingPreviewSampleCount else { return }
+
+        let previewSamples = audioCapture.recentSamples(maxCount: streamingPreviewWindowSamples)
+        guard AudioSpeechDetector.assess(samples: previewSamples).shouldTranscribe else { return }
 
         do {
-            let text = try await transcriptionService.transcribeStreaming(samples: samples)
+            let text = try await transcriptionService.transcribeStreaming(samples: previewSamples)
             try Task.checkCancellation()
 
             guard currentSessionID == sessionID, state == .recording else { return }
 
-            lastStreamingPreviewSampleCount = samples.count
+            lastStreamingPreviewSampleCount = totalCount
             let trimmedText = text.trimmingCharacters(in: .whitespacesAndNewlines)
             guard !trimmedText.isEmpty, trimmedText != lastStreamingPreviewText else { return }
 

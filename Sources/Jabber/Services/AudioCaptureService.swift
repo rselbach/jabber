@@ -106,6 +106,26 @@ final class AudioCaptureService {
         }
     }
 
+    /// Number of captured samples without copying the buffer. Cheap, for
+    /// callers that only need to know whether new audio arrived (e.g. the
+    /// streaming preview's "skip when unchanged" guard).
+    func sampleCount() -> Int {
+        queue.sync {
+            capturedSamples.count
+        }
+    }
+
+    /// The last `maxCount` captured samples (or the whole buffer if smaller),
+    /// as a bounded copy. Used by the streaming preview so its per-tick cost
+    /// stays constant instead of growing with session length. The final
+    /// transcription still reads the full buffer via `currentSamples()`.
+    func recentSamples(maxCount: Int) -> [Float] {
+        queue.sync {
+            guard capturedSamples.count > maxCount else { return capturedSamples }
+            return Array(capturedSamples.suffix(maxCount))
+        }
+    }
+
     nonisolated private func processBuffer(_ buffer: AVAudioPCMBuffer) {
         guard let converter = getConverter() else { return }
 

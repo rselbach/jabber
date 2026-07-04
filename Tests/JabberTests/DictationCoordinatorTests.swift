@@ -278,6 +278,68 @@ final class DictationCoordinatorTests: XCTestCase {
         coordinator.cancel()
     }
 
+    // Regression: a buffer larger than the 15s preview window must be windowed
+    // for preview transcription, not transcribed in full each tick. Without
+    // windowing, per-tick preview cost grows O(n) in session length (a full
+    // array copy + a full-buffer transcode every 500ms), i.e. O(n^2) over the
+    // session. The final transcription (stop()) still uses the full buffer.
+    func testStreamingPreviewWindowsInputToBoundedRecentSamples() async throws {
+        // 17.5s of loud samples (280_000) exceeds the 15s default window
+        // (240_000), so the preview must transcribe only the last 240_000.
+        audioCapture.storedSamples = makeLoudSamples(count: 280_000)
+        transcriptionService.streamingResult = .success("recent speech")
+
+        let partialExpectation = XCTestExpectation(description: "partial transcription published")
+        coordinator.onPartialTranscription = { _ in partialExpectation.fulfill() }
+
+        XCTAssertTrue(coordinator.start())
+        await fulfillment(of: [partialExpectation], timeout: 1.0)
+
+        // The preview transcribed the bounded window, not the full 280_000.
+        XCTAssertEqual(transcriptionService.streamingSampleCounts, [240_000])
+
+        coordinator.cancel()
+        try await Task.sleep(for: .milliseconds(20))
+    }
+
+    // Regression: a recording left running (pocket dial) grew capturedSamples
+    // without bound. The max session duration stops recording at the limit,
+    // transcribes the full captured buffer (nothing truncated), and fires the
+    // limit callback so the auto-stop is never silent.
+    func testRecordingStopsAtMaxDurationLimitAndTranscribes() async {
+        // Inject a tiny max duration so the limit fires within the test
+        // without a real 15-minute wait.
+        let limitedCoordinator = DictationCoordinator(
+            audioCapture: audioCapture,
+            transcriptionService: transcriptionService,
+            typingService: typingService,
+            mediaPlaybackService: mediaPlaybackService,
+            dictationHistoryStore: dictationHistoryStore,
+            postProcessingProvider: postProcessor,
+            streamingPreviewInterval: .milliseconds(10),
+            minimumStreamingPreviewSampleCount: 16_000,
+            maxRecordingDuration: .milliseconds(50),
+            isPostProcessingEnabled: { [weak self] in self?.postProcessingEnabled ?? false },
+            replacementEntriesProvider: { [weak self] in self?.replacementEntries ?? [] }
+        )
+
+        audioCapture.storedSamples = makeLoudSamples()
+        transcriptionService.transcribeResult = .success("troy and abed in the morning")
+
+        let limitReached = XCTestExpectation(description: "recording limit callback fired")
+        limitedCoordinator.onRecordingLimitReached = { limitReached.fulfill() }
+        let idleExpectation = XCTestExpectation(description: "coordinator returns to idle after limit stop")
+        limitedCoordinator.onStateChange = { state in
+            if state == .idle { idleExpectation.fulfill() }
+        }
+
+        XCTAssertTrue(limitedCoordinator.start())
+        await fulfillment(of: [limitReached, idleExpectation], timeout: 2.0)
+
+        XCTAssertTrue(limitedCoordinator.isIdle)
+        XCTAssertEqual(typingService.outputs, ["troy and abed in the morning"])
+    }
+
     func testStopWithEmptyTranscriptionShowsNoSpeechWarning() async {
         audioCapture.storedSamples = makeLoudSamples()
         transcriptionService.transcribeResult = .success("   ")
@@ -982,13 +1044,12 @@ final class DictationCoordinatorTests: XCTestCase {
         return expectation
     }
 
-    private func makeLoudSamples() -> [Float] {
-        let sampleCount = 16_000
+    private func makeLoudSamples(count: Int = 16_000) -> [Float] {
         let amplitude: Float = 0.05
         let frequency = 220.0
         let sampleRate = 16_000.0
 
-        return (0 ..< sampleCount).map { index in
+        return (0 ..< count).map { index in
             let phase = 2 * Double.pi * frequency * Double(index) / sampleRate
             return amplitude * Float(sin(phase))
         }
@@ -1021,6 +1082,15 @@ final class FakeAudioCapture: AudioCaptureProtocol, @unchecked Sendable {
 
     func currentSamples() -> [Float] {
         storedSamples
+    }
+
+    func sampleCount() -> Int {
+        storedSamples.count
+    }
+
+    func recentSamples(maxCount: Int) -> [Float] {
+        guard storedSamples.count > maxCount else { return storedSamples }
+        return Array(storedSamples.suffix(maxCount))
     }
 }
 

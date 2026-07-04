@@ -59,6 +59,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var activeDownloadModelId: String?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        // Normalize stale stored settings before any SwiftUI view mounts, so
+        // `@AppStorage` reads never observe a pre-migration value and the
+        // SettingsStore getters can stay pure (no writes during view updates).
+        TypedSettings.migrateStoredValues()
         setupMenuBar()
         setupHotkey()
         setupDictationCoordinator()

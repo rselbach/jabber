@@ -131,27 +131,51 @@ struct SettingsStore: Sendable {
 
     subscript(setting: TypedSetting<String>) -> String {
         get {
-            let value = userDefaults.string(forKey: setting.key) ?? setting.default
-            let resolvedValue: String
-            switch setting {
-            case .outputMode:
-                resolvedValue = TypingService.migratedOutputModeRawValue(value)
-            case .hotkeyActivationMode:
-                resolvedValue = HotkeyActivationMode(rawValue: value)?.rawValue ?? setting.default
-            case .postProcessingProviderKind:
-                resolvedValue = PostProcessingProviderKind.resolve(rawValue: value).rawValue
-            case .openRouterModel:
-                resolvedValue = OpenRouterModelCatalog.resolveModelId(value)
-            case .selectedModel, .selectedLanguage, .vocabularyPrompt, .replacementEntries, .lastModelMigrationNoticeKey:
-                resolvedValue = value
-            }
-            if resolvedValue != value {
-                userDefaults.set(resolvedValue, forKey: setting.key)
-            }
-            return resolvedValue
+            let raw = userDefaults.string(forKey: setting.key) ?? setting.default
+            return Self.resolvedValue(for: setting, rawValue: raw)
         }
         nonmutating set {
             userDefaults.set(newValue, forKey: setting.key)
+        }
+    }
+
+    /// Resolve a stored raw value to its canonical form without writing. Pure,
+    /// so the subscript getter is a true read and never mutates storage (a
+    /// read API that writes can churn SwiftUI body evaluation and surprise
+    /// callers). Stale values are normalized instead by the explicit
+    /// `migrateStoredValues()` pass at launch, before any `@AppStorage` view
+    /// read can observe them.
+    private static func resolvedValue(for setting: TypedSetting<String>, rawValue: String) -> String {
+        switch setting {
+        case .outputMode:
+            return TypingService.migratedOutputModeRawValue(rawValue)
+        case .hotkeyActivationMode:
+            return HotkeyActivationMode(rawValue: rawValue)?.rawValue ?? setting.default
+        case .postProcessingProviderKind:
+            return PostProcessingProviderKind.resolve(rawValue: rawValue).rawValue
+        case .openRouterModel:
+            return OpenRouterModelCatalog.resolveModelId(rawValue)
+        case .selectedModel, .selectedLanguage, .vocabularyPrompt, .replacementEntries, .lastModelMigrationNoticeKey:
+            return rawValue
+        }
+    }
+
+    /// One explicit migration pass over stored string settings whose raw value
+    /// may be stale after an app update (removed enum case, renamed output
+    /// mode, dropped OpenRouter slug). Writes only when a stored value differs
+    /// from its canonical resolution, so it is idempotent: re-running each
+    /// launch is a cheap no-op once migrated. Call at launch before SwiftUI
+    /// views mount so `@AppStorage` reads never observe a stale value.
+    func migrateStoredValues() {
+        for setting in [TypedSetting<String>.outputMode,
+                        .hotkeyActivationMode,
+                        .postProcessingProviderKind,
+                        .openRouterModel] {
+            let raw = userDefaults.string(forKey: setting.key) ?? setting.default
+            let resolved = Self.resolvedValue(for: setting, rawValue: raw)
+            if resolved != raw {
+                userDefaults.set(resolved, forKey: setting.key)
+            }
         }
     }
 
@@ -214,6 +238,13 @@ struct SettingsStore: Sendable {
 @MainActor
 enum TypedSettings {
     private static let store = SettingsStore.standard
+
+    /// One explicit migration pass over stale stored string settings. Call at
+    /// app launch, before SwiftUI views mount, so `@AppStorage` reads never
+    /// observe a stale value and the subscript getters stay pure (no writes).
+    static func migrateStoredValues() {
+        store.migrateStoredValues()
+    }
 
     /// Get a string setting value
     static subscript(setting: TypedSetting<String>) -> String {

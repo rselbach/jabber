@@ -55,6 +55,10 @@ final class TypedSettingsTests: XCTestCase {
     func testInvalidStoredProviderKindMigratesToDefault() {
         userDefaults.set("changnesia", forKey: AppSettingKey.postProcessingProviderKind)
 
+        // Migration is an explicit launch-time pass now (getters are pure and
+        // no longer write stale-resolved values back to storage).
+        settings.migrateStoredValues()
+
         XCTAssertEqual(settings[.postProcessingProviderKind], PostProcessingProviderKind.defaultValue.rawValue)
         XCTAssertEqual(
             userDefaults.string(forKey: AppSettingKey.postProcessingProviderKind),
@@ -79,12 +83,16 @@ final class TypedSettingsTests: XCTestCase {
     func testInvalidStoredOpenRouterModelMigratesToDefault() {
         userDefaults.set("openai/gpt-4o", forKey: AppSettingKey.openRouterModel)
 
+        settings.migrateStoredValues()
+
         XCTAssertEqual(settings[.openRouterModel], OpenRouterModelCatalog.defaultModelId)
         XCTAssertEqual(userDefaults.string(forKey: AppSettingKey.openRouterModel), OpenRouterModelCatalog.defaultModelId)
     }
 
     func testLegacyPasteOutputModeMigratesToDirectTyping() {
         userDefaults.set("paste", forKey: AppSettingKey.outputMode)
+
+        settings.migrateStoredValues()
 
         XCTAssertEqual(settings[.outputMode], TypingService.OutputMode.directTyping.rawValue)
         XCTAssertEqual(userDefaults.string(forKey: AppSettingKey.outputMode), TypingService.OutputMode.directTyping.rawValue)
@@ -93,8 +101,46 @@ final class TypedSettingsTests: XCTestCase {
     func testInvalidHotkeyActivationModeMigratesToDefault() {
         userDefaults.set("changnesia", forKey: AppSettingKey.hotkeyActivationMode)
 
+        settings.migrateStoredValues()
+
         XCTAssertEqual(settings[.hotkeyActivationMode], HotkeyActivationMode.defaultMode.rawValue)
         XCTAssertEqual(userDefaults.string(forKey: AppSettingKey.hotkeyActivationMode), HotkeyActivationMode.defaultMode.rawValue)
+    }
+
+    /// A read API must not mutate storage. The subscript getter resolves a
+    /// stale stored value to its canonical form WITHOUT writing it back; the
+    /// explicit `migrateStoredValues()` pass owns the write. Guards against a
+    /// regression to the old getter side effect, which churned SwiftUI body
+    /// evaluation ("modifying state during view update").
+    func testGetterDoesNotWriteToUserDefaultsForMigratableSetting() {
+        userDefaults.set("changnesia", forKey: AppSettingKey.postProcessingProviderKind)
+
+        let before = userDefaults.string(forKey: AppSettingKey.postProcessingProviderKind)
+        XCTAssertEqual(before, "changnesia")
+
+        // Reading resolves to the default but must NOT persist it.
+        let resolved = settings[.postProcessingProviderKind]
+        XCTAssertEqual(resolved, PostProcessingProviderKind.defaultValue.rawValue)
+
+        // The stored raw value is unchanged: a getter-triggered write would
+        // have replaced "changnesia" with "appleIntelligence".
+        XCTAssertEqual(
+            userDefaults.string(forKey: AppSettingKey.postProcessingProviderKind),
+            "changnesia",
+            "subscript getter must not mutate UserDefaults"
+        )
+    }
+
+    /// The migration pass is idempotent: running it again after a value is
+    /// already canonical writes nothing, so re-running each launch is a no-op.
+    func testMigrateStoredValuesIsIdempotent() {
+        userDefaults.set("changnesia", forKey: AppSettingKey.postProcessingProviderKind)
+        settings.migrateStoredValues()
+        XCTAssertEqual(userDefaults.string(forKey: AppSettingKey.postProcessingProviderKind), "appleIntelligence")
+
+        // Second pass: already canonical, no write (and no spurious change).
+        settings.migrateStoredValues()
+        XCTAssertEqual(userDefaults.string(forKey: AppSettingKey.postProcessingProviderKind), "appleIntelligence")
     }
 
     func testSettingAndGettingValues() {

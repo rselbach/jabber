@@ -273,7 +273,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
 
         let menu = buildMenu()
-        menu.delegate = self
         statusItem?.menu = menu
     }
 
@@ -1017,8 +1016,16 @@ extension AppDelegate: NSWindowDelegate {
     }
 }
 
-extension AppDelegate: NSMenuDelegate {
-    func menuNeedsUpdate(_ menu: NSMenu) {
-        menu.item(withTitle: "Check for Updates…")?.isEnabled = updaterController.canCheckForUpdates
+extension AppDelegate: NSMenuItemValidation {
+    func validateMenuItem(_ item: NSMenuItem) -> Bool {
+        // AppKit re-validates each item when the menu opens (auto-enabling is
+        // on by default). Without this, a target responding to `checkForUpdates`
+        // is always enabled, clobbering `UpdaterController.canCheckForUpdates`.
+        // Validating by action (not title) avoids the typographic-ellipsis
+        // landmine of `menu.item(withTitle:)`.
+        if item.action == #selector(checkForUpdates) {
+            return updaterController.canCheckForUpdates
+        }
+        return true
     }
 }

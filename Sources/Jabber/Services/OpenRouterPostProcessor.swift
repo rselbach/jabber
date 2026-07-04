@@ -66,15 +66,23 @@ enum OpenRouterPostProcessingError: LocalizedError, Equatable {
 /// not a failure — the coordinator normalizes it and types nothing, matching the
 /// Apple Intelligence contract.
 ///
-/// Transport is injected so tests never hit the network. The default uses
-/// `URLSession.shared` with a 60s timeout: transcripts are short, but a generous
-/// timeout avoids spurious failures on slow/hotspot links.
+/// Transport is injected so tests never hit the network. The default uses a
+/// dedicated `URLSession` with both per-request idle and total-resource timeout
+/// caps: transcripts are short, but a generous timeout avoids spurious failures
+/// on slow/hotspot links.
 struct OpenRouterPostProcessor: PostProcessingProvider {
     static let endpoint = URL(string: "https://openrouter.ai/api/v1/chat/completions")!
 
-    /// 60s: short transcripts normally return in a few seconds, but a generous
-    /// ceiling avoids spurious timeouts on slow networks.
+    /// 60s: short transcripts normally return in a few seconds. URLRequest's
+    /// timeout is idle-based; the session resource timeout is the total cap.
     static let requestTimeout: TimeInterval = 60
+
+    private static let defaultSession: URLSession = {
+        let configuration = URLSessionConfiguration.default
+        configuration.timeoutIntervalForRequest = requestTimeout
+        configuration.timeoutIntervalForResource = requestTimeout
+        return URLSession(configuration: configuration)
+    }()
 
     let apiKey: String
     let modelId: String
@@ -89,7 +97,7 @@ struct OpenRouterPostProcessor: PostProcessingProvider {
         apiKey: String,
         modelId: String = OpenRouterModelCatalog.defaultModelId,
         transport: @Sendable @escaping (URLRequest) async throws -> (Data, URLResponse) = { request in
-            try await URLSession.shared.data(for: request)
+            try await Self.defaultSession.data(for: request)
         }
     ) {
         self.apiKey = apiKey

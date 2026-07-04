@@ -72,6 +72,7 @@ final class OpenRouterPostProcessorTests: XCTestCase {
         let request = try XCTUnwrap(captured.requests.first)
         XCTAssertEqual(request.httpMethod, "POST")
         XCTAssertEqual(request.url, OpenRouterPostProcessor.endpoint)
+        XCTAssertEqual(request.timeoutInterval, OpenRouterPostProcessor.requestTimeout)
         XCTAssertEqual(request.value(forHTTPHeaderField: "Content-Type"), "application/json")
         XCTAssertEqual(request.value(forHTTPHeaderField: "Authorization"), "Bearer \(testKey)")
         XCTAssertEqual(request.value(forHTTPHeaderField: "X-Title"), "Jabber")

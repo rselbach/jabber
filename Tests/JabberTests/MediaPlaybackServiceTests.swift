@@ -146,6 +146,84 @@ final class MediaPlaybackServiceTests: XCTestCase {
         XCTAssertEqual(client.commands, [.pause, .play])
     }
 
+    // MARK: - Stale resume race (fast double-tap of the hotkey)
+
+    /// Session A ends and session B starts before session A's resume Task runs.
+    /// The resume must abort — sending .play would un-pause media session B
+    /// intends to keep paused.
+    func testStaleResumeAbortsWhenNewSessionStartedBeforePlayLands() async throws {
+        // Session A: media playing, pause succeeds, verification sees paused.
+        client.isPlayingResults = [true, false]
+        let service = makeService()
+
+        service.pauseForDictationIfNeeded()
+        try await Task.sleep(for: .milliseconds(20))
+
+        // Session A ends, then session B starts immediately. The resume Task
+        // from session A is enqueued but hasn't run yet (main actor is busy
+        // with the synchronous pause call). When it runs, currentSessionID is
+        // session B's — the resume must abort instead of sending .play.
+        service.resumeAfterDictationIfNeeded()
+        service.pauseForDictationIfNeeded()
+
+        try await Task.sleep(for: .milliseconds(50))
+
+        XCTAssertFalse(
+            client.commands.contains(.play),
+            "stale resume must not send .play when a new session started; commands: \(client.commands)"
+        )
+    }
+
+    /// Session A's resume .play is in flight when session B starts. The resume
+    /// must re-pause after the .play lands so media stays paused for session B.
+    func testStaleResumeRepausesWhenNewSessionStartsDuringPlay() async throws {
+        // Session A: media playing, pause succeeds, verification sees paused.
+        client.isPlayingResults = [true, false]
+        client.holdSendUntilReleased = true
+        let pauseSent = expectation(description: "session A pause send starts")
+        client.sendExpectations[.pause] = pauseSent
+        let service = makeService()
+
+        service.pauseForDictationIfNeeded()
+        await fulfillment(of: [pauseSent], timeout: 1.0)
+        // Clear the pause expectation so the later re-pause doesn't double-fulfill.
+        client.sendExpectations[.pause] = nil
+        client.releaseSend(true)
+        try await Task.sleep(for: .milliseconds(20))
+
+        // Session A ends: resume sends .play. Hold it so we can race a new
+        // session into the middle of the await.
+        client.holdSendUntilReleased = true
+        let playStarted = expectation(description: "resume .play send starts (held)")
+        client.sendExpectations[.play] = playStarted
+        service.resumeAfterDictationIfNeeded()
+        await fulfillment(of: [playStarted], timeout: 1.0)
+
+        // New session B starts while session A's resume .play is in flight.
+        // isPlayingResults is exhausted, so session B's pauseTask sees
+        // isPlaying=false and does not send .pause — the only .pause after
+        // the .play should be the resume Task's safety re-pause.
+        service.pauseForDictationIfNeeded()
+
+        // Release the .play. The resume Task must detect the new session and
+        // re-pause so media stays paused for session B.
+        client.releaseSend(true)
+        try await Task.sleep(for: .milliseconds(50))
+
+        let commands = client.commands
+        XCTAssertTrue(commands.contains(.play), "resume must have sent .play; commands: \(commands)")
+        let lastPauseIndex = commands.lastIndex(of: .pause)
+        let playIndex = commands.firstIndex(of: .play)
+        if let lastPauseIndex, let playIndex {
+            XCTAssertTrue(
+                lastPauseIndex > playIndex,
+                "a .pause must follow the .play (stale resume re-pause); commands: \(commands)"
+            )
+        } else {
+            XCTFail("expected [.pause, .play, .pause] but got \(commands)")
+        }
+    }
+
     // MARK: - runProcess pipe drain + timeout (deadlock regression)
 
     /// 100_000 bytes far exceeds the ~64KB pipe buffer. With read-after-

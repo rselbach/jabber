@@ -389,6 +389,84 @@ final class DictationHistoryStoreTests: XCTestCase {
         XCTAssertEqual(entries.map(\.transcript), ["Señor Chang's Spanish class"])
     }
 
+    // MARK: - Bug 4: path traversal via tampered metadata.json directoryName
+
+    func testLoadEntriesRejectsPathTraversalDirectoryName() async throws {
+        let store = makeStore()
+
+        // Plant a malicious entry whose metadata.json advertises ".." as its
+        // directoryName. URL.appendingPathComponent does NOT strip "..", so
+        // without validation audioURL(for:) would resolve to the parent of the
+        // history directory.
+        let maliciousDir = historyDirectoryURL
+            .appendingPathComponent("2024-01-01T00-00-00Z-malicious", isDirectory: true)
+        try FileManager.default.createDirectory(at: maliciousDir, withIntermediateDirectories: true)
+        try Data([0xDE, 0xAD, 0xBE, 0xEF]).write(to: maliciousDir.appendingPathComponent("audio.wav"))
+        let maliciousJSON = """
+        {
+            "id": "00000000-0000-0000-0000-000000000002",
+            "timestamp": "2024-01-01T00:00:00Z",
+            "duration": 0.5,
+            "sampleRate": 16000,
+            "modelID": "qwen3",
+            "modelName": "Qwen3-ASR",
+            "language": "en",
+            "transcript": "malicious",
+            "directoryName": "..",
+            "audioFilename": "audio.wav",
+            "audioByteCount": 84
+        }
+        """
+        try Data(maliciousJSON.utf8).write(to: maliciousDir.appendingPathComponent("metadata.json"))
+
+        // Saving a real session triggers enforceRetentionLimit, which reuses
+        // decodeEntry and should sweep the rejected (unsafe-name) entry before
+        // applying count/byte limits.
+        _ = try await store.save(session(
+            transcript: "Troy and Abed in the morning",
+            timestamp: Date(timeIntervalSince1970: 100)
+        ))
+
+        let entries = await store.entries()
+        XCTAssertEqual(entries.map(\.transcript), ["Troy and Abed in the morning"])
+        XCTAssertFalse(FileManager.default.fileExists(atPath: maliciousDir.path), "malicious entry directory should be pruned")
+    }
+
+    func testAudioURLSanitizesUnsafeDirectoryName() {
+        let store = makeStore()
+
+        // Defense-in-depth: even if a caller hand-constructs an entry with a
+        // traversal-style directoryName, audioURL(for:) must stay inside the
+        // history directory. Without sanitization, ".." would resolve via
+        // standardizedFileURL to a sibling of the history dir, not a child.
+        let malicious = DictationHistoryEntry(
+            id: UUID(),
+            timestamp: Date(timeIntervalSince1970: 100),
+            duration: 0.5,
+            sampleRate: 16_000,
+            modelID: AppMode.qwen3ModelId,
+            modelName: "Qwen3-ASR",
+            language: "en",
+            transcript: "Señor Chang",
+            directoryName: "..",
+            audioFilename: "audio.wav",
+            audioByteCount: 84
+        )
+
+        let audioURL = store.audioURL(for: malicious)
+        let historyPath = historyDirectoryURL.standardizedFileURL.path
+        let resolvedPath = audioURL.standardizedFileURL.path
+
+        XCTAssertTrue(
+            resolvedPath.hasPrefix(historyPath),
+            "audioURL must stay inside history directory; got \(resolvedPath) (history root: \(historyPath))"
+        )
+        XCTAssertTrue(
+            audioURL.path.contains("__invalid_entry__"),
+            "audioURL should use the safety sentinel for unsafe directoryName; got \(audioURL.path)"
+        )
+    }
+
     private func makeStore(
         maxEntryCount: Int = 50,
         maxByteCount: Int64 = 500 * 1024 * 1024,

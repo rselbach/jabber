@@ -267,6 +267,14 @@ final class TypingService {
         let chunks = Self.unicodeChunks(for: text)
         guard !chunks.isEmpty else { return true }
 
+        // Pre-build every (keyDown, keyUp) pair before posting any of them.
+        // If we posted inline and a CGEvent failed to allocate partway through,
+        // earlier chunks would already be delivered to the target app and the
+        // caller's fallback (AX insert / HID / clipboard paste) would re-inject
+        // the entire transcript on top of them, garbling the output.
+        var events: [(down: CGEvent, up: CGEvent)] = []
+        events.reserveCapacity(chunks.count)
+
         for chunk in chunks {
             guard let keyDown = CGEvent(keyboardEventSource: nil, virtualKey: 0, keyDown: true),
                   let keyUp = CGEvent(keyboardEventSource: nil, virtualKey: 0, keyDown: false) else {
@@ -280,8 +288,12 @@ final class TypingService {
                 keyUp.keyboardSetUnicodeString(stringLength: buffer.count, unicodeString: baseAddress)
             }
 
-            post(keyDown)
-            post(keyUp)
+            events.append((down: keyDown, up: keyUp))
+        }
+
+        for event in events {
+            post(event.down)
+            post(event.up)
         }
 
         return true

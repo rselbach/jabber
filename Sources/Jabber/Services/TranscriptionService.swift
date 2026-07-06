@@ -95,8 +95,13 @@ actor TranscriptionService {
     }
 
     private var provider: TranscriptionProvider?
+    // All provider-touching calls (transcribe, transcribeStreaming, reset,
+    // unload) route through a single gate. The providers are
+    // `@unchecked Sendable` with mutable model/streaming state and no internal
+    // synchronization, so a streaming preview call running concurrently with a
+    // final transcribe (or an unload) would race on that state. One gate
+    // serializes them; do not split it back into per-method gates.
     private let providerCallGate = ProviderCallGate()
-    private let streamingProviderCallGate = ProviderCallGate()
     private let loadDependencies: LoadDependencies
     private var isLoading = false
     private var loadedModelId: String?
@@ -226,7 +231,7 @@ actor TranscriptionService {
 
         let lang = Self.resolveLanguageForProvider(selectedLanguage)
         let prompt = vocabularyPrompt.isEmpty ? nil : vocabularyPrompt
-        let text = try await streamingProviderCallGate.run {
+        let text = try await providerCallGate.run {
             try await provider.transcribeStreaming(samples: samples, language: lang, vocabularyPrompt: prompt)
         }
         try Task.checkCancellation()
@@ -236,7 +241,7 @@ actor TranscriptionService {
     func resetStreamingTranscription() async {
         guard let provider else { return }
         do {
-            try await streamingProviderCallGate.run {
+            try await providerCallGate.run {
                 provider.resetStreamingTranscription()
             }
         } catch is CancellationError {

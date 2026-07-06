@@ -88,10 +88,25 @@ final class MediaPlaybackService: MediaPlaybackProtocol {
         // behind an unconditional `true`.
         let client = client
         let logger = logger
-        Task {
+        Task { [weak self] in
+            // Abort if a new dictation session started before we could send
+            // the resume — sending .play now would un-pause media the new
+            // session intends to keep paused, and the new session's pauseTask
+            // owns the media state from here.
+            if let self, self.currentSessionID != nil { return }
             guard await client.send(.play) else {
                 logger.warning("MediaRemote failed to resume media playback")
                 return
+            }
+            // A new session may have started during the await. If so, our .play
+            // may have un-paused media the new session just paused (or is about
+            // to pause). Re-pause to restore the state the new session expects;
+            // pausing already-paused media is a harmless no-op.
+            if let self, self.currentSessionID != nil {
+                guard await client.send(.pause) else {
+                    logger.warning("MediaRemote failed to re-pause after stale resume race")
+                    return
+                }
             }
         }
     }

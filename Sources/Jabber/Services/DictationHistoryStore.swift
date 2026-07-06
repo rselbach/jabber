@@ -232,8 +232,13 @@ actor DictationHistoryStore: DictationHistoryProtocol {
     }
 
     nonisolated func audioURL(for entry: DictationHistoryEntry) -> URL {
-        directoryURL
-            .appendingPathComponent(entry.directoryName, isDirectory: true)
+        // Defense-in-depth against path traversal via a tampered metadata.json:
+        // primary validation is in decodeEntry (which rejects unsafe names so
+        // they never reach callers), but audioURL must never escape the
+        // history directory even if a caller hand-constructs an entry.
+        let safeDirectoryName = Self.sanitizedEntryDirectoryName(entry.directoryName)
+        return directoryURL
+            .appendingPathComponent(safeDirectoryName, isDirectory: true)
             .appendingPathComponent(entry.audioFilename)
     }
 
@@ -272,7 +277,16 @@ actor DictationHistoryStore: DictationHistoryProtocol {
         decoder.dateDecodingStrategy = .iso8601
         do {
             let metadataData = try Data(contentsOf: metadataURL)
-            return try decoder.decode(DictationHistoryEntry.self, from: metadataData)
+            let entry = try decoder.decode(DictationHistoryEntry.self, from: metadataData)
+            // Reject entries whose persisted directoryName could escape the
+            // history directory (path traversal via a tampered metadata.json).
+            // pruneOrphanEntryDirectories reuses this decode path and will
+            // remove the rejected entry's directory on the next retention pass.
+            guard Self.isSafeEntryDirectoryName(entry.directoryName) else {
+                logger.error("Rejecting dictation history entry at \(metadataURL.path): unsafe directoryName '\(entry.directoryName)'")
+                return nil
+            }
+            return entry
         } catch {
             logger.error("Failed to read dictation history metadata at \(metadataURL.path): \(error.localizedDescription)")
             return nil
@@ -365,6 +379,26 @@ actor DictationHistoryStore: DictationHistoryProtocol {
         let timestampString = formatter.string(from: timestamp)
             .replacingOccurrences(of: ":", with: "-")
         return "\(timestampString)-\(id.uuidString)"
+    }
+
+    /// A safe entry directory name contains no path separators and is not a
+    /// path-traversal segment. Legitimate names produced by
+    /// `entryDirectoryName(timestamp:id:)` are a single path component
+    /// (ISO8601 timestamp + UUID) and always satisfy this check.
+    private static func isSafeEntryDirectoryName(_ name: String) -> Bool {
+        !name.isEmpty
+            && name != "."
+            && name != ".."
+            && !name.contains("/")
+            && !name.contains("\\")
+    }
+
+    /// Returns `name` if it is safe, otherwise a sentinel that is a valid
+    /// single path component but guaranteed not to match any real entry
+    /// directory, so callers' file-existence checks fail gracefully without
+    /// escaping the history directory.
+    private static func sanitizedEntryDirectoryName(_ name: String) -> String {
+        isSafeEntryDirectoryName(name) ? name : "__invalid_entry__"
     }
 
     private static func modelName(for modelID: String) -> String {

@@ -6,11 +6,9 @@ struct SpeechPage: View {
     @AppStorage(AppSettingKey.selectedLanguage) private var selectedLanguage = Constants.defaultLanguage
 
     @State private var modelManager = ModelManager.shared
-    @State private var errorMessage: String?
-    @State private var showError = false
-    @State private var pendingErrorMessage: String?
-    @State private var pendingDeleteModelId: String?
-    @State private var pendingDeleteModelName: String?
+    @State private var activeAlert: AlertState?
+    @State private var isAlertPresented = false
+    @State private var pendingAlerts: [AlertState] = []
 
     var body: some View {
         Form {
@@ -39,8 +37,7 @@ struct SpeechPage: View {
                             _ = modelManager.startDownload(model.id)
                         },
                         onDelete: {
-                            pendingDeleteModelId = model.id
-                            pendingDeleteModelName = model.name
+                            queueAlert(.deleteModel(id: model.id, name: model.name))
                         },
                         onCancelDownload: {
                             modelManager.cancelDownload(model.id)
@@ -59,14 +56,37 @@ struct SpeechPage: View {
         .onAppear {
             modelManager.refreshModels()
         }
-        .alert("Error", isPresented: $showError, presenting: errorMessage) { _ in
-            Button("OK") {}
-        } message: { message in
-            Text(message)
+        .alert(alertTitle, isPresented: $isAlertPresented, presenting: activeAlert) { state in
+            switch state {
+            case .error:
+                Button("OK") {}
+            case .deleteModel(let id, let name):
+                Button("Delete", role: .destructive) {
+                    do {
+                        try modelManager.deleteModel(id)
+                    } catch {
+                        queueAlert(.error(message: "Failed to delete \(name): \(error.localizedDescription)"))
+                    }
+                }
+                Button("Cancel", role: .cancel) {}
+            }
+        } message: { state in
+            switch state {
+            case .error(let message):
+                Text(message)
+            case .deleteModel(_, let name):
+                Text("Delete \(name)? This action removes local model files and cannot be undone.")
+            }
         }
-        .onChange(of: showError) { _, isPresented in
+        .onChange(of: isAlertPresented) { _, isPresented in
+            // When the current alert is dismissed, dequeue the next pending one
+            // (if any). Mirrors the existing error-queue pattern, extended to
+            // also serialize the delete confirmation so the two never race for
+            // the single alert slot SwiftUI allows per view.
             guard !isPresented else { return }
-            presentPendingErrorIfNeeded()
+            activeAlert = nil
+            guard !pendingAlerts.isEmpty else { return }
+            queueAlert(pendingAlerts.removeFirst())
         }
         .onReceive(NotificationCenter.default.publisher(for: Constants.Notifications.modelDownloadStateDidChange)) { notification in
             guard let state = notification.object as? ModelDownloadState else { return }
@@ -74,52 +94,29 @@ struct SpeechPage: View {
 
             let modelName = modelManager.models.first { $0.id == state.modelId }?.name ?? state.modelId
             let details = state.errorDescription ?? state.status
-            presentError("Failed to download \(modelName): \(details)")
-        }
-        .alert("Delete model", isPresented: Binding(
-            get: { pendingDeleteModelId != nil },
-            set: { isPresented in
-                if !isPresented {
-                    pendingDeleteModelId = nil
-                    pendingDeleteModelName = nil
-                }
-            }
-        )) {
-            Button("Delete", role: .destructive) {
-                guard let modelId = pendingDeleteModelId,
-                      let modelName = pendingDeleteModelName else {
-                    pendingDeleteModelId = nil
-                    return
-                }
-                do {
-                    try modelManager.deleteModel(modelId)
-                } catch {
-                    presentError("Failed to delete \(modelName): \(error.localizedDescription)")
-                }
-                pendingDeleteModelId = nil
-                pendingDeleteModelName = nil
-            }
-            Button("Cancel", role: .cancel) {
-                pendingDeleteModelId = nil
-                pendingDeleteModelName = nil
-            }
-        } message: {
-            Text("Delete \(pendingDeleteModelName ?? "")? This action removes local model files and cannot be undone.")
+            queueAlert(.error(message: "Failed to download \(modelName): \(details)"))
         }
     }
 
-    private func presentError(_ message: String) {
-        guard !showError else {
-            pendingErrorMessage = message
+    private var alertTitle: String {
+        switch activeAlert {
+        case .error: return "Error"
+        case .deleteModel: return "Delete model"
+        case .none: return ""
+        }
+    }
+
+    private func queueAlert(_ state: AlertState) {
+        guard !isAlertPresented else {
+            pendingAlerts.append(state)
             return
         }
-        errorMessage = message
-        showError = true
+        activeAlert = state
+        isAlertPresented = true
     }
+}
 
-    private func presentPendingErrorIfNeeded() {
-        guard let pendingErrorMessage else { return }
-        self.pendingErrorMessage = nil
-        presentError(pendingErrorMessage)
-    }
+private enum AlertState: Equatable {
+    case error(message: String)
+    case deleteModel(id: String, name: String)
 }

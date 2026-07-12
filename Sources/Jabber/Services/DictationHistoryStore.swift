@@ -443,6 +443,10 @@ actor DictationHistoryStore: DictationHistoryProtocol {
     }
 
     private static func pcm16Sample(from sample: Float) -> Int16 {
+        // NaN matches neither range case (infinities clamp below) and would
+        // fall through to the Int16 conversion, which traps — one bad float
+        // from the capture pipeline must not crash a best-effort history save.
+        guard !sample.isNaN else { return 0 }
         switch sample {
         case ...(-1):
             return Int16.min

@@ -55,6 +55,30 @@ final class DictationHistoryStoreTests: XCTestCase {
         XCTAssertEqual(decodedEntry.duration, 4.0 / 16_000.0, accuracy: 0.000_001)
     }
 
+    func testSaveEncodesNonFiniteSamplesWithoutTrapping() async throws {
+        let store = makeStore()
+
+        // NaN falls through both clamp ranges; Int16(NaN.rounded()) traps, so
+        // one bad float from the capture pipeline crashed the history save.
+        let entry = try await store.save(DictationHistorySession(
+            samples: [Float.nan, .infinity, -.infinity, 0.5],
+            transcript: "streets ahead",
+            modelID: AppMode.qwen3ModelId,
+            language: "en"
+        ))
+
+        let audioData = try Data(contentsOf: store.audioURL(for: entry))
+        XCTAssertEqual(audioData.count, 44 + 4 * 2)
+        // NaN encodes as silence; infinities clamp to the extremes.
+        let pcmBytes = [UInt8](audioData.suffix(8))
+        func pcmSample(_ index: Int) -> Int16 {
+            Int16(bitPattern: UInt16(pcmBytes[2 * index]) | (UInt16(pcmBytes[2 * index + 1]) << 8))
+        }
+        XCTAssertEqual(pcmSample(0), 0)
+        XCTAssertEqual(pcmSample(1), Int16.max)
+        XCTAssertEqual(pcmSample(2), Int16.min)
+    }
+
     func testSaveSessionRequiresOptInSetting() async {
         let disabledStore = makeStore(isSaveEnabled: { false })
 

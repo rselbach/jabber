@@ -40,6 +40,10 @@ final class HotkeyManager: @unchecked Sendable {
     // `lock`; mutated only from the event tap callback and the debounce timer.
     private var gesture = ModifierOnlyGestureReducer()
     private var modifierOnlyDebounce: DispatchWorkItem?
+    /// Whether the Carbon hotkey is physically held (pressed seen, no release
+    /// yet). Held under `lock`; lets unregister() deliver the key-up that
+    /// UnregisterEventHotKey would otherwise swallow mid-hold.
+    private var isCarbonHotkeyDown = false
 
     var onKeyDown: (@MainActor () -> Void)?
     var onKeyUp: (@MainActor () -> Void)?
@@ -116,12 +120,25 @@ final class HotkeyManager: @unchecked Sendable {
         let source = runLoopSource
         runLoopSource = nil
         modifierOnlyShortcut = nil
-        gesture.reset()
+        // A gesture/hotkey physically held through unregister never delivers
+        // its key-up (the tap or Carbon registration is gone), leaving
+        // hold-to-record stuck and the next press latched away. Route the
+        // teardown through the reducer like the tap-disabled path so an
+        // active hold emits fireUp, and remember a held Carbon key.
+        let gestureAction = gesture.handle(.tapDisabled)
+        let carbonWasDown = isCarbonHotkeyDown
+        isCarbonHotkeyDown = false
         recentTapDisables = []
         eventTapDead = false
         let debounce = modifierOnlyDebounce
         modifierOnlyDebounce = nil
         lock.unlock()
+
+        dispatchGesture(gestureAction)
+        if carbonWasDown {
+            logger.info("Hotkey unregistered while held: delivering pending onKeyUp")
+            Self.deliverToMain { self.onKeyUp?() }
+        }
 
         if let ref {
             let status = UnregisterEventHotKey(ref)
@@ -291,6 +308,12 @@ final class HotkeyManager: @unchecked Sendable {
         CGEvent.tapEnable(tap: tap, enable: true)
         logger.info("CGEventTap enabled on main runloop for keyCode=\(shortcut.keyCode)")
         return noErr
+    }
+
+    private func setCarbonHotkeyDown(_ down: Bool) {
+        lock.lock()
+        isCarbonHotkeyDown = down
+        lock.unlock()
     }
 
     /// Clear the rapid-disable history once a real event proves the tap is alive.
@@ -541,8 +564,10 @@ final class HotkeyManager: @unchecked Sendable {
                 let kind = GetEventKind(event)
 
                 if kind == UInt32(kEventHotKeyPressed) {
+                    manager.setCarbonHotkeyDown(true)
                     HotkeyManager.deliverToMain { manager.onKeyDown?() }
                 } else if kind == UInt32(kEventHotKeyReleased) {
+                    manager.setCarbonHotkeyDown(false)
                     HotkeyManager.deliverToMain { manager.onKeyUp?() }
                 }
 

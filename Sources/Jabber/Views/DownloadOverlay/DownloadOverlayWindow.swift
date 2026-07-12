@@ -41,16 +41,19 @@ final class DownloadOverlayWindow: OverlayWindowController {
         window?.setFrame(frame, display: true)
     }
 
-    /// Centered overlay frame for the current screen. Overridable so tests can
-    /// inject a deterministic frame (NSScreen cannot be fabricated).
+    /// Bottom-center overlay frame matching the recording overlay's position,
+    /// so both panels share one visual language (the two are never shown at
+    /// the same time). Overridable so tests can inject a deterministic frame
+    /// (NSScreen cannot be fabricated).
     func frameForCurrentScreen() -> NSRect? {
         guard let screenFrame = OverlayScreenResolver.currentVisibleFrame() else { return nil }
 
-        let windowWidth: CGFloat = 320
-        let windowHeight: CGFloat = 80
+        let windowWidth: CGFloat = 400
+        let windowHeight: CGFloat = 72
+        let bottomMargin: CGFloat = 100
 
         let x = screenFrame.origin.x + (screenFrame.width - windowWidth) / 2
-        let y = screenFrame.origin.y + (screenFrame.height - windowHeight) / 2
+        let y = screenFrame.origin.y + bottomMargin
 
         return NSRect(x: x, y: y, width: windowWidth, height: windowHeight)
     }
@@ -67,32 +70,32 @@ struct DownloadOverlayContent: View {
     @ObservedObject var viewModel: DownloadOverlayViewModel
 
     var body: some View {
-        VStack(spacing: 12) {
-            HStack(spacing: 8) {
-                Image(systemName: "arrow.down.circle")
-                    .font(.title2)
-                Text("Jabber")
-                    .font(.headline)
-            }
-
-            VStack(spacing: 6) {
-                if viewModel.isIndeterminate {
-                    ProgressView()
-                        .progressViewStyle(.linear)
-                } else {
-                    ProgressView(value: viewModel.progress)
-                        .progressViewStyle(.linear)
-                }
-
-                Text(viewModel.status)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
-        }
-        .padding()
-        .background(
+        ZStack {
             RoundedRectangle(cornerRadius: 12)
                 .fill(.ultraThinMaterial)
-        )
+
+            HStack(spacing: 10) {
+                Image(systemName: "arrow.down.circle")
+                    .font(.title3)
+                    .foregroundStyle(.secondary)
+
+                VStack(alignment: .leading, spacing: 6) {
+                    Text(viewModel.status)
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+
+                    if viewModel.isIndeterminate {
+                        ProgressView()
+                            .progressViewStyle(.linear)
+                    } else {
+                        ProgressView(value: viewModel.progress)
+                            .progressViewStyle(.linear)
+                    }
+                }
+            }
+            .padding(.horizontal, 18)
+            .padding(.vertical, 12)
+        }
     }
 }

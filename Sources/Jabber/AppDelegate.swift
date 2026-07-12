@@ -928,7 +928,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             hasMicrophonePermission: permissionService.hasMicrophonePermission(),
             hasAccessibilityPermission: permissionService.hasAccessibilityPermission(),
             requiresAccessibilityPermission: typingService.requiresAccessibilityPermission,
-            hasDownloadedModel: ModelManager.shared.hasAnyDownloadedModel,
+            isSelectedModelDownloaded: ModelManager.shared.isSelectedModelDownloaded,
             isDownloadingModel: ModelManager.shared.models.contains { $0.isDownloading }
         )
     }
@@ -953,7 +953,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             TypedSettings[.onboardingCompleted] = true
         }
 
-        guard ModelManager.shared.hasAnyDownloadedModel else { return }
+        // Only auto-load when the selected model is already installed —
+        // loading would otherwise kick off the multi-GB download the launch
+        // path deliberately avoids for a user who abandoned onboarding.
+        guard ModelManager.shared.isSelectedModelDownloaded else { return }
         guard !isModelLoadInProgress, !transcriptionService.isReady else { return }
 
         if !startDeclinedModelMigrationFallbackIfNeeded() {

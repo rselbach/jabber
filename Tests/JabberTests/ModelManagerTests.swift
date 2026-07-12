@@ -394,10 +394,17 @@ final class ModelManagerTests: XCTestCase {
         }
     }
 
-    func testHasAnyDownloadedModelReflectsState() {
-        let hasDownloaded = modelManager.hasAnyDownloadedModel
-        let expected = !modelManager.downloadedModels.isEmpty
-        XCTAssertEqual(hasDownloaded, expected, "hasAnyDownloadedModel should reflect downloadedModels state")
+    func testIsSelectedModelDownloadedIsFalseForMissingSelection() {
+        // Setup selects Nemotron with an empty cache: not installed. The old
+        // "any model downloaded" check was constant-true because built-in
+        // Apple Speech always counts as installed.
+        XCTAssertFalse(modelManager.isSelectedModelDownloaded)
+    }
+
+    func testIsSelectedModelDownloadedIsTrueForBuiltInSelection() {
+        settings[.selectedModel] = AppMode.appleSpeechModelId
+        modelManager.refreshModels()
+        XCTAssertTrue(modelManager.isSelectedModelDownloaded)
     }
 
     func testModelDownloadStateEquality() {

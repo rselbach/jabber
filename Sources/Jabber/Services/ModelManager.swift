@@ -90,8 +90,12 @@ final class ModelManager {
         models.filter { $0.isDownloaded }
     }
 
-    var hasAnyDownloadedModel: Bool {
-        !downloadedModels.isEmpty
+    /// Whether the currently selected model is installed. "Any model
+    /// downloaded" is not a usable readiness check: built-in Apple Speech
+    /// always counts as installed, so it would be constant-true.
+    var isSelectedModelDownloaded: Bool {
+        let selectedId = settings[.selectedModel]
+        return models.contains { $0.id == selectedId && $0.isDownloaded }
     }
 
     func selectedModelId() -> String {

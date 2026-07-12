@@ -7,7 +7,7 @@ final class SetupReadinessResolverTests: XCTestCase {
             hasMicrophonePermission: true,
             hasAccessibilityPermission: true,
             requiresAccessibilityPermission: true,
-            hasDownloadedModel: true,
+            isSelectedModelDownloaded: true,
             isDownloadingModel: false
         )
 
@@ -21,7 +21,7 @@ final class SetupReadinessResolverTests: XCTestCase {
             hasMicrophonePermission: true,
             hasAccessibilityPermission: false,
             requiresAccessibilityPermission: false,
-            hasDownloadedModel: true,
+            isSelectedModelDownloaded: true,
             isDownloadingModel: false
         )
 
@@ -36,7 +36,7 @@ final class SetupReadinessResolverTests: XCTestCase {
             hasMicrophonePermission: false,
             hasAccessibilityPermission: false,
             requiresAccessibilityPermission: true,
-            hasDownloadedModel: false,
+            isSelectedModelDownloaded: false,
             isDownloadingModel: false
         )
 
@@ -58,7 +58,7 @@ final class SetupReadinessResolverTests: XCTestCase {
             hasMicrophonePermission: true,
             hasAccessibilityPermission: true,
             requiresAccessibilityPermission: true,
-            hasDownloadedModel: false,
+            isSelectedModelDownloaded: false,
             isDownloadingModel: true
         )
 

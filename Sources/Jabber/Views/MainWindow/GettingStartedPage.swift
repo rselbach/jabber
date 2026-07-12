@@ -77,7 +77,7 @@ struct GettingStartedPage: View {
             hasMicrophonePermission: PermissionService.shared.hasMicrophonePermission(),
             hasAccessibilityPermission: PermissionService.shared.hasAccessibilityPermission(),
             requiresAccessibilityPermission: selectedOutputMode.requiresAccessibilityPermission,
-            hasDownloadedModel: modelManager.hasAnyDownloadedModel,
+            isSelectedModelDownloaded: modelManager.isSelectedModelDownloaded,
             isDownloadingModel: modelManager.models.contains { $0.isDownloading }
         )
     }

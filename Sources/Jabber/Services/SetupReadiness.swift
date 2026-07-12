@@ -44,7 +44,7 @@ enum SetupReadinessResolver {
         hasMicrophonePermission: Bool,
         hasAccessibilityPermission: Bool,
         requiresAccessibilityPermission: Bool,
-        hasDownloadedModel: Bool,
+        isSelectedModelDownloaded: Bool,
         isDownloadingModel: Bool
     ) -> SetupReadiness {
         SetupReadiness(steps: [
@@ -54,7 +54,7 @@ enum SetupReadinessResolver {
                 isRequired: requiresAccessibilityPermission
             ),
             modelStep(
-                hasDownloadedModel: hasDownloadedModel,
+                isSelectedModelDownloaded: isSelectedModelDownloaded,
                 isDownloadingModel: isDownloadingModel
             )
         ])
@@ -119,14 +119,14 @@ enum SetupReadinessResolver {
     }
 
     private static func modelStep(
-        hasDownloadedModel: Bool,
+        isSelectedModelDownloaded: Bool,
         isDownloadingModel: Bool
     ) -> SetupStep {
-        if hasDownloadedModel {
+        if isSelectedModelDownloaded {
             return SetupStep(
                 id: .model,
                 title: "Speech Model",
-                message: "A local transcription model is installed.",
+                message: "The selected transcription model is installed.",
                 status: .complete,
                 actionTitle: nil,
                 action: nil

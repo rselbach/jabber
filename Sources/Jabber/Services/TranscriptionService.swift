@@ -291,11 +291,17 @@ actor TranscriptionService {
                 continue
             }
 
+            // Claim the load BEFORE resolveLoadedModel: it suspends when a
+            // wrong-model provider must be unloaded, and an unclaimed
+            // suspension lets a second caller run its own iteration and start
+            // a duplicate concurrent load (a second multi-GB weight load) or
+            // double-unload the same provider.
+            isLoading = true
+
             if await resolveLoadedModel(desiredModelId: desiredModelId) {
+                isLoading = false
                 return
             }
-
-            isLoading = true
             break
         }
 

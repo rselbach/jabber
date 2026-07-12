@@ -116,6 +116,55 @@ final class TranscriptionServiceTests: XCTestCase {
         XCTAssertEqual(provider.unloadCallCount, 0)
     }
 
+    func testModelSwitchUnloadSuspensionDoesNotStartDuplicateLoad() async throws {
+        let downloadProbe = ModelDownloadProbe()
+        let selected = MutableSelectedModel(AppMode.qwen3ModelId)
+        let providerA = FakeTranscriptionProvider(modelId: AppMode.qwen3ModelId)
+        let providerB = FakeTranscriptionProvider(modelId: AppMode.nemotronModelId)
+        let transcribeStarted = TestLatch()
+        let releaseTranscribe = TestLatch()
+        providerA.holdTranscribe(started: transcribeStarted, release: releaseTranscribe)
+        let service = TranscriptionService(loadDependencies: TranscriptionService.LoadDependencies(
+            waitForUIReady: {},
+            selectedModelId: { await selected.get() },
+            setSelectedModelId: { _ in },
+            ensureModelDownloaded: { modelId in
+                try await downloadProbe.ensureDownloaded(modelId)
+            },
+            makeProvider: { modelId in
+                modelId == providerA.modelId ? providerA : providerB
+            }
+        ))
+
+        try await service.ensureModelLoaded()
+        XCTAssertEqual(providerA.loadCallCount, 1)
+
+        // Park the provider gate with an in-flight transcribe so the model
+        // switch's unload of providerA suspends behind it.
+        let transcribeTask = Task { try await service.transcribe(samples: []) }
+        await transcribeStarted.wait()
+
+        await selected.set(AppMode.nemotronModelId)
+
+        let firstLoad = Task { try await service.ensureModelLoaded() }
+        try await Task.sleep(for: .milliseconds(50))
+        // While firstLoad is suspended in the unload, a second caller must
+        // wait for it instead of claiming a duplicate concurrent load.
+        let secondLoad = Task { try await service.ensureModelLoaded() }
+        try await Task.sleep(for: .milliseconds(50))
+
+        await releaseTranscribe.open()
+        _ = try await transcribeTask.value
+        try await firstLoad.value
+        try await secondLoad.value
+
+        XCTAssertEqual(providerA.unloadCallCount, 1)
+        XCTAssertEqual(providerB.loadCallCount, 1)
+        XCTAssertEqual(providerB.unloadCallCount, 0)
+        let currentModelId = await service.currentModelId()
+        XCTAssertEqual(currentModelId, AppMode.nemotronModelId)
+    }
+
     func testUnknownModelFallsBackToRecommendedDefaultLanguageModel() async throws {
         let selectedModelId = "greendale-human-being"
         let fallbackModelId = LanguageModelCatalog.recommendedModelId(for: Constants.defaultLanguage)
@@ -251,6 +300,22 @@ final class TranscriptionServiceTests: XCTestCase {
     }
 }
 
+private actor MutableSelectedModel {
+    private var modelId: String
+
+    init(_ modelId: String) {
+        self.modelId = modelId
+    }
+
+    func set(_ modelId: String) {
+        self.modelId = modelId
+    }
+
+    func get() -> String {
+        modelId
+    }
+}
+
 private actor TestLatch {
     private var isOpen = false
     private var continuations: [CheckedContinuation<Void, Never>] = []
@@ -301,6 +366,8 @@ private final class FakeTranscriptionProvider: TranscriptionProvider, @unchecked
     private struct State {
         var loadStarted: TestLatch?
         var releaseLoad: TestLatch?
+        var transcribeStarted: TestLatch?
+        var releaseTranscribe: TestLatch?
         var isReady = false
         var loadCallCount = 0
         var unloadCallCount = 0
@@ -339,6 +406,13 @@ private final class FakeTranscriptionProvider: TranscriptionProvider, @unchecked
         }
     }
 
+    func holdTranscribe(started: TestLatch, release: TestLatch) {
+        state.withLock { state in
+            state.transcribeStarted = started
+            state.releaseTranscribe = release
+        }
+    }
+
     func load(from _: URL, progressHandler _: (@Sendable (Double, String) -> Void)?) async throws {
         let holds = state.withLock { state in
             state.loadCallCount += 1
@@ -354,7 +428,12 @@ private final class FakeTranscriptionProvider: TranscriptionProvider, @unchecked
     }
 
     func transcribe(samples _: [Float], language _: String?, vocabularyPrompt _: String?) async throws -> String {
-        "Troy and Abed in the morning"
+        let holds = state.withLock { state in
+            (started: state.transcribeStarted, release: state.releaseTranscribe)
+        }
+        await holds.started?.open()
+        await holds.release?.wait()
+        return "Troy and Abed in the morning"
     }
 
     func transcribeStreaming(samples _: [Float], language _: String?, vocabularyPrompt _: String?) async throws -> String {

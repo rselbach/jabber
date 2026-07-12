@@ -199,9 +199,10 @@ final class TypingService {
             guard let keyDown = CGEvent(keyboardEventSource: src, virtualKey: KeyCode.v, keyDown: true),
                   let keyUp = CGEvent(keyboardEventSource: src, virtualKey: KeyCode.v, keyDown: false) else {
                 self.logger.error("Failed to create CGEvent for paste operation")
-                if let previousClipboard {
-                    self.restoreClipboard(previousClipboard, expectedChangeCount: expectedPasteboardChangeCount)
-                }
+                // The transcript is already on the clipboard. Leave it there
+                // so the user can paste manually — restoring the previous
+                // clipboard here would silently discard the transcript while
+                // the notification claims it is available.
                 NotificationService.shared.showError(
                     title: "Paste Failed",
                     message: "Could not simulate paste command. Text is in clipboard.",

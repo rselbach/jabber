@@ -44,6 +44,27 @@ final class OverlayWindowTests: XCTestCase {
         )
     }
 
+    // Regression: hide() during an in-flight hide bumped visibilityToken, so
+    // the first hide's completion read the mismatch as "a show superseded me",
+    // restored alpha on a still-ordered-in window (flash), and reset isHiding —
+    // letting a following show() early-return while the second completion
+    // ordered the window out (swallowed show). A hide must not interrupt an
+    // in-flight hide; the token proxy makes that observable synchronously.
+    func testHideDuringInFlightHideDoesNotInterruptIt() {
+        let overlay = TestOverlayWindow()
+
+        overlay.show()
+        overlay.hide()
+        let tokenAfterFirstHide = overlay.visibilityToken
+
+        overlay.hide()
+        XCTAssertEqual(
+            overlay.visibilityToken,
+            tokenAfterFirstHide,
+            "a second hide must not bump the token of the in-flight hide"
+        )
+    }
+
     // Regression: the overlay panel is created once and cached, positioned
     // against NSScreen.main at creation time. Without recomputing on every
     // show(), unplugging the display it was created on strands it offscreen

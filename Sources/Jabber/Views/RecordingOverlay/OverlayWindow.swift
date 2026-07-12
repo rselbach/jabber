@@ -37,6 +37,13 @@ class OverlayWindowController {
     }
 
     func hide() {
+        // A hide during an in-flight hide must not bump the token: the first
+        // hide's completion would read the mismatch as "a show superseded me"
+        // and restore alpha on a still-ordered-in window (visible flash), and
+        // its isHiding reset lets a following show() early-return while the
+        // second completion orders the window out — swallowing the show. The
+        // in-flight hide already finishes the job; only show() interrupts.
+        guard !isHiding else { return }
         visibilityToken &+= 1
         let token = visibilityToken
         isHiding = true

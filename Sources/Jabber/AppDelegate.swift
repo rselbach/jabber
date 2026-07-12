@@ -5,6 +5,10 @@ import os
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
     private var statusItem: NSStatusItem?
+    /// Disabled first menu item mirroring the current app state; refreshed on
+    /// every menu open.
+    private var statusHeaderItem: NSMenuItem?
+    private var currentAppState: AppState = .ready
     private var onboardingWindow: NSWindow?
     private var onboardingCoordinator: OnboardingCoordinator?
     private var mainWindow: NSWindow?
@@ -258,6 +262,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func updateStatusIcon(state: AppState) {
+        currentAppState = state
+
         let iconName: String
         switch state {
         case .downloading:
@@ -278,6 +284,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
 
         button.image = NSImage(systemSymbolName: iconName, accessibilityDescription: "Jabber")
+        button.contentTintColor = state == .recording ? .systemRed : nil
     }
 
     private func setupMenuBar() {
@@ -294,6 +301,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func buildMenu() -> NSMenu {
         let menu = NSMenu()
 
+        // Disabled header reflecting the current state; refreshed in
+        // menuWillOpen so it shows the live state and hotkey when opened.
+        let statusHeaderItem = NSMenuItem(title: statusMenuTitle(), action: nil, keyEquivalent: "")
+        self.statusHeaderItem = statusHeaderItem
+
         let openItem = NSMenuItem(title: "Open Jabber", action: #selector(openJabber), keyEquivalent: "")
         let settingsItem = NSMenuItem(title: "Settings…", action: #selector(openSettings), keyEquivalent: ",")
         let vocabularyItem = NSMenuItem(title: "Vocabulary", action: #selector(openVocabulary), keyEquivalent: "")
@@ -304,9 +316,31 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             item.target = self
         }
         // quitItem has no target → routes through the responder chain to NSApp.terminate.
+        // statusHeaderItem has no action either, so autoenablesItems keeps it disabled.
 
-        menu.items = [openItem, settingsItem, vocabularyItem, .separator(), updatesItem, .separator(), quitItem]
+        menu.items = [statusHeaderItem, .separator(), openItem, settingsItem, vocabularyItem,
+                      .separator(), updatesItem, .separator(), quitItem]
+        menu.delegate = self
         return menu
+    }
+
+    private func statusMenuTitle() -> String {
+        switch currentAppState {
+        case .downloading:
+            return "Downloading Model…"
+        case .ready:
+            let shortcut = HotkeyShortcut(
+                keyCode: UInt32(TypedSettings[.hotkeyKeyCode]),
+                modifiers: UInt32(TypedSettings[.hotkeyModifiers])
+            )
+            return "Ready to Dictate — \(shortcut.displayString)"
+        case .recording:
+            return "Recording…"
+        case .transcribing:
+            return "Transcribing…"
+        case .error:
+            return "Model Unavailable"
+        }
     }
 
     @objc private func openJabber() {
@@ -1172,6 +1206,12 @@ extension AppDelegate: NSWindowDelegate {
         // state survive re-opening.
 
         refreshActivationPolicy(closing: window)
+    }
+}
+
+extension AppDelegate: NSMenuDelegate {
+    func menuWillOpen(_ menu: NSMenu) {
+        statusHeaderItem?.title = statusMenuTitle()
     }
 }
 

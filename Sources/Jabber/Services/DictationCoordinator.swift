@@ -506,6 +506,13 @@ final class DictationCoordinator {
                 postProcessingErrorDescription: resolvedOutcome.errorDescription
             ))
 
+            // saveSession is another long suspension (actor hop + WAV encode +
+            // disk write). Re-validate once more so a cancel() during the save
+            // doesn't type stale text into whatever now has focus.
+            guard currentSessionID == sessionID else {
+                throw CancellationError()
+            }
+
             let trimmedText = resolvedOutcome.outputText.trimmingCharacters(in: .whitespacesAndNewlines)
             if !trimmedText.isEmpty {
                 typingService.output(trimmedText, targetProcessID: targetProcessID)

@@ -607,6 +607,36 @@ final class DictationCoordinatorTests: XCTestCase {
         XCTAssertTrue(dictationHistoryStore.sessions.isEmpty)
     }
 
+    func testCancelDuringHistorySaveDiscardsOutput() async {
+        audioCapture.storedSamples = makeLoudSamples()
+        transcriptionService.transcribeResult = .success("troy barnes")
+
+        // Park saveSession on a continuation so cancel() lands during the
+        // save suspension, after the pre-save session guard already passed.
+        dictationHistoryStore.holdUntilReleased = true
+        let saveStarted = XCTestExpectation(description: "history save started")
+        dictationHistoryStore.onSaveSession = { _ in saveStarted.fulfill() }
+
+        XCTAssertTrue(coordinator.start(targetProcessID: 12_345))
+        coordinator.stop()
+
+        await fulfillment(of: [saveStarted], timeout: 1.0)
+
+        // Cancel while the save is in flight: the session is invalidated, so
+        // the stale task must not type when the save returns.
+        coordinator.cancel()
+        XCTAssertTrue(coordinator.isIdle)
+
+        let noOutput = expectation(description: "no output after cancel")
+        noOutput.isInverted = true
+        typingService.onOutput = { _ in noOutput.fulfill() }
+
+        dictationHistoryStore.releaseSave()
+
+        await fulfillment(of: [noOutput], timeout: 1.0)
+        XCTAssertTrue(typingService.outputs.isEmpty)
+    }
+
     func testAudioConversionErrorIsForwarded() {
         let conversionError = AudioCaptureError.conversionFailed(NSError(domain: "test", code: 1))
 
@@ -1437,12 +1467,30 @@ final class FakeMediaPlaybackService: MediaPlaybackProtocol, @unchecked Sendable
 }
 
 final class FakeDictationHistoryStore: DictationHistoryProtocol, @unchecked Sendable {
+    private let lock = NSLock()
     private(set) var sessions: [DictationHistorySession] = []
     var onSaveSession: ((DictationHistorySession) -> Void)?
+    var holdUntilReleased = false
+    private var _saveRelease: CheckedContinuation<Void, Never>?
+
+    /// Resumes a `saveSession(_:)` call parked via `holdUntilReleased`.
+    func releaseSave() {
+        let continuation = lock.withLock {
+            let continuation = _saveRelease
+            _saveRelease = nil
+            return continuation
+        }
+        continuation?.resume()
+    }
 
     func saveSession(_ session: DictationHistorySession) async {
         sessions.append(session)
         onSaveSession?(session)
+        if holdUntilReleased {
+            await withCheckedContinuation { continuation in
+                lock.withLock { _saveRelease = continuation }
+            }
+        }
     }
 }
 

@@ -263,8 +263,11 @@ final class AppleSpeechProvider: TranscriptionProvider, @unchecked Sendable {
         with converter: AVAudioConverter,
         to outputFormat: AVAudioFormat
     ) throws -> AVAudioPCMBuffer {
-        let ratio = outputFormat.sampleRate / converter.inputFormat.sampleRate
-        let capacity = AVAudioFrameCount(Double(buffer.frameLength) * ratio.rounded(.up))
+        let capacity = AudioCaptureService.outputFrameCapacity(
+            inputFrames: buffer.frameLength,
+            inputRate: converter.inputFormat.sampleRate,
+            outputRate: outputFormat.sampleRate
+        )
 
         guard let output = AVAudioPCMBuffer(pcmFormat: outputFormat, frameCapacity: capacity) else {
             throw TranscriptionError.transcriptionFailed
@@ -278,7 +281,11 @@ final class AppleSpeechProvider: TranscriptionProvider, @unchecked Sendable {
                 return wasProcessed
             }
             if alreadyDone {
-                outStatus.pointee = .noDataNow
+                // This converter sees exactly one buffer: signal end-of-stream
+                // (not .noDataNow, which promises more input later) so a
+                // resampling converter flushes its filter-delay tail instead
+                // of dropping the final milliseconds of the utterance.
+                outStatus.pointee = .endOfStream
                 return nil
             }
             outStatus.pointee = .haveData

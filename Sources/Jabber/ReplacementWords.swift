@@ -130,7 +130,7 @@ enum ReplacementWordsResolver {
         at position: String.Index,
         rules: [Rule]
     ) -> (rangeUpperBound: String.Index, replacement: String)? {
-        var best: (length: Int, rangeUpperBound: String.Index, replacement: String)?
+        var best: (rangeUpperBound: String.Index, replacement: String)?
 
         for rule in rules {
             guard let range = transcript.range(
@@ -140,12 +140,16 @@ enum ReplacementWordsResolver {
             ) else { continue }
             guard isLeftBoundary(at: range.lowerBound, in: transcript),
                   isRightBoundary(at: range.upperBound, in: transcript) else { continue }
-            let length = rule.trigger.count
-            if length > (best?.length ?? -1) {
-                best = (length, range.upperBound, rule.replacement)
+            // "Longest" is measured in the transcript, not the trigger: full
+            // case folding can match spans of a different length than the
+            // trigger ("strasse" matches "straße"). All matches anchor at
+            // `position`, so the farthest upper bound is the longest match;
+            // ties keep the earlier rule, preserving entry order.
+            if best == nil || range.upperBound > best!.rangeUpperBound {
+                best = (range.upperBound, rule.replacement)
             }
         }
-        return best.map { (rangeUpperBound: $0.rangeUpperBound, replacement: $0.replacement) }
+        return best
     }
 
     /// True when the character before `index` (if any) is not a letter/digit.

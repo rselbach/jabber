@@ -147,6 +147,21 @@ final class ReplacementWordsResolverTests: XCTestCase {
         )
     }
 
+    func testLongestMatchIsMeasuredInTranscriptNotTriggerLength() {
+        // Full case folding lets trigger length diverge from the matched
+        // span: "ssssss" (6 chars) matches "ßßß" (3 transcript chars) while
+        // "ßßß xy" (also 6 chars) matches all 6. The rule consuming the
+        // longer transcript span must win, not the longer trigger string.
+        let entries = [
+            ReplacementEntry(triggers: ["ssssss"], replacement: "Chang"),
+            ReplacementEntry(triggers: ["ßßß xy"], replacement: "Greendale")
+        ]
+        XCTAssertEqual(
+            ReplacementWordsResolver.resolve(transcript: "ßßß xy", entries: entries),
+            "Greendale"
+        )
+    }
+
     // MARK: - Codec
 
     func testCodecEmptyRoundTrip() {

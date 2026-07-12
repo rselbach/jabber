@@ -104,21 +104,21 @@ final class ModelManager {
     }
 
     @discardableResult
-    func migrateSelectedModelIfNeeded(notify: Bool = false) -> Migration? {
+    func migrateSelectedModelIfNeeded() -> Migration? {
         let current = settings[.selectedModel]
 
         if let legacyReplacement = Self.legacyModelIdMigration[current] {
             guard legacyReplacement != current else { return nil }
-            return applyMigration(from: current, to: legacyReplacement, notify: notify)
+            return applyMigration(from: current, to: legacyReplacement)
         }
 
         guard AppMode.modelDefinition(for: current) == nil else { return nil }
 
         let fallback = LanguageModelCatalog.recommendedModelId(for: Constants.defaultLanguage)
-        return applyMigration(from: current, to: fallback, notify: notify)
+        return applyMigration(from: current, to: fallback)
     }
 
-    private func applyMigration(from: String, to: String, notify: Bool) -> Migration {
+    private func applyMigration(from: String, to: String) -> Migration {
         let shouldPersist = !replacementNeedsDownload(to)
         if shouldPersist {
             logger.info("Migrating selected model from '\(from)' to available replacement '\(to)'")
@@ -128,9 +128,6 @@ final class ModelManager {
         }
         let migration = Migration(from: from, to: to)
         lastMigration = migration
-        if notify {
-            NotificationCenter.default.post(name: Constants.Notifications.modelDidChange, object: nil)
-        }
         return migration
     }
 

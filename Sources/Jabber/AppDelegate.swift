@@ -762,6 +762,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         )
     }
 
+    @discardableResult
     private func startDeclinedModelMigrationFallbackIfNeeded() -> Bool {
         guard hasDeclinedModelMigrationDownloadPending() else { return false }
 

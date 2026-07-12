@@ -979,9 +979,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 TypingService.appIcon(forTargetProcessID: currentTargetProcessID)
             )
             updateStatusIcon(state: .recording)
+            SoundFeedbackService.shared.play(.dictationStart)
         case .transcribing:
             overlayWindow.showProcessing()
             updateStatusIcon(state: .transcribing)
+            SoundFeedbackService.shared.play(.dictationStop)
         }
     }
 

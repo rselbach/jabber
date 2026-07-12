@@ -6,6 +6,7 @@ struct GeneralPage: View {
 
     @AppStorage(AppSettingKey.outputMode) private var outputMode = TypingService.OutputMode.directTyping.rawValue
     @AppStorage(AppSettingKey.pauseMediaDuringRecording) private var pauseMediaDuringRecording = false
+    @AppStorage(AppSettingKey.soundFeedbackEnabled) private var soundFeedbackEnabled = true
 
     @State private var permissionRefreshTick = false
 
@@ -46,6 +47,12 @@ struct GeneralPage: View {
                     .foregroundStyle(.secondary)
             } header: {
                 Text("Media")
+            }
+
+            Section {
+                Toggle("Play sounds when dictation starts and stops", isOn: $soundFeedbackEnabled)
+            } header: {
+                Text("Feedback")
             }
 
             Section {

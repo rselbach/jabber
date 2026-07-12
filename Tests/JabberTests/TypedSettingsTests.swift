@@ -193,18 +193,23 @@ final class TypedSettingsTests: XCTestCase {
         XCTAssertFalse(settings[.pauseMediaDuringRecording])
         XCTAssertFalse(settings[.saveHistoryEnabled])
         XCTAssertFalse(settings[.postProcessingEnabled])
+        XCTAssertTrue(settings[.soundFeedbackEnabled])
         XCTAssertFalse(settings.isSet(.didShowFirstRunSetup))
         XCTAssertFalse(settings.isSet(.onboardingCompleted))
         XCTAssertFalse(settings.isSet(.pauseMediaDuringRecording))
         XCTAssertFalse(settings.isSet(.saveHistoryEnabled))
         XCTAssertFalse(settings.isSet(.postProcessingEnabled))
+        XCTAssertFalse(settings.isSet(.soundFeedbackEnabled))
 
         settings[.didShowFirstRunSetup] = true
         settings[.onboardingCompleted] = true
         settings[.pauseMediaDuringRecording] = true
         settings[.saveHistoryEnabled] = true
         settings[.postProcessingEnabled] = true
+        settings[.soundFeedbackEnabled] = false
 
+        XCTAssertFalse(settings[.soundFeedbackEnabled])
+        XCTAssertTrue(settings.isSet(.soundFeedbackEnabled))
         XCTAssertTrue(settings[.didShowFirstRunSetup])
         XCTAssertTrue(settings[.onboardingCompleted])
         XCTAssertTrue(settings[.pauseMediaDuringRecording])
@@ -229,11 +234,16 @@ final class TypedSettingsTests: XCTestCase {
         XCTAssertTrue(settings[.saveHistoryEnabled])
         XCTAssertTrue(settings[.postProcessingEnabled])
 
+        settings[.soundFeedbackEnabled] = false
+        XCTAssertFalse(settings[.soundFeedbackEnabled])
+
         settings.remove(.didShowFirstRunSetup)
         settings.remove(.onboardingCompleted)
         settings.remove(.pauseMediaDuringRecording)
         settings.remove(.saveHistoryEnabled)
         settings.remove(.postProcessingEnabled)
+        settings.remove(.soundFeedbackEnabled)
+        XCTAssertTrue(settings[.soundFeedbackEnabled])
 
         XCTAssertFalse(settings[.didShowFirstRunSetup])
         XCTAssertFalse(settings[.onboardingCompleted])

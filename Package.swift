@@ -27,7 +27,8 @@ let package = Package(
             ],
             path: "Sources/Jabber",
             resources: [
-                .process("Assets.xcassets")
+                .process("Assets.xcassets"),
+                .process("Resources")
             ],
             swiftSettings: [
                 .swiftLanguageMode(.v5),

@@ -321,14 +321,13 @@ struct WaveformContainer: View {
     }
 
     private var processingContent: some View {
-        VStack(spacing: 6) {
-            HStack(spacing: 8) {
-                ProgressView()
-                    .controlSize(.small)
-                Text(waveformView.processingLabel)
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
-            }
+        VStack(spacing: 8) {
+            ProcessingWaveformView()
+                .frame(height: 16)
+
+            Text(waveformView.processingLabel)
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
 
             if !waveformView.partialTranscription.isEmpty {
                 Text(waveformView.partialTranscription)
@@ -379,5 +378,38 @@ struct WaveformBarsView: View {
     private func barHeight(for level: Float, available: CGFloat) -> CGFloat {
         let normalized = min(CGFloat(level) * 10, 1.0) // Scale up quiet audio
         return minBarHeight + normalized * max(available - minBarHeight, 0)
+    }
+}
+
+/// The waveform flattened to its idle dots with a repeating highlight sweep,
+/// shown while transcription or refinement runs. Keeps the overlay surface
+/// continuous from recording to processing instead of swapping in a spinner.
+/// The sweep is skipped when the user has Reduce Motion enabled.
+struct ProcessingWaveformView: View {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var sweep = false
+
+    var body: some View {
+        WaveformBarsView(levels: [])
+            .overlay {
+                if !reduceMotion {
+                    GeometryReader { geometry in
+                        let bandWidth = geometry.size.width * 0.35
+                        LinearGradient(
+                            colors: [.clear, .white.opacity(0.9), .clear],
+                            startPoint: .leading,
+                            endPoint: .trailing
+                        )
+                        .frame(width: bandWidth)
+                        .offset(x: sweep ? geometry.size.width : -bandWidth)
+                    }
+                    .mask(WaveformBarsView(levels: []))
+                }
+            }
+            .onAppear {
+                withAnimation(.linear(duration: 1.05).repeatForever(autoreverses: false)) {
+                    sweep = true
+                }
+            }
     }
 }

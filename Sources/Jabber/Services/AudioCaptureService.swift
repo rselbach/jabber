@@ -129,10 +129,44 @@ final class AudioCaptureService {
         }
         engine.inputNode.removeTap(onBus: 0)
         engine.stop()
+        // Flush the converter's filter-delay tail (a few ms of audio at the
+        // end of the utterance) before discarding it; must happen while
+        // isCapturing is still true so the append guard accepts the samples.
+        drainConverter()
         captureState.withLock {
             $0.isCapturing = false
         }
         setConverter(nil)
+    }
+
+    private func drainConverter() {
+        guard let converter = getConverter() else { return }
+        // The sample-rate conversion tail is a fixed few milliseconds; 4096
+        // frames at 16kHz is far more than any real filter delay.
+        guard let tailBuffer = AVAudioPCMBuffer(
+            pcmFormat: converter.outputFormat,
+            frameCapacity: 4096
+        ) else { return }
+
+        var error: NSError?
+        converter.convert(to: tailBuffer, error: &error) { _, outStatus in
+            outStatus.pointee = .endOfStream
+            return nil
+        }
+        if let error {
+            logger.warning("Draining audio converter tail failed: \(error.localizedDescription)")
+            return
+        }
+
+        guard let channelData = tailBuffer.floatChannelData?[0] else { return }
+        let frames = Int(tailBuffer.frameLength)
+        guard frames > 0 else { return }
+
+        let samples = Array(UnsafeBufferPointer(start: channelData, count: frames))
+        captureState.withLock {
+            guard $0.isCapturing else { return }
+            $0.capturedSamples.append(contentsOf: samples)
+        }
     }
 
     func currentSamples() -> [Float] {

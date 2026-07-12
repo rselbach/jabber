@@ -1025,6 +1025,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         updateDownloadTracking(with: state)
 
+        // Failed-download alerts live on the Speech page, which is only
+        // mounted while the main window shows it. A download started from the
+        // migration notice (or watched with the window closed) would fail
+        // with no message anywhere — the overlay just disappears. Surface
+        // those through a notification; skip it when the main window is
+        // visible so the Speech page alert isn't duplicated.
+        if state.phase == .failed, !state.isCancelled, mainWindow?.isVisible != true {
+            let modelName = ModelManager.shared.models.first { $0.id == state.modelId }?.name ?? state.modelId
+            NotificationService.shared.showError(
+                title: "Model Download Failed",
+                message: "Failed to download \(modelName): \(state.errorDescription ?? state.status)",
+                critical: false
+            )
+        }
+
         // When the selected model finishes downloading, ensure a load starts.
         // This covers the migration-notice "Download" path, the notice's
         // "Choose Another" path (downloading the already-selected model is a

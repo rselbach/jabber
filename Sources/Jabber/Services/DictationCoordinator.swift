@@ -424,6 +424,17 @@ final class DictationCoordinator {
         let previewSamples = audioCapture.recentSamples(maxCount: streamingPreviewWindowSamples)
         guard AudioSpeechDetector.assess(samples: previewSamples).shouldTranscribe else { return }
 
+        // Once the buffer exceeds the window, previewSamples is a sliding
+        // window and no longer a prefix-extension of the previous tick's
+        // slice. A stateful provider's delta (dropFirst(streamedCount)) would
+        // silently skip the samples that slid past the window start on the
+        // transition tick, garbling the preview. Reset so the provider
+        // re-transcribes the full window — the steady state it reaches one
+        // tick later anyway once the windowed slice stops growing.
+        if totalCount > streamingPreviewWindowSamples {
+            await transcriptionService.resetStreamingTranscription()
+        }
+
         do {
             let text = try await transcriptionService.transcribeStreaming(samples: previewSamples)
             try Task.checkCancellation()

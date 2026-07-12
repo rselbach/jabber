@@ -343,6 +343,13 @@ final class DictationCoordinatorTests: XCTestCase {
         // The preview transcribed the bounded window, not the full 280_000.
         XCTAssertEqual(transcriptionService.streamingSampleCounts, [240_000])
 
+        // The window has slid past the buffer start, so the slice is no
+        // longer a prefix-extension of the previous tick's: the preview must
+        // reset streaming state (once at loop start, once for the slide) so
+        // stateful providers re-transcribe the window instead of computing a
+        // misaligned delta.
+        XCTAssertEqual(transcriptionService.resetStreamingCallCount, 2)
+
         coordinator.cancel()
         try await Task.sleep(for: .milliseconds(20))
     }

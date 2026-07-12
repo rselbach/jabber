@@ -109,6 +109,11 @@ final class OnboardingCoordinator {
     }
 
     func selectLanguage(_ languageCode: String) {
+        // Re-tapping the already-selected language (e.g. after going Back
+        // from the model step) must not clobber a model the user picked
+        // manually with the recommendation.
+        guard languageCode != onboardingSelectedLanguage else { return }
+
         onboardingSelectedLanguage = languageCode
         TypedSettings[.selectedLanguage] = languageCode
 

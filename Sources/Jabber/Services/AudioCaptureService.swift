@@ -21,6 +21,12 @@ final class AudioCaptureService {
 
     var onAudioLevel: ((Float) -> Void)?
     var onConversionError: ((Error) -> Void)?
+    /// Invoked when the engine's configuration changes mid-capture (input
+    /// device unplugged, AirPods disconnect). AVAudioEngine stops itself in
+    /// that case and the tap simply goes silent, so without this signal the
+    /// session would keep "recording" dead air with a frozen level meter.
+    var onCaptureInterrupted: (() -> Void)?
+    private var configurationChangeObserver: (any NSObjectProtocol)?
 
     init() {
         captureState.withLock {
@@ -89,9 +95,29 @@ final class AudioCaptureService {
             stopCapture()
             throw error
         }
+
+        configurationChangeObserver = NotificationCenter.default.addObserver(
+            forName: .AVAudioEngineConfigurationChange,
+            object: engine,
+            queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor [weak self] in
+                self?.handleConfigurationChange()
+            }
+        }
+    }
+
+    private func handleConfigurationChange() {
+        guard isCapturing else { return }
+        logger.warning("Audio engine configuration changed during capture")
+        onCaptureInterrupted?()
     }
 
     func stopCapture() {
+        if let configurationChangeObserver {
+            NotificationCenter.default.removeObserver(configurationChangeObserver)
+            self.configurationChangeObserver = nil
+        }
         let wasCapturing = captureState.withLock { $0.isCapturing }
         guard wasCapturing else { return }
         guard let engine = engineStorage as? AVAudioEngine else {
@@ -253,6 +279,7 @@ enum AudioCaptureError: Error, LocalizedError {
     case invalidFormat
     case converterUnavailable
     case conversionFailed(Error)
+    case deviceChanged
 
     var errorDescription: String? {
         switch self {
@@ -262,6 +289,8 @@ enum AudioCaptureError: Error, LocalizedError {
             return "Audio converter could not be created"
         case .conversionFailed(let error):
             return "Audio conversion failed: \(error.localizedDescription)"
+        case .deviceChanged:
+            return "The audio input device changed during recording"
         }
     }
 }

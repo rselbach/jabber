@@ -7,6 +7,7 @@ import os
 protocol AudioCaptureProtocol: AnyObject {
     var onAudioLevel: ((Float) -> Void)? { get set }
     var onConversionError: ((Error) -> Void)? { get set }
+    var onCaptureInterrupted: (() -> Void)? { get set }
     func startCapture() throws
     func stopCapture()
     func currentSamples() -> [Float]
@@ -200,6 +201,16 @@ final class DictationCoordinator {
         }
         self.audioCapture.onConversionError = { [weak self] error in
             self?.onAudioConversionError?(error)
+        }
+        self.audioCapture.onCaptureInterrupted = { [weak self] in
+            guard let self, self.isRecording else { return }
+            // The engine died mid-recording (input device change). Stop the
+            // session so the audio captured up to the interruption is
+            // transcribed, and tell the user why recording ended instead of
+            // silently recording dead air.
+            self.logger.warning("Audio capture interrupted; stopping dictation with captured audio")
+            self.onAudioConversionError?(AudioCaptureError.deviceChanged)
+            self.stop()
         }
     }
 

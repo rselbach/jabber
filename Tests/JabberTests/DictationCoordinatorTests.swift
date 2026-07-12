@@ -607,6 +607,27 @@ final class DictationCoordinatorTests: XCTestCase {
         XCTAssertTrue(dictationHistoryStore.sessions.isEmpty)
     }
 
+    func testCaptureInterruptionStopsRecordingAndTranscribesCapturedAudio() async {
+        audioCapture.storedSamples = makeLoudSamples()
+        transcriptionService.transcribeResult = .success("troy barnes")
+
+        let errorSurfaced = expectation(description: "interruption error surfaced")
+        coordinator.onAudioConversionError = { error in
+            guard case AudioCaptureError.deviceChanged = error else { return }
+            errorSurfaced.fulfill()
+        }
+        let output = expectation(description: "captured audio transcribed and typed")
+        typingService.onOutput = { _ in output.fulfill() }
+
+        XCTAssertTrue(coordinator.start(targetProcessID: 12_345))
+        // Simulate the input device disappearing mid-recording.
+        audioCapture.onCaptureInterrupted?()
+
+        await fulfillment(of: [errorSurfaced, output], timeout: 1.0)
+        XCTAssertEqual(typingService.outputs, ["troy barnes"])
+        XCTAssertTrue(audioCapture.didStop)
+    }
+
     func testCancelDuringHistorySaveDiscardsOutput() async {
         audioCapture.storedSamples = makeLoudSamples()
         transcriptionService.transcribeResult = .success("troy barnes")
@@ -1160,6 +1181,7 @@ final class DictationCoordinatorTests: XCTestCase {
 final class FakeAudioCapture: AudioCaptureProtocol, @unchecked Sendable {
     var onAudioLevel: ((Float) -> Void)?
     var onConversionError: ((Error) -> Void)?
+    var onCaptureInterrupted: (() -> Void)?
 
     var startShouldSucceed = true
     var startError: Error?

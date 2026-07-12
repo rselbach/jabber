@@ -1035,7 +1035,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             && state.modelId == selectedModelId
 
         if isSelectedModelFinished, !isModelLoadInProgress {
-            startModelLoadingTask()
+            // Clear any session override first: after a declined migration
+            // the override points at the fallback model, so desiredModelId()
+            // would ignore the freshly-downloaded selection and this load
+            // would be a no-op on the already-loaded fallback until restart.
+            startModelLoadingTask { appDelegate in
+                await appDelegate.transcriptionService.setSessionModelOverride(nil)
+                await appDelegate.loadModel()
+            }
         }
 
         syncNonDictationUI(forceLoading: isSelectedModelFinished)

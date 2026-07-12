@@ -29,7 +29,7 @@ struct KeycapsView: View {
                     .padding(.horizontal, label.count > 1 ? 8 : 7)
                     .padding(.vertical, 3)
                     .background(
-                        RoundedRectangle(cornerRadius: 6)
+                        RoundedRectangle(cornerRadius: CornerRadius.small)
                             .fill(.quaternary)
                             .shadow(color: .black.opacity(0.2), radius: 0, y: 1)
                     )

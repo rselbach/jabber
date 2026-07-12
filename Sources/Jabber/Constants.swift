@@ -1,5 +1,16 @@
 import Foundation
 
+/// Corner-radius scale shared across surfaces so panels, cards, tiles, and
+/// keycaps sit on one consistent geometry instead of per-view magic numbers.
+enum CornerRadius {
+    /// Small chips: sidebar icon tiles, keycaps, app-icon clips.
+    static let small: CGFloat = 6
+    /// Inline controls and inner cards: search fields, selection cards, permission tiles.
+    static let medium: CGFloat = 10
+    /// Floating panels and top-level cards: overlays, onboarding cards.
+    static let large: CGFloat = 12
+}
+
 /// Application-wide constants and notification names
 enum Constants {
     /// Notification names used throughout the application

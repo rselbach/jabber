@@ -71,7 +71,7 @@ struct DownloadOverlayContent: View {
 
     var body: some View {
         ZStack {
-            RoundedRectangle(cornerRadius: 12)
+            RoundedRectangle(cornerRadius: CornerRadius.large)
                 .fill(.ultraThinMaterial)
 
             HStack(spacing: 10) {

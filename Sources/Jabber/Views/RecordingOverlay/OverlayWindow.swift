@@ -254,7 +254,7 @@ struct WaveformContainer: View {
 
     var body: some View {
         ZStack {
-            RoundedRectangle(cornerRadius: 12)
+            RoundedRectangle(cornerRadius: CornerRadius.large)
                 .fill(.ultraThinMaterial)
 
             HStack(spacing: 10) {
@@ -303,7 +303,7 @@ struct WaveformContainer: View {
             .interpolation(.high)
             .aspectRatio(contentMode: .fit)
             .frame(width: 20, height: 20)
-            .clipShape(RoundedRectangle(cornerRadius: 5))
+            .clipShape(RoundedRectangle(cornerRadius: CornerRadius.small))
     }
 
     private var waveform: some View {

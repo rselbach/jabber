@@ -124,7 +124,7 @@ struct MainWindowView: View {
                 .foregroundStyle(.white)
                 .frame(width: 22, height: 22)
                 .background(
-                    RoundedRectangle(cornerRadius: 6)
+                    RoundedRectangle(cornerRadius: CornerRadius.small)
                         .fill(section.iconColor.gradient)
                 )
         }

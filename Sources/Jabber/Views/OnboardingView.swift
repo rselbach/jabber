@@ -160,11 +160,11 @@ struct OnboardingView: View {
     private func card(_ content: some View) -> some View {
         content
             .background(
-                RoundedRectangle(cornerRadius: 14)
+                RoundedRectangle(cornerRadius: CornerRadius.large)
                     .fill(.quinary)
             )
             .overlay(
-                RoundedRectangle(cornerRadius: 14)
+                RoundedRectangle(cornerRadius: CornerRadius.large)
                     .strokeBorder(.quaternary, lineWidth: 1)
             )
     }
@@ -260,7 +260,7 @@ struct OnboardingView: View {
                 .padding(.horizontal, 10)
                 .padding(.vertical, 7)
                 .background(
-                    RoundedRectangle(cornerRadius: 8)
+                    RoundedRectangle(cornerRadius: CornerRadius.medium)
                         .fill(.quinary)
                 )
 
@@ -325,9 +325,9 @@ struct OnboardingView: View {
             .padding(.horizontal, 12)
             .padding(.vertical, 10)
             .background(isSelected ? Color.accentColor.opacity(0.15) : Color.primary.opacity(0.05))
-            .clipShape(RoundedRectangle(cornerRadius: 10))
+            .clipShape(RoundedRectangle(cornerRadius: CornerRadius.medium))
             .overlay(
-                RoundedRectangle(cornerRadius: 10)
+                RoundedRectangle(cornerRadius: CornerRadius.medium)
                     .strokeBorder(isSelected ? Color.accentColor : Color.clear, lineWidth: 1.5)
             )
         }
@@ -451,7 +451,7 @@ struct OnboardingView: View {
                     .foregroundStyle(.white)
                     .frame(width: 38, height: 38)
                     .background(
-                        RoundedRectangle(cornerRadius: 9)
+                        RoundedRectangle(cornerRadius: CornerRadius.medium)
                             .fill(symbolColor.gradient)
                     )
 
@@ -602,7 +602,7 @@ struct OnboardingView: View {
             .padding(16)
         )
         .overlay(
-            RoundedRectangle(cornerRadius: 14)
+            RoundedRectangle(cornerRadius: CornerRadius.large)
                 .strokeBorder(isActive ? Color.accentColor : Color.clear, lineWidth: 1.5)
         )
     }
@@ -723,7 +723,7 @@ struct OnboardingView: View {
                     .padding(.horizontal, label.count > 1 ? 10 : 8)
                     .padding(.vertical, 4)
                     .background(
-                        RoundedRectangle(cornerRadius: 7)
+                        RoundedRectangle(cornerRadius: CornerRadius.small)
                             .fill(.quaternary)
                             .shadow(color: .black.opacity(0.2), radius: 0, y: 1)
                     )
@@ -747,11 +747,11 @@ struct OnboardingView: View {
                 .frame(maxWidth: 440)
                 .frame(height: 76)
                 .background(
-                    RoundedRectangle(cornerRadius: 12)
+                    RoundedRectangle(cornerRadius: CornerRadius.large)
                         .fill(.quinary)
                 )
                 .overlay(
-                    RoundedRectangle(cornerRadius: 12)
+                    RoundedRectangle(cornerRadius: CornerRadius.large)
                         .strokeBorder(.quaternary, lineWidth: 1)
                 )
                 .overlay(alignment: .topLeading) {

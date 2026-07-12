@@ -253,6 +253,16 @@ final class TypingService {
 
     private func insertUnicodeText(_ text: String, targetProcessID: pid_t) -> Bool {
         guard targetProcessID > 0 else { return false }
+        // The PID was captured at hotkey press and transcription can take
+        // seconds. Events posted to a terminated process vanish without an
+        // error, which would count as success here and skip every fallback.
+        // Verify the target is still alive so a dead PID routes to the
+        // AX/HID/clipboard fallbacks instead of silently dropping the text.
+        guard let app = NSRunningApplication(processIdentifier: targetProcessID),
+              !app.isTerminated else {
+            logger.warning("Target process \(targetProcessID) is no longer running; using fallback output")
+            return false
+        }
         return postUnicodeChunks(for: text) { event in
             event.postToPid(targetProcessID)
         }

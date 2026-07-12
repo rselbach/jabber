@@ -27,13 +27,19 @@ class OverlayWindowController {
         // offscreen and every future dictation shows an invisible overlay.
         reposition()
         visibilityToken &+= 1
-        isHiding = false
-        NSAnimationContext.runAnimationGroup { context in
-            context.duration = 0
-            window?.animator().alphaValue = 1
+        // Fade in from transparent on a fresh show; a show that interrupts an
+        // in-flight hide fades back up from the current alpha instead so the
+        // overlay doesn't blink.
+        if window?.isVisible != true {
+            window?.alphaValue = 0
         }
+        isHiding = false
         onShow()
         window?.orderFront(nil)
+        NSAnimationContext.runAnimationGroup { context in
+            context.duration = animationDuration
+            window?.animator().alphaValue = 1
+        }
     }
 
     func hide() {

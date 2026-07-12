@@ -91,22 +91,28 @@ final class MediaPlaybackService: MediaPlaybackProtocol {
         Task { [weak self] in
             // Abort if a new dictation session started before we could send
             // the resume — sending .play now would un-pause media the new
-            // session intends to keep paused, and the new session's pauseTask
-            // owns the media state from here.
-            if let self, self.currentSessionID != nil { return }
+            // session intends to keep paused. Hand the pause ownership to
+            // that session: its own probe sees media already paused and skips,
+            // so without the handoff nobody would ever send the .play.
+            if let self, self.currentSessionID != nil {
+                self.didPauseMediaForThisSession = true
+                return
+            }
             guard await client.send(.play) else {
                 logger.warning("MediaRemote failed to resume media playback")
                 return
             }
             // A new session may have started during the await. If so, our .play
             // may have un-paused media the new session just paused (or is about
-            // to pause). Re-pause to restore the state the new session expects;
-            // pausing already-paused media is a harmless no-op.
+            // to pause). Re-pause to restore the state the new session expects
+            // (pausing already-paused media is a harmless no-op) and hand it
+            // the pause ownership so its resume sends the .play.
             if let self, self.currentSessionID != nil {
                 guard await client.send(.pause) else {
                     logger.warning("MediaRemote failed to re-pause after stale resume race")
                     return
                 }
+                self.didPauseMediaForThisSession = true
             }
         }
     }
@@ -128,6 +134,16 @@ final class MediaPlaybackService: MediaPlaybackProtocol {
         }
 
         guard currentSessionID == sessionID, !Task.isCancelled else {
+            // "Session invalidated" splits into two cases. A *different*
+            // session is active: the pause we just landed is exactly what it
+            // wants — hand it ownership (its probe saw media already paused
+            // and skipped) instead of un-pausing mid-dictation. No session at
+            // all: undo the stale pause.
+            if currentSessionID != nil {
+                logger.notice("Media pause completed after a new session started; transferring pause ownership")
+                didPauseMediaForThisSession = true
+                return
+            }
             logger.notice("Media pause completed after dictation ended; undoing stale pause")
             guard await client.send(.play) else {
                 logger.warning("MediaRemote failed to undo stale media pause")

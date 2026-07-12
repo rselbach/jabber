@@ -174,6 +174,71 @@ final class MediaPlaybackServiceTests: XCTestCase {
         )
     }
 
+    /// Same race as above, one step further: the aborted resume must hand the
+    /// pause ownership to session B. B's probe saw media already paused and
+    /// skipped, so without the handoff B's resume never sends .play and the
+    /// user's media stays paused forever.
+    func testAbortedStaleResumeHandsPauseOwnershipToNewSession() async throws {
+        // Session A: media playing, pause succeeds, verification sees paused.
+        // Session B's probe then sees paused media and skips its own pause.
+        client.isPlayingResults = [true, false, false]
+        let service = makeService()
+
+        service.pauseForDictationIfNeeded()
+        try await Task.sleep(for: .milliseconds(20))
+
+        // A ends and B starts before A's resume Task runs; the resume aborts.
+        service.resumeAfterDictationIfNeeded()
+        service.pauseForDictationIfNeeded()
+        try await Task.sleep(for: .milliseconds(50))
+        XCTAssertFalse(client.commands.contains(.play))
+
+        // B ends: it inherited the pause from A, so its resume must send .play.
+        let playSent = expectation(description: "session B resume sends play")
+        client.sendExpectations[.play] = playSent
+        service.resumeAfterDictationIfNeeded()
+        await fulfillment(of: [playSent], timeout: 1.0)
+
+        XCTAssertEqual(client.commands, [.pause, .play])
+    }
+
+    /// Session A's .pause is in flight when A ends and session B starts. The
+    /// landed pause is exactly what B wants: the stale task must NOT undo it
+    /// with .play (that would un-pause media mid-dictation of B with nothing
+    /// left to re-pause it) and must hand B the pause ownership instead.
+    func testPauseLandingAfterNewSessionStartsTransfersOwnershipInsteadOfUnpausing() async throws {
+        // A's probe sees playing; B's probe sees paused (A's pause landed
+        // just before it) and skips.
+        client.isPlayingResults = [true, false]
+        client.holdSendUntilReleased = true
+        let pauseStarted = expectation(description: "session A pause send starts")
+        client.sendExpectations[.pause] = pauseStarted
+        let service = makeService()
+
+        service.pauseForDictationIfNeeded()
+        await fulfillment(of: [pauseStarted], timeout: 1.0)
+
+        // A ends, B starts while A's .pause is still in flight.
+        service.resumeAfterDictationIfNeeded()
+        service.pauseForDictationIfNeeded()
+
+        // A's .pause lands with session B active: no .play undo.
+        client.releaseSend(true)
+        try await Task.sleep(for: .milliseconds(50))
+        XCTAssertFalse(
+            client.commands.contains(.play),
+            "stale pause must not be undone while a new session is active; commands: \(client.commands)"
+        )
+
+        // B ends: it inherited the pause, so its resume must send .play.
+        let playSent = expectation(description: "session B resume sends play")
+        client.sendExpectations[.play] = playSent
+        service.resumeAfterDictationIfNeeded()
+        await fulfillment(of: [playSent], timeout: 1.0)
+
+        XCTAssertEqual(client.commands, [.pause, .play])
+    }
+
     /// Session A's resume .play is in flight when session B starts. The resume
     /// must re-pause after the .play lands so media stays paused for session B.
     func testStaleResumeRepausesWhenNewSessionStartsDuringPlay() async throws {

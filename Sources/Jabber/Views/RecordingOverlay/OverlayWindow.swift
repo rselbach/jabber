@@ -301,8 +301,7 @@ struct WaveformContainer: View {
     }
 
     private var waveform: some View {
-        WaveformShape(levels: waveformView.levels)
-            .stroke(Color.accentColor, lineWidth: 2)
+        WaveformBarsView(levels: waveformView.levels)
             .padding(.horizontal, 20)
             .padding(.vertical, 15)
     }
@@ -314,8 +313,7 @@ struct WaveformContainer: View {
                 .lineLimit(2)
                 .frame(maxWidth: .infinity, alignment: .leading)
 
-            WaveformShape(levels: waveformView.levels)
-                .stroke(Color.accentColor, lineWidth: 2)
+            WaveformBarsView(levels: waveformView.levels)
                 .frame(height: 24)
         }
         .padding(.horizontal, 18)
@@ -345,35 +343,41 @@ struct WaveformContainer: View {
     }
 }
 
-struct WaveformShape: Shape {
+/// Voice-memo style level meter: one rounded bar per sample, symmetric around
+/// the centerline, newest sample at the right. Short histories are left-padded
+/// with silence so the meter is always full-width and idles as a row of dots.
+/// Height changes ease out so motion stays smooth at audio-buffer cadence.
+struct WaveformBarsView: View {
     let levels: [Float]
 
-    func path(in rect: CGRect) -> Path {
-        var path = Path()
+    private let barWidth: CGFloat = 3
+    private let spacing: CGFloat = 3
+    private let minBarHeight: CGFloat = 3
 
-        guard levels.count > 1 else {
-            // Draw flat line if no data
-            path.move(to: CGPoint(x: 0, y: rect.midY))
-            path.addLine(to: CGPoint(x: rect.width, y: rect.midY))
-            return path
-        }
-
-        let stepX = rect.width / CGFloat(levels.count - 1)
-        let midY = rect.midY
-        let maxAmplitude = rect.height / 2 - 4
-
-        for (index, level) in levels.enumerated() {
-            let x = CGFloat(index) * stepX
-            let normalizedLevel = min(CGFloat(level) * 10, 1.0) // Scale up quiet audio
-            let y = midY - normalizedLevel * maxAmplitude
-
-            if index == 0 {
-                path.move(to: CGPoint(x: x, y: y))
-            } else {
-                path.addLine(to: CGPoint(x: x, y: y))
+    var body: some View {
+        GeometryReader { geometry in
+            let bars = displayLevels(width: geometry.size.width)
+            HStack(spacing: spacing) {
+                ForEach(bars.indices, id: \.self) { index in
+                    Capsule(style: .continuous)
+                        .fill(Color.accentColor)
+                        .frame(width: barWidth, height: barHeight(for: bars[index], available: geometry.size.height))
+                }
             }
+            .shadow(color: Color.accentColor.opacity(0.35), radius: 1.5)
+            .frame(width: geometry.size.width, height: geometry.size.height)
         }
+        .animation(.easeOut(duration: 0.1), value: levels)
+    }
 
-        return path
+    private func displayLevels(width: CGFloat) -> [Float] {
+        let capacity = max(1, Int((width + spacing) / (barWidth + spacing)))
+        let recent = levels.suffix(capacity)
+        return Array(repeating: 0, count: capacity - recent.count) + recent
+    }
+
+    private func barHeight(for level: Float, available: CGFloat) -> CGFloat {
+        let normalized = min(CGFloat(level) * 10, 1.0) // Scale up quiet audio
+        return minBarHeight + normalized * max(available - minBarHeight, 0)
     }
 }

@@ -1,5 +1,6 @@
 import Foundation
 import NemotronStreamingASR
+import os
 
 final class NemotronASRProvider: TranscriptionProvider, @unchecked Sendable {
     let modelId: String
@@ -8,6 +9,11 @@ final class NemotronASRProvider: TranscriptionProvider, @unchecked Sendable {
     private var streamingSession: NemotronStreamingASR.StreamingSession?
     private var streamedSampleCount = 0
     private var latestStreamingText = ""
+    /// isReady is read from the TranscriptionService actor while unload() can
+    /// be running on the provider-call gate; `model` itself stays confined to
+    /// gate-serialized calls, so mirror readiness in a lock-guarded flag
+    /// instead of racing on the unprotected var.
+    private let readyState = OSAllocatedUnfairLock(initialState: false)
 
     init(modelId: String, huggingFaceModelId: String) {
         self.modelId = modelId
@@ -15,7 +21,7 @@ final class NemotronASRProvider: TranscriptionProvider, @unchecked Sendable {
     }
 
     var isReady: Bool {
-        model != nil
+        readyState.withLock { $0 }
     }
 
     func load(from cacheDir: URL, progressHandler: (@Sendable (Double, String) -> Void)?) async throws {
@@ -33,6 +39,7 @@ final class NemotronASRProvider: TranscriptionProvider, @unchecked Sendable {
             }
         )
         model = m
+        readyState.withLock { $0 = true }
     }
 
     func transcribe(samples: [Float], language: String?, vocabularyPrompt: String?) async throws -> String {
@@ -84,6 +91,7 @@ final class NemotronASRProvider: TranscriptionProvider, @unchecked Sendable {
     }
 
     func unload() {
+        readyState.withLock { $0 = false }
         resetStreamingTranscription()
         model = nil
     }

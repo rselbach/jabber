@@ -1,10 +1,16 @@
 import Foundation
+import os
 import Qwen3ASR
 
 final class Qwen3ASRProvider: TranscriptionProvider, @unchecked Sendable {
     let modelId: String
     private let huggingFaceModelId: String
     private var model: Qwen3ASRModel?
+    /// isReady is read from the TranscriptionService actor while unload() can
+    /// be running on the provider-call gate; `model` itself stays confined to
+    /// gate-serialized calls, so mirror readiness in a lock-guarded flag
+    /// instead of racing on the unprotected var.
+    private let readyState = OSAllocatedUnfairLock(initialState: false)
 
     init(modelId: String, huggingFaceModelId: String) {
         self.modelId = modelId
@@ -12,7 +18,7 @@ final class Qwen3ASRProvider: TranscriptionProvider, @unchecked Sendable {
     }
 
     var isReady: Bool {
-        model != nil
+        readyState.withLock { $0 }
     }
 
     func load(from cacheDir: URL, progressHandler: (@Sendable (Double, String) -> Void)?) async throws {
@@ -25,6 +31,7 @@ final class Qwen3ASRProvider: TranscriptionProvider, @unchecked Sendable {
             }
         )
         model = m
+        readyState.withLock { $0 = true }
     }
 
     func transcribe(samples: [Float], language: String?, vocabularyPrompt: String?) async throws -> String {
@@ -50,6 +57,7 @@ final class Qwen3ASRProvider: TranscriptionProvider, @unchecked Sendable {
     }
 
     func unload() {
+        readyState.withLock { $0 = false }
         model = nil
     }
 }

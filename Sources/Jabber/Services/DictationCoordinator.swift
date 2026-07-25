@@ -420,10 +420,17 @@ final class DictationCoordinator {
         guard totalCount > lastStreamingPreviewSampleCount else { return }
 
         let previewSamples = audioCapture.currentSamples()
-        guard AudioSpeechDetector.assess(samples: previewSamples).shouldTranscribe else { return }
+        let previewAudioMilliseconds = previewSamples.count * 1_000 / 16_000
+        guard AudioSpeechDetector.assess(samples: previewSamples).shouldTranscribe else {
+            logger.debug("Preview tick skipped: no speech in \(previewAudioMilliseconds) ms of audio")
+            return
+        }
 
         do {
+            let decodeStartedAt = ContinuousClock.now
             let text = try await transcriptionService.transcribeStreaming(samples: previewSamples)
+            let decodeMilliseconds = (ContinuousClock.now - decodeStartedAt).wholeMilliseconds
+            logger.info("Preview tick: \(previewAudioMilliseconds) ms audio decoded in \(decodeMilliseconds) ms")
             try Task.checkCancellation()
 
             guard currentSessionID == sessionID, state == .recording else { return }
@@ -582,23 +589,16 @@ final class DictationCoordinator {
         historyFinishedAt: ContinuousClock.Instant,
         finishedAt: ContinuousClock.Instant
     ) {
-        let capture = Self.milliseconds(captureFinishedAt - stopStartedAt)
-        let finalQueue = Self.milliseconds(asrStartedAt - captureFinishedAt)
-        let asr = Self.milliseconds(asrFinishedAt - asrStartedAt)
-        let refinement = Self.milliseconds(refinementFinishedAt - refinementStartedAt)
-        let history = Self.milliseconds(historyFinishedAt - historyStartedAt)
-        let total = Self.milliseconds(finishedAt - stopStartedAt)
+        let capture = (captureFinishedAt - stopStartedAt).wholeMilliseconds
+        let finalQueue = (asrStartedAt - captureFinishedAt).wholeMilliseconds
+        let asr = (asrFinishedAt - asrStartedAt).wholeMilliseconds
+        let refinement = (refinementFinishedAt - refinementStartedAt).wholeMilliseconds
+        let history = (historyFinishedAt - historyStartedAt).wholeMilliseconds
+        let total = (finishedAt - stopStartedAt).wholeMilliseconds
 
         logger.info(
             "Dictation pipeline: total \(total) ms; capture shutdown \(capture) ms; final queue \(finalQueue) ms; ASR \(asr) ms; refinement \(refinement) ms; history \(history) ms"
         )
-    }
-
-    private static func milliseconds(_ duration: Duration) -> Int64 {
-        let components = duration.components
-        let millisecondsFromSeconds = components.seconds * 1_000
-        let millisecondsFromAttoseconds = components.attoseconds / 1_000_000_000_000_000
-        return millisecondsFromSeconds + millisecondsFromAttoseconds
     }
 
     /// Result of the post-processing step. `outputText` is what gets typed;

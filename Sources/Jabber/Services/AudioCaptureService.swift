@@ -17,6 +17,9 @@ final class AudioCaptureService {
         var lastLevelUpdate: CFAbsoluteTime = 0
         var capturedSamples: [Float] = []
         var isCapturing = false
+        /// Set when capture starts, cleared once the tap delivers its first
+        /// buffer, so the wait for CoreAudio can be logged exactly once.
+        var captureStartedAt: ContinuousClock.Instant?
     }
 
     var onAudioLevel: ((Float) -> Void)?
@@ -60,6 +63,7 @@ final class AudioCaptureService {
     func startCapture() throws {
         guard !isCapturing else { return }
 
+        let startedAt = ContinuousClock.now
         captureState.withLock {
             $0.capturedSamples.removeAll(keepingCapacity: true)
         }
@@ -88,6 +92,7 @@ final class AudioCaptureService {
 
         captureState.withLock {
             $0.isCapturing = true
+            $0.captureStartedAt = startedAt
         }
         do {
             try engine.start()
@@ -95,6 +100,7 @@ final class AudioCaptureService {
             stopCapture()
             throw error
         }
+        logger.info("Audio capture engine started in \((ContinuousClock.now - startedAt).wholeMilliseconds) ms")
 
         configurationChangeObserver = NotificationCenter.default.addObserver(
             forName: .AVAudioEngineConfigurationChange,
@@ -219,9 +225,16 @@ final class AudioCaptureService {
         guard frames > 0 else { return }
 
         let samples = Array(UnsafeBufferPointer(start: channelData, count: frames))
-        captureState.withLock {
-            guard $0.isCapturing else { return }
+        let firstAudioDelay: Duration? = captureState.withLock {
+            guard $0.isCapturing else { return nil }
             $0.capturedSamples.append(contentsOf: samples)
+            guard let startedAt = $0.captureStartedAt else { return nil }
+            $0.captureStartedAt = nil
+            return ContinuousClock.now - startedAt
+        }
+
+        if let firstAudioDelay {
+            logger.info("First audio arrived \(firstAudioDelay.wholeMilliseconds) ms after capture start")
         }
     }
 

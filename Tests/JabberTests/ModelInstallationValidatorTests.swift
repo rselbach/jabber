@@ -21,7 +21,7 @@ final class ModelInstallationValidatorTests: XCTestCase {
 
     func testCompleteParakeetFolderIsValid() throws {
         try writeFile(named: "parakeet_vocab.json")
-        for directory in ModelInstallationValidator.requiredParakeetDirectories {
+        for directory in ModelInstallationValidator.parakeetLayout.directories {
             try createCoreMLBundle(named: directory)
         }
 
@@ -33,7 +33,7 @@ final class ModelInstallationValidatorTests: XCTestCase {
     }
 
     func testMissingParakeetVocabularyIsInvalid() throws {
-        for directory in ModelInstallationValidator.requiredParakeetDirectories {
+        for directory in ModelInstallationValidator.parakeetLayout.directories {
             try createCoreMLBundle(named: directory)
         }
 
@@ -45,7 +45,7 @@ final class ModelInstallationValidatorTests: XCTestCase {
 
     func testEmptyParakeetBundleIsInvalid() throws {
         try writeFile(named: "parakeet_vocab.json")
-        for directory in ModelInstallationValidator.requiredParakeetDirectories {
+        for directory in ModelInstallationValidator.parakeetLayout.directories {
             try createCoreMLBundle(named: directory)
         }
         let emptyBundle = tempDir.appendingPathComponent("Encoder.mlmodelc")
@@ -67,8 +67,37 @@ final class ModelInstallationValidatorTests: XCTestCase {
         XCTAssertFalse(validation.folderExists)
         XCTAssertEqual(
             validation.missingRequiredFiles,
-            ModelInstallationValidator.requiredParakeetFiles
-                + ModelInstallationValidator.requiredParakeetDirectories
+            ModelInstallationValidator.parakeetLayout.requiredAssets
+        )
+    }
+
+    func testMultilingualParakeetNeedsItsOwnJointBundle() throws {
+        try writeFile(named: "parakeet_vocab.json")
+        try createCoreMLBundle(named: "Preprocessor.mlmodelc")
+        try createCoreMLBundle(named: "Encoder.mlmodelc")
+        try createCoreMLBundle(named: "Decoder.mlmodelc")
+        // The v2 joint graph, which v3 cannot use.
+        try createCoreMLBundle(named: "JointDecision.mlmodelc")
+
+        let layout = ModelInstallationValidator.parakeetLayout(for: AppMode.parakeetMultilingualModelId)
+        let validation = ModelInstallationValidator.validateParakeetModelFolder(at: tempDir, layout: layout)
+
+        XCTAssertFalse(validation.isComplete)
+        XCTAssertEqual(validation.missingRequiredFiles, ["JointDecisionv3.mlmodelc"])
+
+        try createCoreMLBundle(named: "JointDecisionv3.mlmodelc")
+        let revalidated = ModelInstallationValidator.validateParakeetModelFolder(at: tempDir, layout: layout)
+        XCTAssertTrue(revalidated.isComplete)
+    }
+
+    func testParakeetLayoutIsSelectedByModelId() {
+        XCTAssertEqual(
+            ModelInstallationValidator.parakeetLayout(for: AppMode.parakeetModelId),
+            ModelInstallationValidator.parakeetLayout
+        )
+        XCTAssertEqual(
+            ModelInstallationValidator.parakeetLayout(for: AppMode.parakeetMultilingualModelId),
+            ModelInstallationValidator.parakeetMultilingualLayout
         )
     }
 

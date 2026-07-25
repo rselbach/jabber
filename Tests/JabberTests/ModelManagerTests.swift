@@ -449,15 +449,18 @@ final class ModelManagerTests: XCTestCase {
         XCTAssertEqual(uniqueIds.count, models.count, "All model IDs should be unique")
     }
 
-    private func createCompleteParakeetModelFolder(at url: URL) throws {
+    private func createCompleteParakeetModelFolder(
+        at url: URL,
+        layout: ModelInstallationValidator.FolderLayout = ModelInstallationValidator.parakeetLayout
+    ) throws {
         try FileManager.default.createDirectory(
             at: url,
             withIntermediateDirectories: true
         )
-        for fileName in ModelInstallationValidator.requiredParakeetFiles {
+        for fileName in layout.files {
             try Data("test".utf8).write(to: url.appendingPathComponent(fileName))
         }
-        for directoryName in ModelInstallationValidator.requiredParakeetDirectories {
+        for directoryName in layout.directories {
             let directory = url.appendingPathComponent(directoryName, isDirectory: true)
             try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
             try Data("test".utf8).write(

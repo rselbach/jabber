@@ -34,16 +34,43 @@ struct ModelFolderValidation: Equatable {
 }
 
 enum ModelInstallationValidator {
-    static let requiredParakeetFiles = [
-        "parakeet_vocab.json"
-    ]
+    /// What a downloaded model folder must contain: the loose files and the
+    /// compiled CoreML bundles. Drives both the download allowlist and the
+    /// completeness check, so the two cannot drift apart.
+    struct FolderLayout: Equatable {
+        let files: [String]
+        let directories: [String]
 
-    static let requiredParakeetDirectories = [
-        "Preprocessor.mlmodelc",
-        "Encoder.mlmodelc",
-        "Decoder.mlmodelc",
-        "JointDecision.mlmodelc"
-    ]
+        var requiredAssets: [String] {
+            files + directories
+        }
+    }
+
+    static let parakeetLayout = FolderLayout(
+        files: ["parakeet_vocab.json"],
+        directories: [
+            "Preprocessor.mlmodelc",
+            "Encoder.mlmodelc",
+            "Decoder.mlmodelc",
+            "JointDecision.mlmodelc"
+        ]
+    )
+
+    /// v3 ships its own joint graph, which computes the top-K outputs the
+    /// language hint filters on. The rest of the layout matches v2.
+    static let parakeetMultilingualLayout = FolderLayout(
+        files: ["parakeet_vocab.json"],
+        directories: [
+            "Preprocessor.mlmodelc",
+            "Encoder.mlmodelc",
+            "Decoder.mlmodelc",
+            "JointDecisionv3.mlmodelc"
+        ]
+    )
+
+    static func parakeetLayout(for modelId: String) -> FolderLayout {
+        modelId == AppMode.parakeetMultilingualModelId ? parakeetMultilingualLayout : parakeetLayout
+    }
 
     static let requiredCoreMLTransducerFiles = [
         "config.json",
@@ -61,9 +88,12 @@ enum ModelInstallationValidator {
     /// empty directory by an interrupted download.
     static let coreMLBundleMarkerFile = "coremldata.bin"
 
-    static func validateParakeetModelFolder(at folder: URL) -> ModelFolderValidation {
+    static func validateParakeetModelFolder(
+        at folder: URL,
+        layout: FolderLayout = parakeetLayout
+    ) -> ModelFolderValidation {
         let fm = FileManager.default
-        let requiredAssets = requiredParakeetFiles + requiredParakeetDirectories
+        let requiredAssets = layout.requiredAssets
         var isDirectory: ObjCBool = false
         guard fm.fileExists(atPath: folder.path, isDirectory: &isDirectory), isDirectory.boolValue else {
             return ModelFolderValidation(
@@ -87,9 +117,9 @@ enum ModelInstallationValidator {
         }
 
         let fileNames = Set(contents.map(\.lastPathComponent))
-        let missingFiles = requiredParakeetFiles.filter { !fileNames.contains($0) }
-        let missingDirs = requiredParakeetDirectories.filter { !fileNames.contains($0) }
-        let hasWeights = requiredParakeetDirectories.allSatisfy { dirName in
+        let missingFiles = layout.files.filter { !fileNames.contains($0) }
+        let missingDirs = layout.directories.filter { !fileNames.contains($0) }
+        let hasWeights = layout.directories.allSatisfy { dirName in
             let marker = folder
                 .appendingPathComponent(dirName)
                 .appendingPathComponent(coreMLBundleMarkerFile)
@@ -147,10 +177,10 @@ enum ModelInstallationValidator {
         )
     }
 
-    static func validate(folder: URL, for family: AppMode.ModelFamily) -> ModelFolderValidation {
-        switch family {
+    static func validate(folder: URL, for definition: AppMode.ModelDefinition) -> ModelFolderValidation {
+        switch definition.family {
         case .parakeetTDT:
-            return validateParakeetModelFolder(at: folder)
+            return validateParakeetModelFolder(at: folder, layout: parakeetLayout(for: definition.id))
         case .nemotronASR:
             return validateCoreMLTransducerModelFolder(at: folder)
         case .appleSpeech:

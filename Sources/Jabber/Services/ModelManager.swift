@@ -424,7 +424,7 @@ final class ModelManager {
         guard let def = AppMode.modelDefinition(for: modelId) else { return nil }
 
         for folder in modelFolderCandidates(for: modelId) {
-            let validation = ModelInstallationValidator.validate(folder: folder, for: def.family)
+            let validation = ModelInstallationValidator.validate(folder: folder, for: def)
             guard validation.folderExists else { continue }
             if validation.isComplete {
                 return folder
@@ -507,11 +507,11 @@ final class ModelManager {
 
         switch def.family {
         case .parakeetTDT:
+            let layout = ModelInstallationValidator.parakeetLayout(for: def.id)
             try await HuggingFaceDownloader.downloadFiles(
                 modelId: def.huggingFaceModelId,
                 to: downloadFolder,
-                files: ModelInstallationValidator.requiredParakeetFiles
-                    + ModelInstallationValidator.requiredParakeetDirectories.map { "\($0)/**" },
+                files: layout.files + layout.directories.map { "\($0)/**" },
                 progressHandler: downloadProgressHandler(modelId: modelId, modelName: modelName)
             )
         case .nemotronASR:
@@ -532,7 +532,7 @@ final class ModelManager {
 
         try Task.checkCancellation()
 
-        let validation = ModelInstallationValidator.validate(folder: downloadFolder, for: def.family)
+        let validation = ModelInstallationValidator.validate(folder: downloadFolder, for: def)
         if validation.isComplete {
             return downloadFolder
         }

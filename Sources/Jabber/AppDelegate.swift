@@ -109,7 +109,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// Builds the audio engine once the UI has settled so the hotkey path does
     /// not pay CoreAudio setup. Skipped without microphone permission; the
     /// first dictation after it is granted builds on demand instead.
+    ///
+    /// Only the packaged app prewarms. Prewarming reaches for the microphone
+    /// before the user has asked for anything, and an unbundled binary — what
+    /// `swift run` produces — has no Info.plist for macOS to attribute that
+    /// access to, so the request lands against the launching terminal instead
+    /// of against Jabber. Development builds therefore open the microphone
+    /// only from the hotkey, as they did before prewarming existed.
     private func prepareAudioCaptureWhenReady() {
+        guard Bundle.main.bundleIdentifier != nil else {
+            logger.info("Audio prewarm skipped: not running from an app bundle")
+            return
+        }
+
         audioPrepareTask?.cancel()
         audioPrepareTask = Task { @MainActor [weak self] in
             await AppReadinessGate.shared.waitForUIReady()

@@ -205,7 +205,18 @@ final class AppleSpeechProvider: TranscriptionProvider, @unchecked Sendable {
         "ms": "ms-MY",
         "mk": "mk-MK",
         "fil": "fil-PH",
-        "yue": "yue-CN"
+        "yue": "yue-CN",
+        "be": "be-BY",
+        "bg": "bg-BG",
+        "bs": "bs-BA",
+        "et": "et-EE",
+        "hr": "hr-HR",
+        "lt": "lt-LT",
+        "lv": "lv-LV",
+        "mt": "mt-MT",
+        "sk": "sk-SK",
+        "sl": "sl-SI",
+        "sr": "sr-RS"
     ]
 
     static func locale(for languageCode: String?) -> Locale {

@@ -54,6 +54,21 @@ final class LanguageModelCatalogTests: XCTestCase {
         }
     }
 
+    func testEveryOfferedLanguageParakeetKnowsRoutesToParakeet() {
+        // Guards the pairing: a language added to Constants that v3 handles
+        // should never be left recommending Apple Speech.
+        let routed = Constants.validLanguageCodes
+            .filter { $0 != "en" && AppMode.parakeetMultilingualLanguageCodes.contains($0) }
+
+        for code in routed {
+            XCTAssertEqual(
+                LanguageModelCatalog.recommendedModelId(for: code),
+                AppMode.parakeetMultilingualModelId,
+                code
+            )
+        }
+    }
+
     func testEnglishStillPrefersTheEnglishOnlyModel() {
         // v3 is offered for English but v2 scores better on it.
         let route = LanguageModelCatalog.routes(for: "en")

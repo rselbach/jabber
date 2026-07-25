@@ -1109,6 +1109,29 @@ final class DictationCoordinatorTests: XCTestCase {
         XCTAssertEqual(dictationHistoryStore.sessions[0].transcript, "i saw Troy Barnes at greendale")
     }
 
+    func testInstantReplacementAppliedToStreamingPreview() async throws {
+        enableReplacementEntries([
+            ReplacementEntry(triggers: ["troy barnes"], replacement: "Troy Barnes")
+        ])
+        audioCapture.storedSamples = makeLoudSamples()
+        transcriptionService.streamingResult = .success("i saw troy barnes")
+
+        let partialExpectation = XCTestExpectation(description: "partial transcription published")
+        var partialTranscriptions: [String] = []
+        coordinator.onPartialTranscription = { text in
+            partialTranscriptions.append(text)
+            partialExpectation.fulfill()
+        }
+
+        XCTAssertTrue(coordinator.start())
+        await fulfillment(of: [partialExpectation], timeout: 1.0)
+
+        XCTAssertEqual(partialTranscriptions, ["i saw Troy Barnes"])
+
+        coordinator.cancel()
+        try await Task.sleep(for: .milliseconds(20))
+    }
+
     func testInstantReplacementAppliedAfterPostProcessing() async {
         enableReplacementEntries([
             ReplacementEntry(triggers: ["troy barnes"], replacement: "Troy Barnes")

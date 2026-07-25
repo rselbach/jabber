@@ -400,12 +400,19 @@ final class DictationCoordinator {
         await transcriptionService.resetStreamingTranscription()
         await applyCurrentTranscriptionSettings()
 
+        // Read the replacement rules once per session rather than per tick;
+        // they cannot change mid-utterance anyway.
+        let replacementEntries = replacementEntriesProvider()
+
         // Decode first and sleep afterwards: waiting a full interval before the
         // first pass pushed the opening preview a whole tick later than the
         // audio it needed was available.
         while !Task.isCancelled {
             guard currentSessionID == sessionID, state == .recording else { break }
-            await publishStreamingPreviewIfAvailable(sessionID: sessionID)
+            await publishStreamingPreviewIfAvailable(
+                sessionID: sessionID,
+                replacementEntries: replacementEntries
+            )
 
             guard !Task.isCancelled else { break }
             do {
@@ -419,7 +426,10 @@ final class DictationCoordinator {
         }
     }
 
-    private func publishStreamingPreviewIfAvailable(sessionID: UUID) async {
+    private func publishStreamingPreviewIfAvailable(
+        sessionID: UUID,
+        replacementEntries: [ReplacementEntry]
+    ) async {
         // Re-transcribe the complete prefix so the preview remains a coherent
         // version of the whole utterance rather than a rolling tail fragment.
         // Only one preview loop exists, so slow passes cause ticks to be
@@ -446,7 +456,13 @@ final class DictationCoordinator {
 
             lastStreamingPreviewSampleCount = totalCount
             let trimmedText = text.trimmingCharacters(in: .whitespacesAndNewlines)
-            let previewText = streamingPreviewStabilizer.stabilize(trimmedText)
+            // Same replacement pass the final transcript gets, so the preview
+            // shows the words the user will end up with rather than the raw
+            // model spelling of them.
+            let replacedText = replacementEntries.isEmpty
+                ? trimmedText
+                : ReplacementWordsResolver.resolve(transcript: trimmedText, entries: replacementEntries)
+            let previewText = streamingPreviewStabilizer.stabilize(replacedText)
             guard !previewText.isEmpty, previewText != lastStreamingPreviewText else { return }
 
             lastStreamingPreviewText = previewText

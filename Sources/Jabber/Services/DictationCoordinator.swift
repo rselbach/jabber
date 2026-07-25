@@ -155,6 +155,7 @@ final class DictationCoordinator {
     private var currentTargetProcessID: pid_t?
     private var lastStreamingPreviewSampleCount = 0
     private var lastStreamingPreviewText = ""
+    private var streamingPreviewStabilizer = StreamingPreviewStabilizer()
     private let streamingPreviewInterval: Duration
     private let minimumStreamingPreviewSampleCount: Int
     private let streamingPreviewStopTimeout: Duration
@@ -325,6 +326,7 @@ final class DictationCoordinator {
         _ = stopStreamingPreview()
         lastStreamingPreviewSampleCount = 0
         lastStreamingPreviewText = ""
+        streamingPreviewStabilizer.reset()
 
         streamingTask = Task { [weak self] in
             await self?.runStreamingPreviewLoop(sessionID: sessionID)
@@ -444,10 +446,11 @@ final class DictationCoordinator {
 
             lastStreamingPreviewSampleCount = totalCount
             let trimmedText = text.trimmingCharacters(in: .whitespacesAndNewlines)
-            guard !trimmedText.isEmpty, trimmedText != lastStreamingPreviewText else { return }
+            let previewText = streamingPreviewStabilizer.stabilize(trimmedText)
+            guard !previewText.isEmpty, previewText != lastStreamingPreviewText else { return }
 
-            lastStreamingPreviewText = trimmedText
-            onPartialTranscription?(trimmedText)
+            lastStreamingPreviewText = previewText
+            onPartialTranscription?(previewText)
         } catch is CancellationError {
             // Expected when recording stops while a preview pass is in flight.
         } catch {

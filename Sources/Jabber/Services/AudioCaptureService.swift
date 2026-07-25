@@ -30,6 +30,17 @@ final class AudioCaptureService {
     /// session would keep "recording" dead air with a frozen level meter.
     var onCaptureInterrupted: (() -> Void)?
     private var configurationChangeObserver: (any NSObjectProtocol)?
+    /// Engine built, converter created, tap installed. The microphone is only
+    /// open once the engine is also running.
+    private var isPrepared = false
+    /// Set when the audio route changes, so the engine is rebuilt against the
+    /// new input device instead of being kept warm in a stale configuration.
+    private var needsRebuild = false
+    private var standbyTask: Task<Void, Never>?
+    /// How long the engine keeps running after a session. Back-to-back
+    /// dictations then skip the start cost; a lone one releases the
+    /// microphone, and its indicator, shortly after.
+    private let standbyDuration: Duration = .seconds(8)
 
     init() {
         captureState.withLock {
@@ -42,8 +53,14 @@ final class AudioCaptureService {
         set { captureState.withLock { $0.isCapturing = newValue } }
     }
 
-    nonisolated private func getConverter() -> AVAudioConverter? {
-        converterQueue.sync { converter }
+    /// Runs `body` against the converter with exclusive access. The tap and the
+    /// end-of-session drain both use it, and since the tap stays installed
+    /// between sessions the two can otherwise overlap.
+    nonisolated private func withConverter<T>(_ body: (AVAudioConverter) -> T) -> T? {
+        converterQueue.sync {
+            guard let converter else { return nil }
+            return body(converter)
+        }
     }
 
     nonisolated private func setConverter(_ newConverter: AVAudioConverter?) {
@@ -60,17 +77,31 @@ final class AudioCaptureService {
         return engine
     }
 
-    func startCapture() throws {
-        guard !isCapturing else { return }
+    /// Builds the engine, converter, and tap ahead of time without opening the
+    /// microphone, so a dictation does not pay CoreAudio setup between the
+    /// hotkey and the first captured sample. Safe to call repeatedly.
+    func prepare() {
+        guard !isPrepared, !isCapturing else { return }
 
-        let startedAt = ContinuousClock.now
-        captureState.withLock {
-            $0.capturedSamples.removeAll(keepingCapacity: true)
+        do {
+            try buildEngine()
+        } catch {
+            // Nothing is lost: startCapture() builds on demand and surfaces
+            // the failure to the user there.
+            logger.warning("Audio capture prepare failed: \(error.localizedDescription)")
         }
+    }
 
+    private func buildEngine() throws {
         let engine = audioEngine()
         let inputNode = engine.inputNode
         let inputFormat = inputNode.inputFormat(forBus: 0)
+
+        // A device that is still waking up reports a zero-rate format; a tap
+        // installed against it never delivers audio.
+        guard inputFormat.sampleRate > 0, inputFormat.channelCount > 0 else {
+            throw AudioCaptureError.invalidFormat
+        }
 
         guard let outputFormat = AVAudioFormat(
             commonFormat: .pcmFormatFloat32,
@@ -90,18 +121,6 @@ final class AudioCaptureService {
             self?.processBuffer(buffer)
         }
 
-        captureState.withLock {
-            $0.isCapturing = true
-            $0.captureStartedAt = startedAt
-        }
-        do {
-            try engine.start()
-        } catch {
-            stopCapture()
-            throw error
-        }
-        logger.info("Audio capture engine started in \((ContinuousClock.now - startedAt).wholeMilliseconds) ms")
-
         configurationChangeObserver = NotificationCenter.default.addObserver(
             forName: .AVAudioEngineConfigurationChange,
             object: engine,
@@ -111,66 +130,158 @@ final class AudioCaptureService {
                 self?.handleConfigurationChange()
             }
         }
+
+        engine.prepare()
+        isPrepared = true
+        needsRebuild = false
+    }
+
+    func startCapture() throws {
+        guard !isCapturing else { return }
+
+        let startedAt = ContinuousClock.now
+        standbyTask?.cancel()
+        standbyTask = nil
+
+        if needsRebuild || !isPrepared {
+            teardownEngine()
+            try buildEngine()
+        }
+
+        let engine = audioEngine()
+        // Clear the resampler's filter state so the tail drained at the end of
+        // the previous session cannot bleed into this one.
+        withConverter { $0.reset() }
+
+        captureState.withLock {
+            $0.capturedSamples.removeAll(keepingCapacity: true)
+            $0.isCapturing = true
+            $0.captureStartedAt = startedAt
+        }
+
+        if !engine.isRunning {
+            do {
+                try engine.start()
+            } catch {
+                // Whatever the engine was holding is suspect now; make the
+                // next attempt build from scratch rather than reuse it.
+                needsRebuild = true
+                stopCapture()
+                throw error
+            }
+        }
+        logger.info("Audio capture engine ready in \((ContinuousClock.now - startedAt).wholeMilliseconds) ms")
     }
 
     private func handleConfigurationChange() {
-        guard isCapturing else { return }
+        // The input format may have changed, so the tap and converter built
+        // against the old device have to go, whether or not audio is flowing.
+        needsRebuild = true
+
+        guard isCapturing else {
+            logger.info("Audio engine configuration changed while idle; rebuilding")
+            teardownEngine()
+            prepare()
+            return
+        }
+
         logger.warning("Audio engine configuration changed during capture")
         onCaptureInterrupted?()
     }
 
-    func stopCapture() {
+    private func scheduleStandbyRetirement() {
+        standbyTask?.cancel()
+        standbyTask = Task { [weak self, standbyDuration] in
+            do {
+                try await Task.sleep(for: standbyDuration)
+            } catch {
+                return
+            }
+            guard !Task.isCancelled else { return }
+            self?.retireEngine()
+        }
+    }
+
+    /// Stops the engine but keeps it built, so the microphone (and its
+    /// indicator) is released while a restart stays cheap.
+    private func retireEngine() {
+        standbyTask = nil
+        guard !isCapturing, let engine = engineStorage as? AVAudioEngine, engine.isRunning else { return }
+        engine.stop()
+        logger.info("Audio engine stopped after standby")
+    }
+
+    private func teardownEngine() {
+        standbyTask?.cancel()
+        standbyTask = nil
+
         if let configurationChangeObserver {
             NotificationCenter.default.removeObserver(configurationChangeObserver)
             self.configurationChangeObserver = nil
         }
+
+        if let engine = engineStorage as? AVAudioEngine {
+            if isPrepared {
+                engine.inputNode.removeTap(onBus: 0)
+            }
+            engine.stop()
+        }
+
+        setConverter(nil)
+        isPrepared = false
+    }
+
+    func stopCapture() {
         let wasCapturing = captureState.withLock { $0.isCapturing }
         guard wasCapturing else { return }
-        guard let engine = engineStorage as? AVAudioEngine else {
-            captureState.withLock {
-                $0.isCapturing = false
-            }
-            setConverter(nil)
-            return
-        }
-        engine.inputNode.removeTap(onBus: 0)
-        engine.stop()
-        // Flush the converter's filter-delay tail (a few ms of audio at the
-        // end of the utterance) before discarding it; must happen while
-        // isCapturing is still true so the append guard accepts the samples.
-        drainConverter()
+
+        // Close the session before draining so the still-installed tap stops
+        // feeding the converter, then flush its filter-delay tail (a few ms of
+        // audio at the end of the utterance) into the session's samples.
         captureState.withLock {
             $0.isCapturing = false
+            $0.captureStartedAt = nil
         }
-        setConverter(nil)
+        drainConverter()
+
+        // The engine stays built either way. A route change invalidated the
+        // tap, so rebuild now rather than keeping a stale one warm.
+        guard !needsRebuild else {
+            teardownEngine()
+            prepare()
+            return
+        }
+        scheduleStandbyRetirement()
     }
 
     private func drainConverter() {
-        guard let converter = getConverter() else { return }
-        // The sample-rate conversion tail is a fixed few milliseconds; 4096
-        // frames at 16kHz is far more than any real filter delay.
-        guard let tailBuffer = AVAudioPCMBuffer(
-            pcmFormat: converter.outputFormat,
-            frameCapacity: 4096
-        ) else { return }
+        let samples = withConverter { converter -> [Float] in
+            // The sample-rate conversion tail is a fixed few milliseconds; 4096
+            // frames at 16kHz is far more than any real filter delay.
+            guard let tailBuffer = AVAudioPCMBuffer(
+                pcmFormat: converter.outputFormat,
+                frameCapacity: 4096
+            ) else { return [] }
 
-        var error: NSError?
-        converter.convert(to: tailBuffer, error: &error) { _, outStatus in
-            outStatus.pointee = .endOfStream
-            return nil
+            var error: NSError?
+            converter.convert(to: tailBuffer, error: &error) { _, outStatus in
+                outStatus.pointee = .endOfStream
+                return nil
+            }
+            if let error {
+                logger.warning("Draining audio converter tail failed: \(error.localizedDescription)")
+                return []
+            }
+
+            guard let channelData = tailBuffer.floatChannelData?[0] else { return [] }
+            let frames = Int(tailBuffer.frameLength)
+            guard frames > 0 else { return [] }
+
+            return Array(UnsafeBufferPointer(start: channelData, count: frames))
         }
-        if let error {
-            logger.warning("Draining audio converter tail failed: \(error.localizedDescription)")
-            return
-        }
 
-        guard let channelData = tailBuffer.floatChannelData?[0] else { return }
-        let frames = Int(tailBuffer.frameLength)
-        guard frames > 0 else { return }
-
-        let samples = Array(UnsafeBufferPointer(start: channelData, count: frames))
+        guard let samples, !samples.isEmpty else { return }
         captureState.withLock {
-            guard $0.isCapturing else { return }
             $0.capturedSamples.append(contentsOf: samples)
         }
     }
@@ -191,7 +302,9 @@ final class AudioCaptureService {
     }
 
     nonisolated private func processBuffer(_ buffer: AVAudioPCMBuffer) {
-        guard let converter = getConverter() else { return }
+        // The tap keeps firing while the engine idles in standby; drop those
+        // buffers rather than resampling audio no session asked for.
+        guard captureState.withLock({ $0.isCapturing }) else { return }
 
         let rms = calculateRms(from: buffer)
         let now = CFAbsoluteTimeGetCurrent()
@@ -209,7 +322,7 @@ final class AudioCaptureService {
             }
         }
 
-        let conversionResult = convertBuffer(buffer, using: converter)
+        guard let conversionResult = withConverter({ convertBuffer(buffer, using: $0) }) else { return }
         if let error = conversionResult.error {
             logger.error("Audio conversion failed: \(error.localizedDescription)")
             DispatchQueue.main.async { [weak self] in

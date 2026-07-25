@@ -30,6 +30,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private var modelLoadTask: Task<Void, Never>?
     private var firstRunSetupTask: Task<Void, Never>?
+    private var audioPrepareTask: Task<Void, Never>?
     private var modelMigrationNoticeTask: Task<Void, Never>?
     private var isModelLoadInProgress = false
     private var modelLoadID = UUID()
@@ -102,11 +103,26 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         scheduleUIReadyFallbackIfNeeded()
         scheduleFirstRunSetupPrompt()
+        prepareAudioCaptureWhenReady()
+    }
+
+    /// Builds the audio engine once the UI has settled so the hotkey path does
+    /// not pay CoreAudio setup. Skipped without microphone permission; the
+    /// first dictation after it is granted builds on demand instead.
+    private func prepareAudioCaptureWhenReady() {
+        audioPrepareTask?.cancel()
+        audioPrepareTask = Task { @MainActor [weak self] in
+            await AppReadinessGate.shared.waitForUIReady()
+            guard let self, !Task.isCancelled else { return }
+            guard permissionService.hasMicrophonePermission() else { return }
+            audioCapture.prepare()
+        }
     }
 
     func applicationWillTerminate(_ notification: Notification) {
         modelLoadTask?.cancel()
         firstRunSetupTask?.cancel()
+        audioPrepareTask?.cancel()
         modelMigrationNoticeTask?.cancel()
         onboardingCoordinator?.stop()
         dictationCoordinator.cancel()

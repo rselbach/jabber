@@ -99,6 +99,26 @@ final class ModelInstallationValidatorTests: XCTestCase {
             ModelInstallationValidator.parakeetLayout(for: AppMode.parakeetMultilingualModelId),
             ModelInstallationValidator.parakeetMultilingualLayout
         )
+        XCTAssertEqual(
+            ModelInstallationValidator.parakeetLayout(for: AppMode.parakeetJapaneseModelId),
+            ModelInstallationValidator.parakeetJapaneseLayout
+        )
+    }
+
+    func testJapaneseParakeetUsesItsOwnVocabularyAndGraphNames() throws {
+        try writeFile(named: "vocab.json")
+        try createCoreMLBundle(named: "Preprocessor.mlmodelc")
+        try createCoreMLBundle(named: "Encoder.mlmodelc")
+        try createCoreMLBundle(named: "Decoderv2.mlmodelc")
+        try createCoreMLBundle(named: "Jointerv2.mlmodelc")
+
+        let validation = ModelInstallationValidator.validateParakeetModelFolder(
+            at: tempDir,
+            layout: ModelInstallationValidator.parakeetJapaneseLayout
+        )
+
+        XCTAssertTrue(validation.isComplete)
+        XCTAssertTrue(validation.hasWeights)
     }
 
     func testCompleteCoreMLTransducerFolderIsValid() throws {

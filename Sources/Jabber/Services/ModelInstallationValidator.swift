@@ -68,8 +68,27 @@ enum ModelInstallationValidator {
         ]
     )
 
+    /// The Japanese model carries its own vocabulary file name and a decoder
+    /// and joint pair named for the v2 graphs they derive from.
+    static let parakeetJapaneseLayout = FolderLayout(
+        files: ["vocab.json"],
+        directories: [
+            "Preprocessor.mlmodelc",
+            "Encoder.mlmodelc",
+            "Decoderv2.mlmodelc",
+            "Jointerv2.mlmodelc"
+        ]
+    )
+
     static func parakeetLayout(for modelId: String) -> FolderLayout {
-        modelId == AppMode.parakeetMultilingualModelId ? parakeetMultilingualLayout : parakeetLayout
+        switch modelId {
+        case AppMode.parakeetMultilingualModelId:
+            return parakeetMultilingualLayout
+        case AppMode.parakeetJapaneseModelId:
+            return parakeetJapaneseLayout
+        default:
+            return parakeetLayout
+        }
     }
 
     static let requiredCoreMLTransducerFiles = [

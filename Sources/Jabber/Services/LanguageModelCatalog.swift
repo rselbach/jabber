@@ -43,6 +43,13 @@ enum LanguageModelCatalog {
             ]
         }
 
+        if languageCode == "ja" {
+            return [
+                .init(modelId: AppMode.parakeetJapaneseModelId, isRecommended: true),
+                .init(modelId: AppMode.appleSpeechModelId, isRecommended: false)
+            ]
+        }
+
         return [
             .init(modelId: AppMode.appleSpeechModelId, isRecommended: true)
         ]

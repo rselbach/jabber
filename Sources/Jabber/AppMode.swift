@@ -3,6 +3,7 @@ import Foundation
 enum AppMode {
     static let parakeetModelId = "parakeet-tdt-v2"
     static let parakeetMultilingualModelId = "parakeet-tdt-v3"
+    static let parakeetJapaneseModelId = "parakeet-ja"
     static let nemotronModelId = "nemotron"
     static let appleSpeechModelId = "apple-speech"
 
@@ -64,6 +65,19 @@ enum AppMode {
             license: "CC BY 4.0",
             licenseUrl: "https://creativecommons.org/licenses/by/4.0/",
             attribution: "Parakeet TDT 0.6B v3 by NVIDIA; CoreML conversion by FluidInference",
+            isBuiltIn: false
+        ),
+        .init(
+            id: parakeetJapaneseModelId,
+            family: .parakeetTDT,
+            huggingFaceModelId: "FluidInference/parakeet-0.6b-ja-coreml",
+            name: "Parakeet Japanese",
+            description: "NVIDIA Parakeet 0.6B tuned for Japanese",
+            sizeHint: "~450MB",
+            supportedLanguageCodes: ["ja"],
+            license: "CC BY 4.0",
+            licenseUrl: "https://creativecommons.org/licenses/by/4.0/",
+            attribution: "Parakeet 0.6B Japanese by NVIDIA; CoreML conversion by FluidInference",
             isBuiltIn: false
         ),
         .init(

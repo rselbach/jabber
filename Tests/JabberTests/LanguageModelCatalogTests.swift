@@ -21,14 +21,26 @@ final class LanguageModelCatalogTests: XCTestCase {
     }
 
     func testLanguageOutsideEveryLocalModelOnlyOffersAppleSpeech() {
-        // Japanese is beyond Parakeet v3's 25 European languages.
+        // Chinese has no local model; v3 is European-only and the Japanese
+        // model is monolingual.
         XCTAssertEqual(
-            LanguageModelCatalog.compatibleModelIds(for: "ja"),
+            LanguageModelCatalog.compatibleModelIds(for: "zh"),
             [AppMode.appleSpeechModelId]
         )
         XCTAssertEqual(
-            LanguageModelCatalog.recommendedModelId(for: "ja"),
+            LanguageModelCatalog.recommendedModelId(for: "zh"),
             AppMode.appleSpeechModelId
+        )
+    }
+
+    func testJapaneseRecommendsTheJapaneseParakeet() {
+        let route = LanguageModelCatalog.routes(for: "ja")
+
+        XCTAssertEqual(route.first?.modelId, AppMode.parakeetJapaneseModelId)
+        XCTAssertTrue(route.first?.isRecommended == true)
+        XCTAssertTrue(route.contains { $0.modelId == AppMode.appleSpeechModelId })
+        XCTAssertFalse(
+            LanguageModelCatalog.supportsLanguage("en", modelId: AppMode.parakeetJapaneseModelId)
         )
     }
 

@@ -56,6 +56,7 @@ final class ModelManagerTests: XCTestCase {
             [
                 AppMode.parakeetModelId,
                 AppMode.parakeetMultilingualModelId,
+                AppMode.parakeetJapaneseModelId,
                 AppMode.nemotronModelId,
                 AppMode.appleSpeechModelId
             ]

@@ -27,10 +27,15 @@ final class ParakeetASRProvider: TranscriptionProvider, @unchecked Sendable {
         true
     }
 
-    /// v3 is the multilingual model; every other Parakeet id Jabber ships is
-    /// the English-only v2.
     nonisolated static func modelVersion(for modelId: String) -> AsrModelVersion {
-        modelId == AppMode.parakeetMultilingualModelId ? .v3 : .v2
+        switch modelId {
+        case AppMode.parakeetMultilingualModelId:
+            return .v3
+        case AppMode.parakeetJapaneseModelId:
+            return .tdtJa
+        default:
+            return .v2
+        }
     }
 
     /// Maps a Jabber language code onto FluidAudio's hint, which drives

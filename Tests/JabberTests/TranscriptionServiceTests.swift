@@ -15,6 +15,7 @@ final class TranscriptionServiceTests: XCTestCase {
     func testParakeetModelIdSelectsTheMatchingModelVersion() {
         XCTAssertEqual(ParakeetASRProvider.modelVersion(for: AppMode.parakeetModelId), .v2)
         XCTAssertEqual(ParakeetASRProvider.modelVersion(for: AppMode.parakeetMultilingualModelId), .v3)
+        XCTAssertEqual(ParakeetASRProvider.modelVersion(for: AppMode.parakeetJapaneseModelId), .tdtJa)
     }
 
     func testParakeetLanguageHintMapsKnownCodesOnly() {

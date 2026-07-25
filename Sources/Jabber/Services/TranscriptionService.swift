@@ -4,6 +4,7 @@ import os
 final class TranscriptionStateObserver: @unchecked Sendable {
     private let lock = NSLock()
     private var _isReady = false
+    private var _supportsStreamingTranscription = false
     private var _stateCallback: (@Sendable (TranscriptionService.State) -> Void)?
 
     var isReady: Bool {
@@ -12,9 +13,21 @@ final class TranscriptionStateObserver: @unchecked Sendable {
         return _isReady
     }
 
+    var supportsStreamingTranscription: Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        return _supportsStreamingTranscription
+    }
+
     func setReady(_ value: Bool) {
         lock.lock()
         _isReady = value
+        lock.unlock()
+    }
+
+    func setSupportsStreamingTranscription(_ value: Bool) {
+        lock.lock()
+        _supportsStreamingTranscription = value
         lock.unlock()
     }
 
@@ -84,8 +97,8 @@ actor TranscriptionService {
             guard let def = AppMode.modelDefinition(for: modelId) else { return nil }
 
             switch def.family {
-            case .qwen3ASR:
-                return Qwen3ASRProvider(modelId: modelId, huggingFaceModelId: def.huggingFaceModelId)
+            case .parakeetTDT:
+                return ParakeetASRProvider(modelId: modelId)
             case .nemotronASR:
                 return NemotronASRProvider(modelId: modelId, huggingFaceModelId: def.huggingFaceModelId)
             case .appleSpeech:
@@ -137,19 +150,14 @@ actor TranscriptionService {
     }
 
     nonisolated var supportsStreamingTranscription: Bool {
-        true
+        stateObserver.supportsStreamingTranscription
     }
 
     private func setReady(_ ready: Bool) {
         stateObserver.setReady(ready)
     }
 
-    private var vocabularyPrompt: String = ""
     private var selectedLanguage: String = Constants.defaultLanguage
-
-    func setVocabularyPrompt(_ prompt: String) {
-        vocabularyPrompt = Self.truncateVocabularyPrompt(prompt)
-    }
 
     func setLanguage(_ language: String) {
         let resolved = Self.resolveLanguage(language)
@@ -187,6 +195,7 @@ actor TranscriptionService {
         provider = nil
         loadedModelId = nil
         setReady(false)
+        stateObserver.setSupportsStreamingTranscription(false)
         notifyState(.notReady)
     }
 
@@ -210,9 +219,8 @@ actor TranscriptionService {
         }
 
         let lang = Self.resolveLanguageForProvider(selectedLanguage)
-        let prompt = vocabularyPrompt.isEmpty ? nil : vocabularyPrompt
         let text = try await providerCallGate.run {
-            try await provider.transcribe(samples: samples, language: lang, vocabularyPrompt: prompt)
+            try await provider.transcribe(samples: samples, language: lang)
         }
         try Task.checkCancellation()
         return text
@@ -230,9 +238,8 @@ actor TranscriptionService {
         }
 
         let lang = Self.resolveLanguageForProvider(selectedLanguage)
-        let prompt = vocabularyPrompt.isEmpty ? nil : vocabularyPrompt
         let text = try await providerCallGate.run {
-            try await provider.transcribeStreaming(samples: samples, language: lang, vocabularyPrompt: prompt)
+            try await provider.transcribeStreaming(samples: samples, language: lang)
         }
         try Task.checkCancellation()
         return text
@@ -269,6 +276,7 @@ actor TranscriptionService {
         provider = nil
         loadedModelId = nil
         setReady(false)
+        stateObserver.setSupportsStreamingTranscription(false)
         notifyState(.notReady)
     }
 
@@ -351,9 +359,9 @@ actor TranscriptionService {
             }
 
             // Both bail-out paths after a successful load must release the
-            // freshly-loaded weights. `newProvider.load(from:)` brought multi-GB
-            // MLX buffers into memory; discarding the reference without
-            // unloading leaks them until the next load replaces the provider.
+            // freshly-loaded weights. Discarding the reference without
+            // unloading leaks model memory until the next load replaces the
+            // provider.
             if Task.isCancelled {
                 await unloadProvider(newProvider)
                 throw CancellationError()
@@ -368,6 +376,7 @@ actor TranscriptionService {
             }
             provider = newProvider
             loadedModelId = modelIdToLoad
+            stateObserver.setSupportsStreamingTranscription(newProvider.supportsStreamingTranscription)
             setReady(true)
             notifyState(.ready)
         } catch {
@@ -380,6 +389,7 @@ actor TranscriptionService {
             // doesn't clobber the newer load's .loading state.
             if loadGeneration == currentLoadGeneration {
                 setReady(false)
+                stateObserver.setSupportsStreamingTranscription(false)
                 if error is CancellationError {
                     notifyState(.notReady)
                 } else {
@@ -446,12 +456,6 @@ actor TranscriptionService {
     /// Returns nil for "auto" (provider auto-detects), otherwise the code.
     nonisolated static func resolveLanguageForProvider(_ code: String) -> String? {
         code == "auto" ? nil : code
-    }
-
-    /// Truncates the vocabulary prompt to the maximum length the ASR model
-    /// accepts as context.
-    nonisolated static func truncateVocabularyPrompt(_ prompt: String) -> String {
-        String(prompt.prefix(500))
     }
 }
 

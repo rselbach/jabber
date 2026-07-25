@@ -34,11 +34,15 @@ struct ModelFolderValidation: Equatable {
 }
 
 enum ModelInstallationValidator {
-    static let requiredQwen3ASRFiles = [
-        "config.json",
-        "vocab.json",
-        "merges.txt",
-        "tokenizer_config.json"
+    static let requiredParakeetFiles = [
+        "parakeet_vocab.json"
+    ]
+
+    static let requiredParakeetDirectories = [
+        "Preprocessor.mlmodelc",
+        "Encoder.mlmodelc",
+        "Decoder.mlmodelc",
+        "JointDecision.mlmodelc"
     ]
 
     static let requiredCoreMLTransducerFiles = [
@@ -57,13 +61,14 @@ enum ModelInstallationValidator {
     /// empty directory by an interrupted download.
     static let coreMLBundleMarkerFile = "coremldata.bin"
 
-    static func validateQwen3ASRModelFolder(at folder: URL) -> ModelFolderValidation {
+    static func validateParakeetModelFolder(at folder: URL) -> ModelFolderValidation {
         let fm = FileManager.default
+        let requiredAssets = requiredParakeetFiles + requiredParakeetDirectories
         var isDirectory: ObjCBool = false
         guard fm.fileExists(atPath: folder.path, isDirectory: &isDirectory), isDirectory.boolValue else {
             return ModelFolderValidation(
                 folderExists: false,
-                missingRequiredFiles: requiredQwen3ASRFiles,
+                missingRequiredFiles: requiredAssets,
                 hasWeights: false,
                 readErrorDescription: nil
             )
@@ -75,19 +80,25 @@ enum ModelInstallationValidator {
         } catch {
             return ModelFolderValidation(
                 folderExists: true,
-                missingRequiredFiles: requiredQwen3ASRFiles,
+                missingRequiredFiles: requiredAssets,
                 hasWeights: false,
                 readErrorDescription: error.localizedDescription
             )
         }
 
         let fileNames = Set(contents.map(\.lastPathComponent))
-        let missingRequiredFiles = requiredQwen3ASRFiles.filter { !fileNames.contains($0) }
-        let hasWeights = contents.contains { $0.pathExtension == "safetensors" }
+        let missingFiles = requiredParakeetFiles.filter { !fileNames.contains($0) }
+        let missingDirs = requiredParakeetDirectories.filter { !fileNames.contains($0) }
+        let hasWeights = requiredParakeetDirectories.allSatisfy { dirName in
+            let marker = folder
+                .appendingPathComponent(dirName)
+                .appendingPathComponent(coreMLBundleMarkerFile)
+            return fm.fileExists(atPath: marker.path)
+        }
 
         return ModelFolderValidation(
             folderExists: true,
-            missingRequiredFiles: missingRequiredFiles,
+            missingRequiredFiles: missingFiles + missingDirs,
             hasWeights: hasWeights,
             readErrorDescription: nil
         )
@@ -138,8 +149,8 @@ enum ModelInstallationValidator {
 
     static func validate(folder: URL, for family: AppMode.ModelFamily) -> ModelFolderValidation {
         switch family {
-        case .qwen3ASR:
-            return validateQwen3ASRModelFolder(at: folder)
+        case .parakeetTDT:
+            return validateParakeetModelFolder(at: folder)
         case .nemotronASR:
             return validateCoreMLTransducerModelFolder(at: folder)
         case .appleSpeech:

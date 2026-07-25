@@ -12,17 +12,15 @@ protocol AudioCaptureProtocol: AnyObject {
     func stopCapture()
     func currentSamples() -> [Float]
     func sampleCount() -> Int
-    func recentSamples(maxCount: Int) -> [Float]
 }
 
 extension AudioCaptureService: AudioCaptureProtocol {}
 
 /// Abstraction over the transcription engine so the coordinator can be tested
-/// without loading a real MLX model.
+/// without loading a real speech model.
 protocol TranscriptionProtocol: AnyObject, Sendable {
     var isReady: Bool { get }
     var supportsStreamingTranscription: Bool { get }
-    func setVocabularyPrompt(_ prompt: String) async
     func setLanguage(_ language: String) async
     func currentModelId() async -> String?
     func transcribeStreaming(samples: [Float]) async throws -> String
@@ -159,7 +157,6 @@ final class DictationCoordinator {
     private var lastStreamingPreviewText = ""
     private let streamingPreviewInterval: Duration
     private let minimumStreamingPreviewSampleCount: Int
-    private let streamingPreviewWindowSamples: Int
     private let streamingPreviewStopTimeout: Duration
     private let maxRecordingDuration: Duration
     private var recordingLimitTask: Task<Void, Never>?
@@ -174,9 +171,8 @@ final class DictationCoordinator {
         mediaPlaybackService: any MediaPlaybackProtocol = MediaPlaybackService.shared,
         dictationHistoryStore: any DictationHistoryProtocol = DictationHistoryStore.shared,
         postProcessingProvider: (any PostProcessingProvider)? = RoutedPostProcessor(),
-        streamingPreviewInterval: Duration = .milliseconds(500),
+        streamingPreviewInterval: Duration = .milliseconds(400),
         minimumStreamingPreviewSampleCount: Int = 16_000,
-        streamingPreviewWindowSamples: Int = 16_000 * 15,
         streamingPreviewStopTimeout: Duration = .seconds(5),
         maxRecordingDuration: Duration = .seconds(900),
         isPostProcessingEnabled: @escaping @MainActor () -> Bool = { TypedSettings[.postProcessingEnabled] },
@@ -190,7 +186,6 @@ final class DictationCoordinator {
         self.postProcessingProvider = postProcessingProvider
         self.streamingPreviewInterval = streamingPreviewInterval
         self.minimumStreamingPreviewSampleCount = minimumStreamingPreviewSampleCount
-        self.streamingPreviewWindowSamples = streamingPreviewWindowSamples
         self.streamingPreviewStopTimeout = streamingPreviewStopTimeout
         self.maxRecordingDuration = maxRecordingDuration
         self.isPostProcessingEnabled = isPostProcessingEnabled
@@ -247,11 +242,13 @@ final class DictationCoordinator {
     func stop() {
         guard case .recording = state, let sessionID = currentSessionID else { return }
 
+        let stopStartedAt = ContinuousClock.now
         recordingLimitTask?.cancel()
         recordingLimitTask = nil
         audioCapture.stopCapture()
 
         let samples = audioCapture.currentSamples()
+        let captureFinishedAt = ContinuousClock.now
         let pendingStreamingTask = stopStreamingPreview()
         let speechAssessment = AudioSpeechDetector.assess(samples: samples)
 
@@ -276,7 +273,12 @@ final class DictationCoordinator {
             if let pendingStreamingTask {
                 await self?.waitForStreamingPreviewToStop(pendingStreamingTask)
             }
-            await self?.transcribeAndOutput(samples: samples, sessionID: sessionID)
+            await self?.transcribeAndOutput(
+                samples: samples,
+                sessionID: sessionID,
+                stopStartedAt: stopStartedAt,
+                captureFinishedAt: captureFinishedAt
+            )
         }
     }
 
@@ -409,31 +411,16 @@ final class DictationCoordinator {
     }
 
     private func publishStreamingPreviewIfAvailable(sessionID: UUID) async {
-        // Use the cheap count for the "skip when no new audio arrived" guard,
-        // then transcribe only a bounded recent window — not the full buffer —
-        // so per-tick preview cost is constant instead of O(n) in session
-        // length. The streaming provider resets when the windowed slice stops
-        // growing (stateful providers) or re-transcribes the slice (fallback),
-        // so the preview reflects a rolling recent window. The FINAL
-        // transcription (stop()) still reads the full buffer via
-        // `currentSamples()`, so nothing is lost.
+        // Re-transcribe the complete prefix so the preview remains a coherent
+        // version of the whole utterance rather than a rolling tail fragment.
+        // Only one preview loop exists, so slow passes cause ticks to be
+        // skipped naturally instead of building an inference queue.
         let totalCount = audioCapture.sampleCount()
         guard totalCount >= minimumStreamingPreviewSampleCount else { return }
         guard totalCount > lastStreamingPreviewSampleCount else { return }
 
-        let previewSamples = audioCapture.recentSamples(maxCount: streamingPreviewWindowSamples)
+        let previewSamples = audioCapture.currentSamples()
         guard AudioSpeechDetector.assess(samples: previewSamples).shouldTranscribe else { return }
-
-        // Once the buffer exceeds the window, previewSamples is a sliding
-        // window and no longer a prefix-extension of the previous tick's
-        // slice. A stateful provider's delta (dropFirst(streamedCount)) would
-        // silently skip the samples that slid past the window start on the
-        // transition tick, garbling the preview. Reset so the provider
-        // re-transcribes the full window — the steady state it reaches one
-        // tick later anyway once the windowed slice stops growing.
-        if totalCount > streamingPreviewWindowSamples {
-            await transcriptionService.resetStreamingTranscription()
-        }
 
         do {
             let text = try await transcriptionService.transcribeStreaming(samples: previewSamples)
@@ -454,7 +441,12 @@ final class DictationCoordinator {
         }
     }
 
-    private func transcribeAndOutput(samples: [Float], sessionID: UUID) async {
+    private func transcribeAndOutput(
+        samples: [Float],
+        sessionID: UUID,
+        stopStartedAt: ContinuousClock.Instant,
+        captureFinishedAt: ContinuousClock.Instant
+    ) async {
         defer {
             _ = activity.complete(sessionID)
             // Do NOT unconditionally nil transcriptionTask here. finish(sessionID:)
@@ -476,7 +468,9 @@ final class DictationCoordinator {
 
             try Task.checkCancellation()
 
+            let asrStartedAt = ContinuousClock.now
             let text = try await transcriptionService.transcribe(samples: samples)
+            let asrFinishedAt = ContinuousClock.now
 
             try Task.checkCancellation()
             guard currentSessionID == sessionID else {
@@ -491,7 +485,9 @@ final class DictationCoordinator {
             let modelID = await transcriptionService.currentModelId() ?? TypedSettings[.selectedModel]
             let language = TypedSettings[.selectedLanguage]
 
+            let refinementStartedAt = ContinuousClock.now
             let postProcessingOutcome = try await applyPostProcessing(to: text)
+            let refinementFinishedAt = ContinuousClock.now
 
             // Re-validate before saving/typing: the awaits above
             // (currentModelId, post-processing) are uncancellable on device.
@@ -518,6 +514,7 @@ final class DictationCoordinator {
                 )
             }
 
+            let historyStartedAt = ContinuousClock.now
             await dictationHistoryStore.saveSession(DictationHistorySession(
                 samples: samples,
                 transcript: resolvedOutcome.finalText,
@@ -527,6 +524,7 @@ final class DictationCoordinator {
                 wasPostProcessed: resolvedOutcome.wasPostProcessed,
                 postProcessingErrorDescription: resolvedOutcome.errorDescription
             ))
+            let historyFinishedAt = ContinuousClock.now
 
             // saveSession is another long suspension (actor hop + WAV encode +
             // disk write). Re-validate once more so a cancel() during the save
@@ -547,6 +545,18 @@ final class DictationCoordinator {
             } else {
                 onNoSpeechDetected?()
             }
+
+            logPipelineTimings(
+                stopStartedAt: stopStartedAt,
+                captureFinishedAt: captureFinishedAt,
+                asrStartedAt: asrStartedAt,
+                asrFinishedAt: asrFinishedAt,
+                refinementStartedAt: refinementStartedAt,
+                refinementFinishedAt: refinementFinishedAt,
+                historyStartedAt: historyStartedAt,
+                historyFinishedAt: historyFinishedAt,
+                finishedAt: ContinuousClock.now
+            )
         } catch is CancellationError {
             // Expected when cancel() is called.
         } catch {
@@ -557,11 +567,38 @@ final class DictationCoordinator {
     }
 
     private func applyCurrentTranscriptionSettings() async {
-        let vocab = TypedSettings[.vocabularyPrompt]
-        await transcriptionService.setVocabularyPrompt(vocab)
-
         let language = TypedSettings[.selectedLanguage]
         await transcriptionService.setLanguage(language)
+    }
+
+    private func logPipelineTimings(
+        stopStartedAt: ContinuousClock.Instant,
+        captureFinishedAt: ContinuousClock.Instant,
+        asrStartedAt: ContinuousClock.Instant,
+        asrFinishedAt: ContinuousClock.Instant,
+        refinementStartedAt: ContinuousClock.Instant,
+        refinementFinishedAt: ContinuousClock.Instant,
+        historyStartedAt: ContinuousClock.Instant,
+        historyFinishedAt: ContinuousClock.Instant,
+        finishedAt: ContinuousClock.Instant
+    ) {
+        let capture = Self.milliseconds(captureFinishedAt - stopStartedAt)
+        let finalQueue = Self.milliseconds(asrStartedAt - captureFinishedAt)
+        let asr = Self.milliseconds(asrFinishedAt - asrStartedAt)
+        let refinement = Self.milliseconds(refinementFinishedAt - refinementStartedAt)
+        let history = Self.milliseconds(historyFinishedAt - historyStartedAt)
+        let total = Self.milliseconds(finishedAt - stopStartedAt)
+
+        logger.info(
+            "Dictation pipeline: total \(total) ms; capture shutdown \(capture) ms; final queue \(finalQueue) ms; ASR \(asr) ms; refinement \(refinement) ms; history \(history) ms"
+        )
+    }
+
+    private static func milliseconds(_ duration: Duration) -> Int64 {
+        let components = duration.components
+        let millisecondsFromSeconds = components.seconds * 1_000
+        let millisecondsFromAttoseconds = components.attoseconds / 1_000_000_000_000_000
+        return millisecondsFromSeconds + millisecondsFromAttoseconds
     }
 
     /// Result of the post-processing step. `outputText` is what gets typed;

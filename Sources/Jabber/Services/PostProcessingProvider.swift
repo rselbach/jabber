@@ -44,9 +44,8 @@ extension PostProcessingProvider {
 /// Intelligence is off or the device is unsupported, `isAvailable` is `false`
 /// and the coordinator falls back to the raw transcript.
 ///
-/// The dictation instructions are adapted from FluidVoice's
-/// `baseDictationPromptText()` / `defaultDictationPromptBodyText()` so Jabber
-/// gets the same cleaning, command, correction, and conversion behavior.
+/// The dictation instructions cover cleaning, commands, corrections, and
+/// spoken-format conversions.
 struct AppleIntelligencePostProcessor: PostProcessingProvider {
     /// Hidden base prompt: role + core cleaning rules. Internal so tests can
     /// guard against accidental regressions in the prompt's capabilities.

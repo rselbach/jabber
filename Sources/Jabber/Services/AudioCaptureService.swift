@@ -184,17 +184,6 @@ final class AudioCaptureService {
         }
     }
 
-    /// The last `maxCount` captured samples (or the whole buffer if smaller),
-    /// as a bounded copy. Used by the streaming preview so its per-tick cost
-    /// stays constant instead of growing with session length. The final
-    /// transcription still reads the full buffer via `currentSamples()`.
-    func recentSamples(maxCount: Int) -> [Float] {
-        captureState.withLock {
-            guard $0.capturedSamples.count > maxCount else { return $0.capturedSamples }
-            return Array($0.capturedSamples.suffix(maxCount))
-        }
-    }
-
     nonisolated private func processBuffer(_ buffer: AVAudioPCMBuffer) {
         guard let converter = getConverter() else { return }
 

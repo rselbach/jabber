@@ -3,15 +3,88 @@ import XCTest
 @testable import Jabber
 
 final class TranscriptionServiceTests: XCTestCase {
+    func testParakeetAndNemotronAdvertiseStreamingPreview() {
+        XCTAssertTrue(ParakeetASRProvider(modelId: AppMode.parakeetModelId).supportsStreamingTranscription)
+        XCTAssertFalse(AppleSpeechProvider(modelId: AppMode.appleSpeechModelId).supportsStreamingTranscription)
+        XCTAssertTrue(NemotronASRProvider(
+            modelId: AppMode.nemotronModelId,
+            huggingFaceModelId: "aufklarer/Nemotron-Speech-Streaming-0.6B-CoreML-INT8"
+        ).supportsStreamingTranscription)
+    }
+
+    func testParakeetReusesRecentPreviewWithCompleteCoverage() {
+        XCTAssertTrue(ParakeetASRProvider.canReuseStreamingPreview(
+            text: "Troy and Abed in the morning",
+            finalSampleCount: 48_000,
+            previewSampleCount: 48_000,
+            previewAge: .milliseconds(400),
+            tailRMS: 0.1
+        ))
+    }
+
+    func testParakeetReusesPreviewWhenUncoveredTailIsSilent() {
+        XCTAssertTrue(ParakeetASRProvider.canReuseStreamingPreview(
+            text: "Troy and Abed in the morning",
+            finalSampleCount: 48_000,
+            previewSampleCount: 43_000,
+            previewAge: .milliseconds(400),
+            tailRMS: 0.001
+        ))
+    }
+
+    func testParakeetRejectsPreviewWhenUncoveredTailContainsSpeech() {
+        XCTAssertFalse(ParakeetASRProvider.canReuseStreamingPreview(
+            text: "Troy and Abed in the",
+            finalSampleCount: 48_000,
+            previewSampleCount: 45_000,
+            previewAge: .milliseconds(400),
+            tailRMS: 0.1
+        ))
+    }
+
+    func testParakeetRejectsStalePreview() {
+        XCTAssertFalse(ParakeetASRProvider.canReuseStreamingPreview(
+            text: "Troy and Abed in the morning",
+            finalSampleCount: 48_000,
+            previewSampleCount: 48_000,
+            previewAge: .seconds(4),
+            tailRMS: 0
+        ))
+    }
+
+    func testStreamingCapabilityTracksLoadedProvider() async throws {
+        let provider = FakeTranscriptionProvider(
+            modelId: AppMode.nemotronModelId,
+            supportsStreamingTranscription: true
+        )
+        let service = TranscriptionService(loadDependencies: TranscriptionService.LoadDependencies(
+            waitForUIReady: {},
+            selectedModelId: { AppMode.nemotronModelId },
+            setSelectedModelId: { _ in },
+            ensureModelDownloaded: { _ in FileManager.default.temporaryDirectory },
+            makeProvider: { _ in provider }
+        ))
+
+        XCTAssertFalse(service.supportsStreamingTranscription)
+
+        try await service.ensureModelLoaded()
+
+        XCTAssertTrue(service.supportsStreamingTranscription)
+
+        await service.unloadModel()
+
+        XCTAssertFalse(service.supportsStreamingTranscription)
+    }
+
     func testConcurrentLoadModelCallersShareSingleProviderLoad() async throws {
         let downloadProbe = ModelDownloadProbe()
-        let provider = FakeTranscriptionProvider(modelId: AppMode.qwen3ModelId)
+        let provider = FakeTranscriptionProvider(modelId: AppMode.parakeetModelId)
         let loadStarted = TestLatch()
         let releaseLoad = TestLatch()
         provider.holdLoad(started: loadStarted, release: releaseLoad)
         let service = TranscriptionService(loadDependencies: TranscriptionService.LoadDependencies(
             waitForUIReady: {},
-            selectedModelId: { AppMode.qwen3ModelId },
+            selectedModelId: { AppMode.parakeetModelId },
             setSelectedModelId: { _ in },
             ensureModelDownloaded: { modelId in
                 try await downloadProbe.ensureDownloaded(modelId)
@@ -30,7 +103,7 @@ final class TranscriptionServiceTests: XCTestCase {
 
         try await Task.sleep(for: .milliseconds(50))
         let modelIdsWhileFirstHeld = await downloadProbe.modelIds
-        XCTAssertEqual(modelIdsWhileFirstHeld, [AppMode.qwen3ModelId])
+        XCTAssertEqual(modelIdsWhileFirstHeld, [AppMode.parakeetModelId])
         XCTAssertEqual(provider.loadCallCount, 1)
 
         await releaseLoad.open()
@@ -39,21 +112,21 @@ final class TranscriptionServiceTests: XCTestCase {
 
         let finalModelIds = await downloadProbe.modelIds
         let currentModelId = await service.currentModelId()
-        XCTAssertEqual(finalModelIds, [AppMode.qwen3ModelId])
+        XCTAssertEqual(finalModelIds, [AppMode.parakeetModelId])
         XCTAssertEqual(provider.loadCallCount, 1)
         XCTAssertEqual(provider.unloadCallCount, 0)
-        XCTAssertEqual(currentModelId, AppMode.qwen3ModelId)
+        XCTAssertEqual(currentModelId, AppMode.parakeetModelId)
     }
 
     func testUnloadDuringLoadCancelsGenerationAndUnloadsNewProvider() async throws {
         let downloadProbe = ModelDownloadProbe()
-        let provider = FakeTranscriptionProvider(modelId: AppMode.qwen3ModelId)
+        let provider = FakeTranscriptionProvider(modelId: AppMode.parakeetModelId)
         let loadStarted = TestLatch()
         let releaseLoad = TestLatch()
         provider.holdLoad(started: loadStarted, release: releaseLoad)
         let service = TranscriptionService(loadDependencies: TranscriptionService.LoadDependencies(
             waitForUIReady: {},
-            selectedModelId: { AppMode.qwen3ModelId },
+            selectedModelId: { AppMode.parakeetModelId },
             setSelectedModelId: { _ in },
             ensureModelDownloaded: { modelId in
                 try await downloadProbe.ensureDownloaded(modelId)
@@ -81,9 +154,9 @@ final class TranscriptionServiceTests: XCTestCase {
     }
 
     func testReentrantSelectedModelAwaitDoesNotStartDuplicateLoad() async throws {
-        let selectedProbe = SelectedModelProbe(modelId: AppMode.qwen3ModelId)
+        let selectedProbe = SelectedModelProbe(modelId: AppMode.parakeetModelId)
         let downloadProbe = ModelDownloadProbe()
-        let provider = FakeTranscriptionProvider(modelId: AppMode.qwen3ModelId)
+        let provider = FakeTranscriptionProvider(modelId: AppMode.parakeetModelId)
         let service = TranscriptionService(loadDependencies: TranscriptionService.LoadDependencies(
             waitForUIReady: {},
             selectedModelId: {
@@ -111,15 +184,15 @@ final class TranscriptionServiceTests: XCTestCase {
         try await secondTask.value
 
         let modelIds = await downloadProbe.modelIds
-        XCTAssertEqual(modelIds, [AppMode.qwen3ModelId])
+        XCTAssertEqual(modelIds, [AppMode.parakeetModelId])
         XCTAssertEqual(provider.loadCallCount, 1)
         XCTAssertEqual(provider.unloadCallCount, 0)
     }
 
     func testModelSwitchUnloadSuspensionDoesNotStartDuplicateLoad() async throws {
         let downloadProbe = ModelDownloadProbe()
-        let selected = MutableSelectedModel(AppMode.qwen3ModelId)
-        let providerA = FakeTranscriptionProvider(modelId: AppMode.qwen3ModelId)
+        let selected = MutableSelectedModel(AppMode.parakeetModelId)
+        let providerA = FakeTranscriptionProvider(modelId: AppMode.parakeetModelId)
         let providerB = FakeTranscriptionProvider(modelId: AppMode.nemotronModelId)
         let transcribeStarted = TestLatch()
         let releaseTranscribe = TestLatch()
@@ -278,26 +351,6 @@ final class TranscriptionServiceTests: XCTestCase {
         XCTAssertEqual(TranscriptionService.resolveLanguageForProvider("en"), "en")
         XCTAssertEqual(TranscriptionService.resolveLanguageForProvider("ja"), "ja")
     }
-
-    // MARK: - truncateVocabularyPrompt
-
-    func testTruncateVocabularyPromptShortStringUnchanged() {
-        XCTAssertEqual(TranscriptionService.truncateVocabularyPrompt("hello"), "hello")
-    }
-
-    func testTruncateVocabularyPromptEmptyStringUnchanged() {
-        XCTAssertEqual(TranscriptionService.truncateVocabularyPrompt(""), "")
-    }
-
-    func testTruncateVocabularyPromptTruncatesAt500Characters() {
-        let short = String(repeating: "a", count: 400)
-        let exact = String(repeating: "b", count: 500)
-        let long = String(repeating: "c", count: 600)
-
-        XCTAssertEqual(TranscriptionService.truncateVocabularyPrompt(short).count, 400)
-        XCTAssertEqual(TranscriptionService.truncateVocabularyPrompt(exact).count, 500)
-        XCTAssertEqual(TranscriptionService.truncateVocabularyPrompt(long).count, 500)
-    }
 }
 
 private actor MutableSelectedModel {
@@ -377,8 +430,11 @@ private final class FakeTranscriptionProvider: TranscriptionProvider, @unchecked
 
     private let state = OSAllocatedUnfairLock(initialState: State())
 
-    init(modelId: String) {
+    let supportsStreamingTranscription: Bool
+
+    init(modelId: String, supportsStreamingTranscription: Bool = false) {
         self.modelId = modelId
+        self.supportsStreamingTranscription = supportsStreamingTranscription
     }
 
     var isReady: Bool {
@@ -427,7 +483,7 @@ private final class FakeTranscriptionProvider: TranscriptionProvider, @unchecked
         }
     }
 
-    func transcribe(samples _: [Float], language _: String?, vocabularyPrompt _: String?) async throws -> String {
+    func transcribe(samples _: [Float], language _: String?) async throws -> String {
         let holds = state.withLock { state in
             (started: state.transcribeStarted, release: state.releaseTranscribe)
         }
@@ -436,7 +492,7 @@ private final class FakeTranscriptionProvider: TranscriptionProvider, @unchecked
         return "Troy and Abed in the morning"
     }
 
-    func transcribeStreaming(samples _: [Float], language _: String?, vocabularyPrompt _: String?) async throws -> String {
+    func transcribeStreaming(samples _: [Float], language _: String?) async throws -> String {
         "Troy and Abed in the morning"
     }
 

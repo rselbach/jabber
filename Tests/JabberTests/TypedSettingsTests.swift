@@ -32,7 +32,6 @@ final class TypedSettingsTests: XCTestCase {
         XCTAssertEqual(settings[.selectedLanguage], Constants.defaultLanguage, "Default language should match system")
         XCTAssertEqual(settings[.outputMode], TypingService.OutputMode.directTyping.rawValue)
         XCTAssertEqual(settings[.hotkeyActivationMode], HotkeyActivationMode.defaultMode.rawValue)
-        XCTAssertEqual(settings[.vocabularyPrompt], "", "Default vocabulary should be empty")
         XCTAssertEqual(settings[.replacementEntries], "", "Default replacement entries should be empty JSON string")
         XCTAssertEqual(settings.replacementEntries, [], "Default replacement entries array should be empty")
         XCTAssertEqual(settings[.postProcessingProviderKind], PostProcessingProviderKind.defaultValue.rawValue)
@@ -149,12 +148,10 @@ final class TypedSettingsTests: XCTestCase {
         // Set custom values
         settings[.selectedModel] = "medium"
         settings[.selectedLanguage] = "en"
-        settings[.vocabularyPrompt] = "medical terminology"
 
         // Verify they're stored
         XCTAssertEqual(settings[.selectedModel], "medium")
         XCTAssertEqual(settings[.selectedLanguage], "en")
-        XCTAssertEqual(settings[.vocabularyPrompt], "medical terminology")
     }
 
     func testIsSetReturnsFalseForUnsetValues() {
@@ -173,7 +170,7 @@ final class TypedSettingsTests: XCTestCase {
 
     func testRemoveResetsToDefault() {
         let defaultModel = LanguageModelCatalog.recommendedModelId(for: Constants.defaultLanguage)
-        let nonDefaultModel = AppMode.qwen3ModelId
+        let nonDefaultModel = AppMode.appleSpeechModelId
 
         // Set a non-default value
         settings[.selectedModel] = nonDefaultModel
@@ -334,27 +331,6 @@ final class TypedSettingsTests: XCTestCase {
 
         XCTAssertEqual(settings.hotkeyActivationMode, .automatic)
         XCTAssertEqual(settings[.hotkeyActivationMode], HotkeyActivationMode.automatic.rawValue)
-    }
-
-    func testPersistenceAcrossAccesses() {
-        settings[.vocabularyPrompt] = "persistent test value"
-
-        // Access multiple times
-        let value1 = settings[.vocabularyPrompt]
-        let value2 = settings[.vocabularyPrompt]
-        let value3 = settings[.vocabularyPrompt]
-
-        XCTAssertEqual(value1, value2)
-        XCTAssertEqual(value2, value3)
-        XCTAssertEqual(value1, "persistent test value")
-    }
-
-    func testEmptyStringIsValidValue() {
-        settings[.vocabularyPrompt] = ""
-
-        // Empty string should be stored (not confused with default)
-        XCTAssertEqual(settings[.vocabularyPrompt], "")
-        XCTAssertTrue(settings.isSet(.vocabularyPrompt))
     }
 
     func testSettingKeysAreCorrect() {

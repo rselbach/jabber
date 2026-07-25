@@ -308,17 +308,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         let openItem = NSMenuItem(title: "Open Jabber", action: #selector(openJabber), keyEquivalent: "")
         let settingsItem = NSMenuItem(title: "Settings…", action: #selector(openSettings), keyEquivalent: ",")
-        let vocabularyItem = NSMenuItem(title: "Vocabulary", action: #selector(openVocabulary), keyEquivalent: "")
         let updatesItem = NSMenuItem(title: "Check for Updates…", action: #selector(checkForUpdates), keyEquivalent: "")
         let quitItem = NSMenuItem(title: "Quit Jabber", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
 
-        for item in [openItem, settingsItem, vocabularyItem, updatesItem] {
+        for item in [openItem, settingsItem, updatesItem] {
             item.target = self
         }
         // quitItem has no target → routes through the responder chain to NSApp.terminate.
         // statusHeaderItem has no action either, so autoenablesItems keeps it disabled.
 
-        menu.items = [statusHeaderItem, .separator(), openItem, settingsItem, vocabularyItem,
+        menu.items = [statusHeaderItem, .separator(), openItem, settingsItem,
                       .separator(), updatesItem, .separator(), quitItem]
         menu.delegate = self
         return menu
@@ -355,17 +354,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         NotificationCenter.default.post(
             name: Constants.Notifications.mainWindowSectionDidRequest,
             object: MainWindowView.Section.general
-        )
-    }
-
-    @objc private func openVocabulary() {
-        showMainWindow(initialSection: .vocabulary)
-        // `showMainWindow` honors `initialSection` only when creating the
-        // window; when it is already open the selection is driven via this
-        // notification so the Vocabulary item always lands on the right page.
-        NotificationCenter.default.post(
-            name: Constants.Notifications.mainWindowSectionDidRequest,
-            object: MainWindowView.Section.vocabulary
         )
     }
 

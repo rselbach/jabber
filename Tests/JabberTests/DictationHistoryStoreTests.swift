@@ -25,7 +25,7 @@ final class DictationHistoryStoreTests: XCTestCase {
         let entry = try await store.save(DictationHistorySession(
             samples: [0, 0.5, -1, 1],
             transcript: "cool cool cool",
-            modelID: AppMode.qwen3ModelId,
+            modelID: AppMode.parakeetModelId,
             language: "en",
             timestamp: timestamp
         ))
@@ -49,8 +49,8 @@ final class DictationHistoryStoreTests: XCTestCase {
 
         XCTAssertEqual(decodedEntry.id, entry.id)
         XCTAssertEqual(decodedEntry.transcript, "cool cool cool")
-        XCTAssertEqual(decodedEntry.modelID, AppMode.qwen3ModelId)
-        XCTAssertEqual(decodedEntry.modelName, "Qwen3-ASR 1.7B 8-bit")
+        XCTAssertEqual(decodedEntry.modelID, AppMode.parakeetModelId)
+        XCTAssertEqual(decodedEntry.modelName, "Parakeet TDT v2")
         XCTAssertEqual(decodedEntry.language, "en")
         XCTAssertEqual(decodedEntry.duration, 4.0 / 16_000.0, accuracy: 0.000_001)
     }
@@ -63,7 +63,7 @@ final class DictationHistoryStoreTests: XCTestCase {
         let entry = try await store.save(DictationHistorySession(
             samples: [Float.nan, .infinity, -.infinity, 0.5],
             transcript: "streets ahead",
-            modelID: AppMode.qwen3ModelId,
+            modelID: AppMode.parakeetModelId,
             language: "en"
         ))
 
@@ -221,7 +221,7 @@ final class DictationHistoryStoreTests: XCTestCase {
         let entry = try await store.save(DictationHistorySession(
             samples: [0, 0.5, -1, 1],
             transcript: "Hello.",
-            modelID: AppMode.qwen3ModelId,
+            modelID: AppMode.parakeetModelId,
             language: "en",
             timestamp: timestamp,
             rawTranscript: " um hello ",
@@ -245,7 +245,7 @@ final class DictationHistoryStoreTests: XCTestCase {
         _ = try await store.save(DictationHistorySession(
             samples: [0.25],
             transcript: "raw fallback",
-            modelID: AppMode.qwen3ModelId,
+            modelID: AppMode.parakeetModelId,
             language: "en",
             rawTranscript: nil,
             wasPostProcessed: false,
@@ -342,16 +342,15 @@ final class DictationHistoryStoreTests: XCTestCase {
 
     // MARK: - Bug 3: corrupt metadata.json must be pruned, not just missing
 
-    func testSaveRecordsHumanReadableModelNameForNonQwenModels() async throws {
+    func testSaveRecordsHumanReadableModelNameForEveryModel() async throws {
         // The history entry's `modelName` label must show the human-readable
-        // display name for every model family, not just Qwen3. Previously the
-        // qwen3ASRVariant lookup returned nil for nemotron/apple-speech and the
-        // raw id leaked into the UI.
+        // display name for every model family instead of leaking raw ids into
+        // the UI.
         let store = makeStore()
         let tests: [String: (modelID: String, want: String)] = [
             "nemotron": (AppMode.nemotronModelId, "Nemotron"),
             "apple-speech": (AppMode.appleSpeechModelId, "Apple Speech"),
-            "qwen3": (AppMode.qwen3ModelId, "Qwen3-ASR 1.7B 8-bit")
+            "parakeet": (AppMode.parakeetModelId, "Parakeet TDT v2")
         ]
 
         for (name, tc) in tests {
@@ -468,8 +467,8 @@ final class DictationHistoryStoreTests: XCTestCase {
             timestamp: Date(timeIntervalSince1970: 100),
             duration: 0.5,
             sampleRate: 16_000,
-            modelID: AppMode.qwen3ModelId,
-            modelName: "Qwen3-ASR",
+            modelID: AppMode.parakeetModelId,
+            modelName: "Parakeet TDT v2",
             language: "en",
             transcript: "Señor Chang",
             directoryName: "..",
@@ -512,7 +511,7 @@ final class DictationHistoryStoreTests: XCTestCase {
         DictationHistorySession(
             samples: samples,
             transcript: transcript,
-            modelID: AppMode.qwen3ModelId,
+            modelID: AppMode.parakeetModelId,
             language: "auto",
             timestamp: timestamp
         )

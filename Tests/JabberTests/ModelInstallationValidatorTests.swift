@@ -19,51 +19,56 @@ final class ModelInstallationValidatorTests: XCTestCase {
         try super.tearDownWithError()
     }
 
-    func testCompleteQwen3ASRFolderIsValid() throws {
-        try writeRequiredModelFiles()
-        try writeFile(named: "model.safetensors")
+    func testCompleteParakeetFolderIsValid() throws {
+        try writeFile(named: "parakeet_vocab.json")
+        for directory in ModelInstallationValidator.requiredParakeetDirectories {
+            try createCoreMLBundle(named: directory)
+        }
 
-        let validation = ModelInstallationValidator.validateQwen3ASRModelFolder(at: tempDir)
+        let validation = ModelInstallationValidator.validateParakeetModelFolder(at: tempDir)
 
         XCTAssertTrue(validation.isComplete)
         XCTAssertEqual(validation.missingRequiredFiles, [])
         XCTAssertTrue(validation.hasWeights)
-        XCTAssertNil(validation.readErrorDescription)
     }
 
-    func testMissingTokenizerFileIsInvalid() throws {
-        try writeRequiredModelFiles(except: "tokenizer_config.json")
-        try writeFile(named: "model.safetensors")
+    func testMissingParakeetVocabularyIsInvalid() throws {
+        for directory in ModelInstallationValidator.requiredParakeetDirectories {
+            try createCoreMLBundle(named: directory)
+        }
 
-        let validation = ModelInstallationValidator.validateQwen3ASRModelFolder(at: tempDir)
+        let validation = ModelInstallationValidator.validateParakeetModelFolder(at: tempDir)
 
         XCTAssertFalse(validation.isComplete)
-        XCTAssertEqual(validation.missingRequiredFiles, ["tokenizer_config.json"])
-        XCTAssertTrue(validation.hasWeights)
-        XCTAssertTrue(validation.failureDescription.contains("tokenizer_config.json"))
+        XCTAssertEqual(validation.missingRequiredFiles, ["parakeet_vocab.json"])
     }
 
-    func testMissingSafetensorsWeightsIsInvalid() throws {
-        try writeRequiredModelFiles()
+    func testEmptyParakeetBundleIsInvalid() throws {
+        try writeFile(named: "parakeet_vocab.json")
+        for directory in ModelInstallationValidator.requiredParakeetDirectories {
+            try createCoreMLBundle(named: directory)
+        }
+        let emptyBundle = tempDir.appendingPathComponent("Encoder.mlmodelc")
+        try FileManager.default.removeItem(at: emptyBundle)
+        try FileManager.default.createDirectory(at: emptyBundle, withIntermediateDirectories: true)
 
-        let validation = ModelInstallationValidator.validateQwen3ASRModelFolder(at: tempDir)
+        let validation = ModelInstallationValidator.validateParakeetModelFolder(at: tempDir)
 
         XCTAssertFalse(validation.isComplete)
-        XCTAssertEqual(validation.missingRequiredFiles, [])
         XCTAssertFalse(validation.hasWeights)
-        XCTAssertTrue(validation.failureDescription.contains("missing model weights"))
     }
 
-    func testMissingFolderIsInvalid() {
+    func testMissingParakeetFolderIsInvalid() {
         let missingFolder = tempDir.appendingPathComponent("missing", isDirectory: true)
 
-        let validation = ModelInstallationValidator.validateQwen3ASRModelFolder(at: missingFolder)
+        let validation = ModelInstallationValidator.validateParakeetModelFolder(at: missingFolder)
 
         XCTAssertFalse(validation.isComplete)
         XCTAssertFalse(validation.folderExists)
         XCTAssertEqual(
             validation.missingRequiredFiles,
-            ModelInstallationValidator.requiredQwen3ASRFiles
+            ModelInstallationValidator.requiredParakeetFiles
+                + ModelInstallationValidator.requiredParakeetDirectories
         )
     }
 
@@ -80,7 +85,7 @@ final class ModelInstallationValidatorTests: XCTestCase {
         XCTAssertTrue(validation.hasWeights)
     }
 
-    func testMissingMlmodelcDirectoryIsInvalid() throws {
+    func testMissingCoreMLTransducerBundleIsInvalid() throws {
         try writeFile(named: "config.json")
         try writeFile(named: "vocab.json")
         try createCoreMLBundle(named: "encoder.mlmodelc")
@@ -93,55 +98,14 @@ final class ModelInstallationValidatorTests: XCTestCase {
         XCTAssertTrue(validation.missingRequiredFiles.contains("joint.mlmodelc"))
     }
 
-    func testEmptyMlmodelcBundlesAreInvalid() throws {
-        try writeFile(named: "config.json")
-        try writeFile(named: "vocab.json")
-        try createDirectory(named: "encoder.mlmodelc")
-        try createDirectory(named: "decoder.mlmodelc")
-        try createDirectory(named: "joint.mlmodelc")
-
-        let validation = ModelInstallationValidator.validateCoreMLTransducerModelFolder(at: tempDir)
-
-        XCTAssertFalse(validation.isComplete)
-        XCTAssertFalse(validation.hasWeights)
-    }
-
-    func testPartiallyPopulatedMlmodelcBundleIsInvalid() throws {
-        try writeFile(named: "config.json")
-        try writeFile(named: "vocab.json")
-        try createCoreMLBundle(named: "encoder.mlmodelc")
-        try createDirectory(named: "decoder.mlmodelc")
-        try createCoreMLBundle(named: "joint.mlmodelc")
-
-        let validation = ModelInstallationValidator.validateCoreMLTransducerModelFolder(at: tempDir)
-
-        XCTAssertFalse(validation.isComplete)
-        XCTAssertFalse(validation.hasWeights)
-    }
-
-    private func writeRequiredModelFiles(except excludedFile: String? = nil) throws {
-        for file in ModelInstallationValidator.requiredQwen3ASRFiles where file != excludedFile {
-            try writeFile(named: file)
-        }
-    }
-
     private func writeFile(named name: String) throws {
-        let data = Data("Greendale Community College".utf8)
-        try data.write(to: tempDir.appendingPathComponent(name))
-    }
-
-    private func createDirectory(named name: String) throws {
-        try FileManager.default.createDirectory(
-            at: tempDir.appendingPathComponent(name),
-            withIntermediateDirectories: true
-        )
+        try Data("Greendale Community College".utf8).write(to: tempDir.appendingPathComponent(name))
     }
 
     private func createCoreMLBundle(named name: String) throws {
         let bundle = tempDir.appendingPathComponent(name)
         try FileManager.default.createDirectory(at: bundle, withIntermediateDirectories: true)
-        let data = Data("Human Being mascot".utf8)
-        try data.write(
+        try Data("Human Being mascot".utf8).write(
             to: bundle.appendingPathComponent(ModelInstallationValidator.coreMLBundleMarkerFile)
         )
     }

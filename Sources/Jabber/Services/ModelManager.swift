@@ -24,16 +24,20 @@ final class ModelManager {
     static let shared = ModelManager()
     private let logger = Logger(subsystem: "com.rselbach.jabber", category: "ModelManager")
     private static let legacyModelIdMigration: [String: String] = [
-        "tiny": AppMode.qwen3Small4BitModelId,
-        "small": AppMode.qwen3Small4BitModelId,
-        "large-v3": AppMode.qwen3ModelId,
-        "base": AppMode.qwen3Small4BitModelId,
-        "medium": AppMode.qwen3Large4BitModelId,
-        "large": AppMode.qwen3ModelId,
-        "qwen3-asr-0.6b-mlx-4bit": AppMode.qwen3Small4BitModelId,
-        "qwen3-asr-0.6b-mlx-8bit": AppMode.qwen3Small8BitModelId,
-        "qwen3-asr-1.7b-mlx-4bit": AppMode.qwen3Large4BitModelId,
-        "qwen3-asr-1.7b-mlx-8bit": AppMode.qwen3ModelId
+        "tiny": AppMode.parakeetModelId,
+        "small": AppMode.parakeetModelId,
+        "large-v3": AppMode.parakeetModelId,
+        "base": AppMode.parakeetModelId,
+        "medium": AppMode.parakeetModelId,
+        "large": AppMode.parakeetModelId,
+        "qwen3": AppMode.parakeetModelId,
+        "qwen3-0.6b-4bit": AppMode.parakeetModelId,
+        "qwen3-0.6b-8bit": AppMode.parakeetModelId,
+        "qwen3-1.7b-4bit": AppMode.parakeetModelId,
+        "qwen3-asr-0.6b-mlx-4bit": AppMode.parakeetModelId,
+        "qwen3-asr-0.6b-mlx-8bit": AppMode.parakeetModelId,
+        "qwen3-asr-1.7b-mlx-4bit": AppMode.parakeetModelId,
+        "qwen3-asr-1.7b-mlx-8bit": AppMode.parakeetModelId
     ]
 
     struct Model: Identifiable {
@@ -416,18 +420,6 @@ final class ModelManager {
         }
     }
 
-    nonisolated static func isQwen3ASRModel(_ modelId: String) -> Bool {
-        AppMode.qwen3ASRVariant(for: modelId) != nil
-    }
-
-    nonisolated static func qwen3ASRHuggingFaceModelId(for modelId: String) -> String? {
-        AppMode.qwen3ASRVariant(for: modelId)?.huggingFaceModelId
-    }
-
-    func isQwen3ASRModel(_ modelId: String) -> Bool {
-        Self.isQwen3ASRModel(modelId)
-    }
-
     private func modelFolder(for modelId: String) -> URL? {
         guard let def = AppMode.modelDefinition(for: modelId) else { return nil }
 
@@ -513,36 +505,30 @@ final class ModelManager {
 
         let downloadFolder = try downloadFolder(for: modelId)
 
-        let additionalFiles: [String]
         switch def.family {
-        case .qwen3ASR:
-            additionalFiles = ["vocab.json", "merges.txt", "tokenizer_config.json"]
+        case .parakeetTDT:
+            try await HuggingFaceDownloader.downloadFiles(
+                modelId: def.huggingFaceModelId,
+                to: downloadFolder,
+                files: ModelInstallationValidator.requiredParakeetFiles
+                    + ModelInstallationValidator.requiredParakeetDirectories.map { "\($0)/**" },
+                progressHandler: downloadProgressHandler(modelId: modelId, modelName: modelName)
+            )
         case .nemotronASR:
-            additionalFiles = [
-                "encoder.mlmodelc/**",
-                "decoder.mlmodelc/**",
-                "joint.mlmodelc/**",
-                "vocab.json"
-            ]
+            try await HuggingFaceDownloader.downloadWeights(
+                modelId: def.huggingFaceModelId,
+                to: downloadFolder,
+                additionalFiles: [
+                    "encoder.mlmodelc/**",
+                    "decoder.mlmodelc/**",
+                    "joint.mlmodelc/**",
+                    "vocab.json"
+                ],
+                progressHandler: downloadProgressHandler(modelId: modelId, modelName: modelName)
+            )
         case .appleSpeech:
             throw ModelError.modelNotFound(modelId: modelId)
         }
-
-        try await HuggingFaceDownloader.downloadWeights(
-            modelId: def.huggingFaceModelId,
-            to: downloadFolder,
-            additionalFiles: additionalFiles,
-            progressHandler: { @Sendable [weak self] progress in
-                Task { @MainActor in
-                    self?.publishDownloadProgress(
-                        modelId: modelId,
-                        modelName: modelName,
-                        progress: progress,
-                        status: "Downloading weights..."
-                    )
-                }
-            }
-        )
 
         try Task.checkCancellation()
 
@@ -559,6 +545,22 @@ final class ModelManager {
             modelId: modelId,
             details: validation.failureDescription
         )
+    }
+
+    private func downloadProgressHandler(
+        modelId: String,
+        modelName: String
+    ) -> @Sendable (Double) -> Void {
+        { @Sendable [weak self] progress in
+            Task { @MainActor in
+                self?.publishDownloadProgress(
+                    modelId: modelId,
+                    modelName: modelName,
+                    progress: progress,
+                    status: "Downloading model..."
+                )
+            }
+        }
     }
 
     private func cacheFolder(for huggingFaceModelId: String) -> URL {

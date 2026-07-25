@@ -6,14 +6,13 @@ import Foundation
 /// Example usage:
 /// ```swift
 /// let language = TypedSettings[.selectedLanguage]
-/// TypedSettings[.vocabularyPrompt] = "medical terms"
+/// TypedSettings[.selectedLanguage] = "en"
 /// ```
 enum TypedSetting<T>: Sendable {
     case selectedModel
     case selectedLanguage
     case outputMode
     case hotkeyActivationMode
-    case vocabularyPrompt
     case replacementEntries
     case postProcessingProviderKind
     case openRouterModel
@@ -27,7 +26,6 @@ enum TypedSetting<T>: Sendable {
         case .selectedLanguage: return AppSettingKey.selectedLanguage
         case .outputMode: return AppSettingKey.outputMode
         case .hotkeyActivationMode: return AppSettingKey.hotkeyActivationMode
-        case .vocabularyPrompt: return AppSettingKey.vocabularyPrompt
         case .replacementEntries: return AppSettingKey.replacementEntries
         case .postProcessingProviderKind: return AppSettingKey.postProcessingProviderKind
         case .openRouterModel: return AppSettingKey.openRouterModel
@@ -110,8 +108,6 @@ extension TypedSetting where T == String {
             return TypingService.OutputMode.directTyping.rawValue
         case .hotkeyActivationMode:
             return HotkeyActivationMode.defaultMode.rawValue
-        case .vocabularyPrompt:
-            return ""
         case .replacementEntries:
             return ""
         case .postProcessingProviderKind:
@@ -164,7 +160,7 @@ struct SettingsStore: Sendable {
             return PostProcessingProviderKind.resolve(rawValue: rawValue).rawValue
         case .openRouterModel:
             return OpenRouterModelCatalog.resolveModelId(rawValue)
-        case .selectedModel, .selectedLanguage, .vocabularyPrompt, .replacementEntries,
+        case .selectedModel, .selectedLanguage, .replacementEntries,
              .lastModelMigrationNoticeKey, .declinedModelMigrationNoticeKey:
             return rawValue
         }

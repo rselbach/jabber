@@ -3,7 +3,7 @@
 # Build a throwaway Jabber.app preview bundle to visually verify the app icon.
 # Uses a unique bundle id per run so IconServices has no cached icon and
 # renders the current Assets.xcassets icon. The bundle is NOT runnable
-# (debug binary, no Sparkle / MediaRemoteAdapter / mlx.metallib copied in) —
+# (debug binary, no Sparkle or MediaRemoteAdapter copied in) —
 # it exists only to show the icon in Finder.
 #
 # Usage: ./scripts/preview_icon.sh

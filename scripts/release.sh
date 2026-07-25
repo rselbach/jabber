@@ -154,7 +154,6 @@ parse_args() {
 build_app() {
   cd "${PROJECT_ROOT}"
   swift build -c release
-  ./scripts/build_mlx_metallib.sh release
 }
 
 create_bundle() {
@@ -170,9 +169,6 @@ create_bundle() {
   # Copy executable
   cp "${PROJECT_ROOT}/.build/release/Jabber" "${macos}/${APP_NAME}"
 
-  # Copy MLX Metal shader library next to the executable for Qwen3-ASR.
-  cp "${PROJECT_ROOT}/.build/release/mlx.metallib" "${macos}/mlx.metallib"
-  
   # Copy Info.plist
   cp "${PROJECT_ROOT}/Info.plist" "${contents}/Info.plist"
   
@@ -269,12 +265,6 @@ sign_app() {
     --sign "${SIGNING_IDENTITY}" \
     "${app_bundle}/Contents/Frameworks/libMediaRemoteAdapter.dylib"
 
-  # Sign MLX's Metal library before signing the executable/app bundle.
-  # codesign treats files in Contents/MacOS as nested code objects.
-  codesign --force --options runtime \
-    --sign "${SIGNING_IDENTITY}" \
-    "${app_bundle}/Contents/MacOS/mlx.metallib"
-  
   # Sign the main executable
   codesign --force --options runtime \
     --entitlements "${entitlements}" \

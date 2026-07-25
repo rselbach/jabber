@@ -74,8 +74,8 @@ final class ModelMigrationNoticeResolverTests: XCTestCase {
 
     func testNoticeKeyBuildsStableMigrationKey() {
         XCTAssertEqual(
-            ModelMigrationNoticeResolver.noticeKey(for: ModelManager.Migration(from: "medium", to: "qwen3")),
-            "medium->qwen3"
+            ModelMigrationNoticeResolver.noticeKey(for: ModelManager.Migration(from: "medium", to: "parakeet-tdt-v2")),
+            "medium->parakeet-tdt-v2"
         )
     }
 
@@ -103,7 +103,7 @@ final class ModelMigrationNoticeResolverTests: XCTestCase {
         XCTAssertEqual(
             ModelFallbackResolver.downloadedFallbackModelId(
                 recommendedModelId: "nemotron",
-                downloadedModelIds: ["apple-speech", "qwen3"]
+                downloadedModelIds: ["apple-speech", "parakeet-tdt-v2"]
             ),
             "apple-speech"
         )
@@ -118,24 +118,24 @@ final class ModelMigrationNoticeResolverTests: XCTestCase {
 
     func testDeclinedDownloadMatchesCurrentMigrationKey() {
         XCTAssertTrue(ModelMigrationDeclineResolver.isDownloadDeclined(
-            migration: ModelManager.Migration(from: "medium", to: "qwen3-1.7b-4bit"),
-            declinedNoticeKey: "medium->qwen3-1.7b-4bit",
+            migration: ModelManager.Migration(from: "medium", to: "parakeet-tdt-v2"),
+            declinedNoticeKey: "medium->parakeet-tdt-v2",
             newModelDownloaded: false
         ))
     }
 
     func testDeclinedDownloadIgnoresDifferentMigrationKey() {
         XCTAssertFalse(ModelMigrationDeclineResolver.isDownloadDeclined(
-            migration: ModelManager.Migration(from: "small", to: "qwen3-0.6b-4bit"),
-            declinedNoticeKey: "medium->qwen3-1.7b-4bit",
+            migration: ModelManager.Migration(from: "small", to: "parakeet-tdt-v2"),
+            declinedNoticeKey: "medium->parakeet-tdt-v2",
             newModelDownloaded: false
         ))
     }
 
     func testDeclinedDownloadStopsBlockingWhenReplacementDownloaded() {
         XCTAssertFalse(ModelMigrationDeclineResolver.isDownloadDeclined(
-            migration: ModelManager.Migration(from: "medium", to: "qwen3-1.7b-4bit"),
-            declinedNoticeKey: "medium->qwen3-1.7b-4bit",
+            migration: ModelManager.Migration(from: "medium", to: "parakeet-tdt-v2"),
+            declinedNoticeKey: "medium->parakeet-tdt-v2",
             newModelDownloaded: true
         ))
     }

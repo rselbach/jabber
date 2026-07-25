@@ -37,16 +37,15 @@ enum Constants {
         /// `object` is the `MainWindowView.Section` to select. Observed by
         /// AppDelegate (which shows the window) and MainWindowView (which sets
         /// the sidebar selection when the window is already open). Used so a
-        /// menu item — Cmd-, (General), the status-menu Settings, Vocabulary —
+        /// menu item — Cmd-, (General), the status-menu Settings —
         /// can land on a page even when the window instance already exists (the
         /// window is retained across close/reopen, so its initial selection is
         /// only honored at creation time).
         static let mainWindowSectionDidRequest = Notification.Name("com.rselbach.jabber.mainWindowSectionDidRequest")
     }
 
-    /// Languages supported by Qwen3-ASR (per the model card).
-    /// Codes are passed verbatim as a decoder prompt prefix; unsupported codes
-    /// produce nonsense text and unpredictable results.
+    /// Languages offered by Jabber. Model compatibility is resolved separately
+    /// by `LanguageModelCatalog`.
     static let languages: [String: String] = [
         "arabic": "ar",
         "cantonese": "yue",

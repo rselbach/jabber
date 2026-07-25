@@ -1,22 +1,12 @@
 import Foundation
 
 enum AppMode {
-    static let qwen3ModelId = "qwen3"
-    static let qwen3Small4BitModelId = "qwen3-0.6b-4bit"
-    static let qwen3Small8BitModelId = "qwen3-0.6b-8bit"
-    static let qwen3Large4BitModelId = "qwen3-1.7b-4bit"
+    static let parakeetModelId = "parakeet-tdt-v2"
     static let nemotronModelId = "nemotron"
     static let appleSpeechModelId = "apple-speech"
 
-    static let qwen3ModelIds = [
-        qwen3ModelId,
-        qwen3Large4BitModelId,
-        qwen3Small8BitModelId,
-        qwen3Small4BitModelId
-    ]
-
     enum ModelFamily: String, CaseIterable {
-        case qwen3ASR
+        case parakeetTDT
         case nemotronASR
         case appleSpeech
     }
@@ -41,55 +31,16 @@ enum AppMode {
 
     static let modelDefinitions: [ModelDefinition] = [
         .init(
-            id: qwen3ModelId,
-            family: .qwen3ASR,
-            huggingFaceModelId: "aufklarer/Qwen3-ASR-1.7B-MLX-8bit",
-            name: "Qwen3-ASR 1.7B 8-bit",
-            description: "Qwen3-ASR 1.7B 8-bit — 52 languages, highest accuracy",
-            sizeHint: "~2.5GB",
-            supportedLanguageCodes: nil,
-            license: "Apache 2.0",
-            licenseUrl: "https://www.apache.org/licenses/LICENSE-2.0",
-            attribution: "Qwen3-ASR by Alibaba Qwen Team",
-            isBuiltIn: false
-        ),
-        .init(
-            id: qwen3Large4BitModelId,
-            family: .qwen3ASR,
-            huggingFaceModelId: "aufklarer/Qwen3-ASR-1.7B-MLX-4bit",
-            name: "Qwen3-ASR 1.7B 4-bit",
-            description: "Qwen3-ASR 1.7B 4-bit — 52 languages, smaller 1.7B download",
-            sizeHint: "~1.3GB",
-            supportedLanguageCodes: nil,
-            license: "Apache 2.0",
-            licenseUrl: "https://www.apache.org/licenses/LICENSE-2.0",
-            attribution: "Qwen3-ASR by Alibaba Qwen Team",
-            isBuiltIn: false
-        ),
-        .init(
-            id: qwen3Small8BitModelId,
-            family: .qwen3ASR,
-            huggingFaceModelId: "aufklarer/Qwen3-ASR-0.6B-MLX-8bit",
-            name: "Qwen3-ASR 0.6B 8-bit",
-            description: "Qwen3-ASR 0.6B 8-bit — 52 languages, smaller model",
-            sizeHint: "~1GB",
-            supportedLanguageCodes: nil,
-            license: "Apache 2.0",
-            licenseUrl: "https://www.apache.org/licenses/LICENSE-2.0",
-            attribution: "Qwen3-ASR by Alibaba Qwen Team",
-            isBuiltIn: false
-        ),
-        .init(
-            id: qwen3Small4BitModelId,
-            family: .qwen3ASR,
-            huggingFaceModelId: "aufklarer/Qwen3-ASR-0.6B-MLX-4bit",
-            name: "Qwen3-ASR 0.6B 4-bit",
-            description: "Qwen3-ASR 0.6B 4-bit — 52 languages, smallest Qwen option",
-            sizeHint: "~600MB",
-            supportedLanguageCodes: nil,
-            license: "Apache 2.0",
-            licenseUrl: "https://www.apache.org/licenses/LICENSE-2.0",
-            attribution: "Qwen3-ASR by Alibaba Qwen Team",
+            id: parakeetModelId,
+            family: .parakeetTDT,
+            huggingFaceModelId: "FluidInference/parakeet-tdt-0.6b-v2-coreml",
+            name: "Parakeet TDT v2",
+            description: "NVIDIA Parakeet TDT v2 — fast, accurate English transcription",
+            sizeHint: "~443MB",
+            supportedLanguageCodes: ["en"],
+            license: "CC BY 4.0",
+            licenseUrl: "https://creativecommons.org/licenses/by/4.0/",
+            attribution: "Parakeet TDT 0.6B v2 by NVIDIA; CoreML conversion by FluidInference",
             isBuiltIn: false
         ),
         .init(
@@ -126,31 +77,5 @@ enum AppMode {
 
     static func family(for modelId: String) -> ModelFamily? {
         modelDefinition(for: modelId)?.family
-    }
-
-    // MARK: - Legacy Qwen3 API (used by ModelManager migration)
-
-    struct Qwen3ASRVariant {
-        let modelId: String
-        let huggingFaceModelId: String
-        let name: String
-        let description: String
-        let sizeHint: String
-    }
-
-    static let qwen3ASRVariants: [Qwen3ASRVariant] = modelDefinitions
-        .filter { $0.family == .qwen3ASR }
-        .map {
-            .init(
-                modelId: $0.id,
-                huggingFaceModelId: $0.huggingFaceModelId,
-                name: $0.name,
-                description: $0.description,
-                sizeHint: $0.sizeHint
-            )
-        }
-
-    static func qwen3ASRVariant(for modelId: String) -> Qwen3ASRVariant? {
-        qwen3ASRVariants.first { $0.modelId == modelId }
     }
 }

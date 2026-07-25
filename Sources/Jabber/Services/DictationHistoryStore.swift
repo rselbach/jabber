@@ -402,10 +402,8 @@ actor DictationHistoryStore: DictationHistoryProtocol {
     }
 
     private static func modelName(for modelID: String) -> String {
-        // `modelDefinition` covers every family (Qwen3, Nemotron, Apple
-        // Speech); the qwen3ASRVariant lookup returned nil for non-Qwen ids and
-        // left history entries showing "nemotron" / "apple-speech" instead of
-        // their human-readable names.
+        // `modelDefinition` covers every model family and prevents history
+        // entries from being labeled with raw model ids.
         AppMode.modelDefinition(for: modelID)?.name ?? modelID
     }
 

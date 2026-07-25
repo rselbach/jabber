@@ -17,26 +17,28 @@ enum LanguageModelCatalog {
     static func routes(for languageCode: String) -> [Route] {
         if languageCode == "auto" {
             return [
+                .init(modelId: AppMode.appleSpeechModelId, isRecommended: true),
+                .init(modelId: AppMode.parakeetModelId, isRecommended: false),
                 .init(modelId: AppMode.nemotronModelId, isRecommended: false),
-                .init(modelId: AppMode.appleSpeechModelId, isRecommended: false)
-            ] + qwen3Routes(recommendedModelId: AppMode.qwen3ModelId)
+            ]
         }
 
         if languageCode == "en" {
             return [
-                .init(modelId: AppMode.nemotronModelId, isRecommended: true),
+                .init(modelId: AppMode.parakeetModelId, isRecommended: true),
+                .init(modelId: AppMode.nemotronModelId, isRecommended: false),
                 .init(modelId: AppMode.appleSpeechModelId, isRecommended: false)
-            ] + qwen3Routes()
+            ]
         }
 
-        return qwen3Routes(recommendedModelId: AppMode.qwen3ModelId) + [
-            .init(modelId: AppMode.appleSpeechModelId, isRecommended: false)
+        return [
+            .init(modelId: AppMode.appleSpeechModelId, isRecommended: true)
         ]
     }
 
     static func recommendedModelId(for languageCode: String) -> String {
         routes(for: languageCode).first(where: { $0.isRecommended })?.modelId
-            ?? AppMode.qwen3ModelId
+            ?? AppMode.appleSpeechModelId
     }
 
     static func compatibleModelIds(for languageCode: String) -> [String] {
@@ -58,11 +60,5 @@ enum LanguageModelCatalog {
 
     static func allLanguages() -> [(name: String, code: String)] {
         Constants.sortedLanguages
-    }
-
-    private static func qwen3Routes(recommendedModelId: String? = nil) -> [Route] {
-        AppMode.qwen3ModelIds.map {
-            .init(modelId: $0, isRecommended: $0 == recommendedModelId)
-        }
     }
 }

@@ -79,7 +79,7 @@ final class AppleSpeechProvider: TranscriptionProvider, @unchecked Sendable {
         }
     }
 
-    func transcribe(samples: [Float], language: String?, vocabularyPrompt: String?) async throws -> String {
+    func transcribe(samples: [Float], language: String?) async throws -> String {
         let initialState = state.withLock { $0 }
         guard initialState.ready else { throw TranscriptionError.loadFailed }
 

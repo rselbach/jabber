@@ -51,66 +51,42 @@ final class ModelManagerTests: XCTestCase {
         XCTAssertFalse(modelManager.models.isEmpty, "Should have model definitions")
 
         let modelIds = modelManager.models.map { $0.id }
-        XCTAssertTrue(modelIds.contains("qwen3"), "Should have Qwen3-ASR model")
-        XCTAssertTrue(modelIds.contains(AppMode.qwen3Small4BitModelId), "Should have Qwen3-ASR 0.6B 4-bit model")
-        XCTAssertTrue(modelIds.contains(AppMode.qwen3Small8BitModelId), "Should have Qwen3-ASR 0.6B 8-bit model")
-        XCTAssertTrue(modelIds.contains(AppMode.qwen3Large4BitModelId), "Should have Qwen3-ASR 1.7B 4-bit model")
-        XCTAssertTrue(modelIds.contains("nemotron"), "Should have Nemotron model")
-        XCTAssertTrue(modelIds.contains("apple-speech"), "Should have Apple Speech model")
-        XCTAssertFalse(modelIds.contains("parakeet"), "Should not expose Parakeet model")
-        XCTAssertEqual(modelIds.count, 6, "Should expose six models")
-    }
-
-    func testQwen3ASRVariantResolvesHuggingFaceId() {
         XCTAssertEqual(
-            ModelManager.qwen3ASRHuggingFaceModelId(for: AppMode.qwen3ModelId),
-            "aufklarer/Qwen3-ASR-1.7B-MLX-8bit"
+            modelIds,
+            [AppMode.parakeetModelId, AppMode.nemotronModelId, AppMode.appleSpeechModelId]
         )
-        XCTAssertEqual(
-            ModelManager.qwen3ASRHuggingFaceModelId(for: AppMode.qwen3Large4BitModelId),
-            "aufklarer/Qwen3-ASR-1.7B-MLX-4bit"
-        )
-        XCTAssertEqual(
-            ModelManager.qwen3ASRHuggingFaceModelId(for: AppMode.qwen3Small8BitModelId),
-            "aufklarer/Qwen3-ASR-0.6B-MLX-8bit"
-        )
-        XCTAssertEqual(
-            ModelManager.qwen3ASRHuggingFaceModelId(for: AppMode.qwen3Small4BitModelId),
-            "aufklarer/Qwen3-ASR-0.6B-MLX-4bit"
-        )
-        XCTAssertNil(ModelManager.qwen3ASRHuggingFaceModelId(for: "tiny"))
     }
 
     func testRefreshModelsUsesInjectedCacheDirectory() throws {
         let modelFolder = cacheBaseURL
             .appendingPathComponent("models", isDirectory: true)
-            .appendingPathComponent("aufklarer", isDirectory: true)
-            .appendingPathComponent("Qwen3-ASR-1.7B-MLX-8bit", isDirectory: true)
-        try createCompleteQwenModelFolder(at: modelFolder)
+            .appendingPathComponent("FluidInference", isDirectory: true)
+            .appendingPathComponent("parakeet-tdt-0.6b-v2-coreml", isDirectory: true)
+        try createCompleteParakeetModelFolder(at: modelFolder)
 
         modelManager.refreshModels()
 
-        let qwenModel = try XCTUnwrap(
-            modelManager.models.first { $0.id == AppMode.qwen3ModelId }
+        let parakeetModel = try XCTUnwrap(
+            modelManager.models.first { $0.id == AppMode.parakeetModelId }
         )
-        XCTAssertTrue(qwenModel.isDownloaded)
+        XCTAssertTrue(parakeetModel.isDownloaded)
     }
 
     func testDeleteModelRemovesNewAndLegacyCacheFolders() throws {
         let newModelFolder = cacheBaseURL
             .appendingPathComponent("models", isDirectory: true)
-            .appendingPathComponent("aufklarer", isDirectory: true)
-            .appendingPathComponent("Qwen3-ASR-1.7B-MLX-8bit", isDirectory: true)
-        try createCompleteQwenModelFolder(at: newModelFolder)
+            .appendingPathComponent("FluidInference", isDirectory: true)
+            .appendingPathComponent("parakeet-tdt-0.6b-v2-coreml", isDirectory: true)
+        try createCompleteParakeetModelFolder(at: newModelFolder)
 
         let legacyModelFolder = cacheBaseURL
             .appendingPathComponent(
-                HuggingFaceDownloader.sanitizedCacheKey(for: "aufklarer/Qwen3-ASR-1.7B-MLX-8bit"),
+                HuggingFaceDownloader.sanitizedCacheKey(for: "FluidInference/parakeet-tdt-0.6b-v2-coreml"),
                 isDirectory: true
             )
-        try createCompleteQwenModelFolder(at: legacyModelFolder)
+        try createCompleteParakeetModelFolder(at: legacyModelFolder)
 
-        try modelManager.deleteModel(AppMode.qwen3ModelId)
+        try modelManager.deleteModel(AppMode.parakeetModelId)
 
         XCTAssertFalse(
             FileManager.default.fileExists(atPath: newModelFolder.path),
@@ -121,10 +97,10 @@ final class ModelManagerTests: XCTestCase {
             "Legacy cache layout folder should be removed"
         )
 
-        let qwenModel = try XCTUnwrap(
-            modelManager.models.first { $0.id == AppMode.qwen3ModelId }
+        let parakeetModel = try XCTUnwrap(
+            modelManager.models.first { $0.id == AppMode.parakeetModelId }
         )
-        XCTAssertFalse(qwenModel.isDownloaded)
+        XCTAssertFalse(parakeetModel.isDownloaded)
     }
 
     func testMigrateLegacyUnavailableModelIds() {
@@ -132,7 +108,7 @@ final class ModelManagerTests: XCTestCase {
         let migration = modelManager.migrateSelectedModelIfNeeded()
         XCTAssertNotNil(migration)
         XCTAssertEqual(migration?.from, "small")
-        XCTAssertEqual(migration?.to, AppMode.qwen3Small4BitModelId)
+        XCTAssertEqual(migration?.to, AppMode.parakeetModelId)
         XCTAssertEqual(settings[.selectedModel], "small")
         XCTAssertEqual(modelManager.lastMigration?.from, "small")
 
@@ -140,23 +116,18 @@ final class ModelManagerTests: XCTestCase {
         let migration2 = modelManager.migrateSelectedModelIfNeeded()
         XCTAssertNotNil(migration2)
         XCTAssertEqual(migration2?.from, "large-v3")
-        XCTAssertEqual(migration2?.to, AppMode.qwen3ModelId)
+        XCTAssertEqual(migration2?.to, AppMode.parakeetModelId)
         XCTAssertEqual(settings[.selectedModel], "large-v3")
         XCTAssertEqual(modelManager.lastMigration?.from, "large-v3")
     }
 
-    func testMigrateOldQwen3VariantIds() {
-        settings[.selectedModel] = "base"
-        XCTAssertNotNil(modelManager.migrateSelectedModelIfNeeded())
-        XCTAssertEqual(settings[.selectedModel], "base")
-
-        settings[.selectedModel] = "medium"
-        XCTAssertNotNil(modelManager.migrateSelectedModelIfNeeded())
-        XCTAssertEqual(settings[.selectedModel], "medium")
-
-        settings[.selectedModel] = "large"
-        XCTAssertNotNil(modelManager.migrateSelectedModelIfNeeded())
-        XCTAssertEqual(settings[.selectedModel], "large")
+    func testMigrateRemovedQwenModelIdsToParakeet() {
+        for modelId in ["qwen3", "qwen3-0.6b-4bit", "qwen3-0.6b-8bit", "qwen3-1.7b-4bit"] {
+            settings[.selectedModel] = modelId
+            let migration = modelManager.migrateSelectedModelIfNeeded()
+            XCTAssertEqual(migration?.to, AppMode.parakeetModelId, modelId)
+            XCTAssertEqual(settings[.selectedModel], modelId)
+        }
     }
 
     func testMigrateExperimentalQwenModelIds() {
@@ -210,14 +181,14 @@ final class ModelManagerTests: XCTestCase {
     }
 
     func testModelPropertiesAreSet() {
-        guard let qwenModel = modelManager.models.first(where: { $0.id == "qwen3" }) else {
-            XCTFail("Qwen3-ASR model not found")
+        guard let parakeetModel = modelManager.models.first(where: { $0.id == AppMode.parakeetModelId }) else {
+            XCTFail("Parakeet model not found")
             return
         }
 
-        XCTAssertEqual(qwenModel.name, "Qwen3-ASR 1.7B 8-bit")
-        XCTAssertEqual(qwenModel.description, "Qwen3-ASR 1.7B 8-bit — 52 languages, highest accuracy")
-        XCTAssertEqual(qwenModel.sizeHint, "~2.5GB")
+        XCTAssertEqual(parakeetModel.name, "Parakeet TDT v2")
+        XCTAssertEqual(parakeetModel.description, "NVIDIA Parakeet TDT v2 — fast, accurate English transcription")
+        XCTAssertEqual(parakeetModel.sizeHint, "~443MB")
     }
 
     func testBuiltInModelAlwaysDownloaded() {
@@ -299,8 +270,8 @@ final class ModelManagerTests: XCTestCase {
     func testRemoveFailedDownloadFolderDeletesOnlyTargetModel() throws {
         let target = cacheBaseURL
             .appendingPathComponent("models", isDirectory: true)
-            .appendingPathComponent("aufklarer", isDirectory: true)
-            .appendingPathComponent("Qwen3-ASR-1.7B-MLX-8bit", isDirectory: true)
+            .appendingPathComponent("FluidInference", isDirectory: true)
+            .appendingPathComponent("parakeet-tdt-0.6b-v2-coreml", isDirectory: true)
         try FileManager.default.createDirectory(at: target, withIntermediateDirectories: true)
         try Data("partial".utf8).write(to: target.appendingPathComponent("config.json"))
 
@@ -308,11 +279,11 @@ final class ModelManagerTests: XCTestCase {
         let sibling = cacheBaseURL
             .appendingPathComponent("models", isDirectory: true)
             .appendingPathComponent("aufklarer", isDirectory: true)
-            .appendingPathComponent("Qwen3-ASR-1.7B-MLX-4bit", isDirectory: true)
+            .appendingPathComponent("Nemotron-Speech-Streaming-0.6B-CoreML-INT8", isDirectory: true)
         try FileManager.default.createDirectory(at: sibling, withIntermediateDirectories: true)
         try Data("partial".utf8).write(to: sibling.appendingPathComponent("config.json"))
 
-        modelManager.removeFailedDownloadFolder(for: AppMode.qwen3ModelId)
+        modelManager.removeFailedDownloadFolder(for: AppMode.parakeetModelId)
 
         XCTAssertFalse(
             FileManager.default.fileExists(atPath: target.path),
@@ -342,19 +313,19 @@ final class ModelManagerTests: XCTestCase {
     func testEnsureModelDownloadedReturnsExistingFolder() async throws {
         let modelFolder = cacheBaseURL
             .appendingPathComponent("models", isDirectory: true)
-            .appendingPathComponent("aufklarer", isDirectory: true)
-            .appendingPathComponent("Qwen3-ASR-1.7B-MLX-8bit", isDirectory: true)
-        try createCompleteQwenModelFolder(at: modelFolder)
+            .appendingPathComponent("FluidInference", isDirectory: true)
+            .appendingPathComponent("parakeet-tdt-0.6b-v2-coreml", isDirectory: true)
+        try createCompleteParakeetModelFolder(at: modelFolder)
 
-        let result = try await modelManager.ensureModelDownloaded(AppMode.qwen3ModelId)
+        let result = try await modelManager.ensureModelDownloaded(AppMode.parakeetModelId)
 
         XCTAssertEqual(result.path, modelFolder.path)
 
-        let qwenModel = try XCTUnwrap(
-            modelManager.models.first { $0.id == AppMode.qwen3ModelId }
+        let parakeetModel = try XCTUnwrap(
+            modelManager.models.first { $0.id == AppMode.parakeetModelId }
         )
-        XCTAssertTrue(qwenModel.isDownloaded)
-        XCTAssertEqual(qwenModel.downloadProgress, 1.0)
+        XCTAssertTrue(parakeetModel.isDownloaded)
+        XCTAssertEqual(parakeetModel.downloadProgress, 1.0)
     }
 
     func testDownloadModelForNonExistentModelThrows() async {
@@ -409,7 +380,7 @@ final class ModelManagerTests: XCTestCase {
 
     func testModelDownloadStateEquality() {
         let state1 = ModelDownloadState(
-            modelId: "qwen3",
+            modelId: AppMode.parakeetModelId,
             progress: 0.5,
             status: "Downloading...",
             phase: .progress,
@@ -418,7 +389,7 @@ final class ModelManagerTests: XCTestCase {
         )
 
         let state2 = ModelDownloadState(
-            modelId: "qwen3",
+            modelId: AppMode.parakeetModelId,
             progress: 0.5,
             status: "Downloading...",
             phase: .progress,
@@ -431,7 +402,7 @@ final class ModelManagerTests: XCTestCase {
 
     func testModelDownloadStateInequality() {
         let state1 = ModelDownloadState(
-            modelId: "qwen3",
+            modelId: AppMode.parakeetModelId,
             progress: 0.5,
             status: "Downloading...",
             phase: .progress,
@@ -456,7 +427,7 @@ final class ModelManagerTests: XCTestCase {
 
         for phase in phases {
             let state = ModelDownloadState(
-                modelId: "qwen3",
+                modelId: AppMode.parakeetModelId,
                 progress: 0.5,
                 status: "Test",
                 phase: phase,
@@ -473,20 +444,20 @@ final class ModelManagerTests: XCTestCase {
         XCTAssertEqual(uniqueIds.count, models.count, "All model IDs should be unique")
     }
 
-    private func createCompleteQwenModelFolder(at url: URL) throws {
+    private func createCompleteParakeetModelFolder(at url: URL) throws {
         try FileManager.default.createDirectory(
             at: url,
             withIntermediateDirectories: true
         )
-        let requiredFiles = [
-            "config.json",
-            "vocab.json",
-            "merges.txt",
-            "tokenizer_config.json",
-            "weights.safetensors"
-        ]
-        for fileName in requiredFiles {
+        for fileName in ModelInstallationValidator.requiredParakeetFiles {
             try Data("test".utf8).write(to: url.appendingPathComponent(fileName))
+        }
+        for directoryName in ModelInstallationValidator.requiredParakeetDirectories {
+            let directory = url.appendingPathComponent(directoryName, isDirectory: true)
+            try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+            try Data("test".utf8).write(
+                to: directory.appendingPathComponent(ModelInstallationValidator.coreMLBundleMarkerFile)
+            )
         }
     }
 }

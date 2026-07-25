@@ -24,13 +24,6 @@ Download the latest DMG from [Releases](../../releases), open it, and drag Jabbe
 
 ```bash
 swift build
-./scripts/build_mlx_metallib.sh debug
-```
-
-If the Metal library build reports a missing Xcode Metal Toolchain, install it:
-
-```bash
-xcodebuild -downloadComponent MetalToolchain
 ```
 
 For a release build with signing:
@@ -48,13 +41,9 @@ For a release build with signing:
 
 Model options are available in Jabber's main window (menu bar → **Open Jabber**, or **Cmd-,** while Jabber is active):
 
-- **Qwen3-ASR** — 52 languages, highest accuracy. Available in four sizes:
-  - 1.7B 8-bit (~2.5GB) — recommended for non-English
-  - 1.7B 4-bit (~1.3GB)
-  - 0.6B 8-bit (~1GB)
-  - 0.6B 4-bit (~600MB)
+- **Parakeet TDT v2** (~443MB) — fast, accurate English transcription on the Neural Engine
 - **Nemotron** (~600MB) — NVIDIA Nemotron Speech Streaming, English-only with native punctuation & capitalization
-- **Apple Speech** — built-in macOS 26 speech recognition, no download required
+- **Apple Speech** — built-in macOS 26 speech recognition, recommended for non-English dictation
 
 During onboarding, you'll pick a language and Jabber recommends the best model for it.
 
@@ -102,16 +91,17 @@ Jabber uses the following open-source models and libraries:
 
 | Model | Creator | License | Link |
 |-------|---------|---------|------|
-| Qwen3-ASR | Alibaba Qwen Team | [Apache 2.0](https://www.apache.org/licenses/LICENSE-2.0) | [huggingface.co/Qwen/Qwen3-ASR-0.6B](https://huggingface.co/Qwen/Qwen3-ASR-0.6B) |
+| Parakeet TDT 0.6B v2 | NVIDIA | [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/) | [huggingface.co/nvidia/parakeet-tdt-0.6b-v2](https://huggingface.co/nvidia/parakeet-tdt-0.6b-v2) |
 | Nemotron Speech Streaming | NVIDIA | [OpenMDW-1.1](https://www.openmodeldefinition.org/) | [huggingface.co/nvidia/nemotron-speech-streaming-en-0.6b](https://huggingface.co/nvidia/nemotron-speech-streaming-en-0.6b) |
 | Apple Speech | Apple | [Apple SLA](https://www.apple.com/legal/sla/) | Built-in macOS 26 Speech framework |
 
-Qwen3-ASR (MLX) and Nemotron (CoreML) conversions by [aufklarer](https://huggingface.co/aufklarer).
+Parakeet's CoreML conversion is maintained by [FluidInference](https://huggingface.co/FluidInference). Nemotron's CoreML conversion is by [aufklarer](https://huggingface.co/aufklarer).
 
 ### Libraries
 
 | Library | License | Link |
 |---------|---------|------|
+| [FluidAudio](https://github.com/FluidInference/FluidAudio) | Apache 2.0 | Parakeet ASR for Apple platforms |
 | [speech-swift](https://github.com/soniqo/speech-swift) | Apache 2.0 | ASR/TTS models for Apple Silicon |
 | [Sparkle](https://sparkle-project.org/) | MIT | Software update framework |
 | [mediaremote-adapter](https://github.com/ejbills/mediaremote-adapter) | MIT | Media remote control |

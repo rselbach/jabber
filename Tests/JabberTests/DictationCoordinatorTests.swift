@@ -145,7 +145,7 @@ final class DictationCoordinatorTests: XCTestCase {
 
     func testStopWithSpeechSavesDictationHistoryAfterTranscriptionCompletes() async {
         audioCapture.storedSamples = makeLoudSamples()
-        transcriptionService.currentModelID = AppMode.qwen3ModelId
+        transcriptionService.currentModelID = AppMode.parakeetModelId
         transcriptionService.transcribeResult = .success(" troy and abed in the morning ")
 
         let idleExpectation = XCTestExpectation(description: "coordinator returns to idle")
@@ -163,7 +163,7 @@ final class DictationCoordinatorTests: XCTestCase {
         XCTAssertEqual(dictationHistoryStore.sessions.count, 1)
         XCTAssertEqual(dictationHistoryStore.sessions[0].samples, audioCapture.storedSamples)
         XCTAssertEqual(dictationHistoryStore.sessions[0].transcript, " troy and abed in the morning ")
-        XCTAssertEqual(dictationHistoryStore.sessions[0].modelID, AppMode.qwen3ModelId)
+        XCTAssertEqual(dictationHistoryStore.sessions[0].modelID, AppMode.parakeetModelId)
         XCTAssertEqual(dictationHistoryStore.sessions[0].language, Constants.defaultLanguage)
     }
 
@@ -323,16 +323,9 @@ final class DictationCoordinatorTests: XCTestCase {
         coordinator.cancel()
     }
 
-    // Regression: a buffer larger than the 15s preview window must be windowed
-    // for preview transcription, not transcribed in full each tick. Without
-    // windowing, per-tick preview cost grows O(n) in session length (a full
-    // array copy + a full-buffer transcode every 500ms), i.e. O(n^2) over the
-    // session. The final transcription (stop()) still uses the full buffer.
-    func testStreamingPreviewWindowsInputToBoundedRecentSamples() async throws {
-        // 17.5s of loud samples (280_000) exceeds the 15s default window
-        // (240_000), so the preview must transcribe only the last 240_000.
+    func testStreamingPreviewUsesCompleteAudioPrefix() async throws {
         audioCapture.storedSamples = makeLoudSamples(count: 280_000)
-        transcriptionService.streamingResult = .success("recent speech")
+        transcriptionService.streamingResult = .success("complete speech")
 
         let partialExpectation = XCTestExpectation(description: "partial transcription published")
         coordinator.onPartialTranscription = { _ in partialExpectation.fulfill() }
@@ -340,15 +333,8 @@ final class DictationCoordinatorTests: XCTestCase {
         XCTAssertTrue(coordinator.start())
         await fulfillment(of: [partialExpectation], timeout: 1.0)
 
-        // The preview transcribed the bounded window, not the full 280_000.
-        XCTAssertEqual(transcriptionService.streamingSampleCounts, [240_000])
-
-        // The window has slid past the buffer start, so the slice is no
-        // longer a prefix-extension of the previous tick's: the preview must
-        // reset streaming state (once at loop start, once for the slide) so
-        // stateful providers re-transcribe the window instead of computing a
-        // misaligned delta.
-        XCTAssertEqual(transcriptionService.resetStreamingCallCount, 2)
+        XCTAssertEqual(transcriptionService.streamingSampleCounts, [280_000])
+        XCTAssertEqual(transcriptionService.resetStreamingCallCount, 1)
 
         coordinator.cancel()
         try await Task.sleep(for: .milliseconds(20))
@@ -785,7 +771,7 @@ final class DictationCoordinatorTests: XCTestCase {
     func testPostProcessingEmptyResultIsSuccessfulCancel() async {
         enablePostProcessing()
         postProcessor.isAvailable = true
-        // FluidVoice-style full self-correction ("scratch that" / "cancel")
+        // Full self-correction ("scratch that" / "cancel")
         // makes the model return empty/whitespace. That is a valid success,
         // not a fallback.
         postProcessor.result = .success("   ")
@@ -820,10 +806,10 @@ final class DictationCoordinatorTests: XCTestCase {
         XCTAssertNil(session.postProcessingErrorDescription)
     }
 
-    func testPostProcessingInstructionsContainFluidVoiceCapabilities() {
+    func testPostProcessingInstructionsContainDictationCapabilities() {
         // Guards against accidental regressions in the dictation prompt's
         // breadth. Does not assert Apple model output, only that the key
-        // FluidVoice-style capabilities are present in the instructions.
+        // Dictation capabilities are present in the instructions.
         let prompt = AppleIntelligencePostProcessor.instructions
         XCTAssertTrue(prompt.contains("EXECUTE commands"))
         XCTAssertTrue(prompt.contains("scratch that"))
@@ -1215,11 +1201,6 @@ final class FakeAudioCapture: AudioCaptureProtocol, @unchecked Sendable {
     func sampleCount() -> Int {
         storedSamples.count
     }
-
-    func recentSamples(maxCount: Int) -> [Float] {
-        guard storedSamples.count > maxCount else { return storedSamples }
-        return Array(storedSamples.suffix(maxCount))
-    }
 }
 
 final class FakeTranscriptionService: TranscriptionProtocol, @unchecked Sendable {
@@ -1233,7 +1214,6 @@ final class FakeTranscriptionService: TranscriptionProtocol, @unchecked Sendable
 
     private let lock = NSLock()
     private var _supportsStreamingTranscription = true
-    private var _vocabularyPrompt: String?
     private var _language: String?
     private var _streamingResult: Result<String, Error> = .success("")
     private var _transcribeResult: Result<String, Error> = .success("")
@@ -1256,11 +1236,6 @@ final class FakeTranscriptionService: TranscriptionProtocol, @unchecked Sendable
     var supportsStreamingTranscription: Bool {
         get { lock.withLock { _supportsStreamingTranscription } }
         set { lock.withLock { _supportsStreamingTranscription = newValue } }
-    }
-
-    var vocabularyPrompt: String? {
-        get { lock.withLock { _vocabularyPrompt } }
-        set { lock.withLock { _vocabularyPrompt = newValue } }
     }
 
     var language: String? {
@@ -1346,10 +1321,6 @@ final class FakeTranscriptionService: TranscriptionProtocol, @unchecked Sendable
 
     var transcribeCompletionCount: Int {
         lock.withLock { _transcribeCompletionCount }
-    }
-
-    func setVocabularyPrompt(_ prompt: String) async {
-        vocabularyPrompt = prompt
     }
 
     func setLanguage(_ language: String) async {

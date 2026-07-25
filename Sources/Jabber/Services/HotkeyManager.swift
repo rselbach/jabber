@@ -649,8 +649,8 @@ struct ModifierOnlyGestureReducer: Sendable, Equatable {
         case tapDisabled
     }
 
-    /// Debounce applied before `onKeyDown` fires. Matches the FluidVoice
-    /// approach (~150ms): long enough to reject Option+key typing and chatter,
+    /// Debounce applied before `onKeyDown` fires. The interval is long enough
+    /// to reject Option+key typing and chatter,
     /// short enough to feel instantaneous for an intentional hold.
     static let debounceInterval: TimeInterval = 0.15
 

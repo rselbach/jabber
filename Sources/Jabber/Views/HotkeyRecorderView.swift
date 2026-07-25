@@ -162,7 +162,7 @@ private final class EventMonitorHandle {
 /// modifier flag inputs and maps the returned `Outcome` to recording side
 /// effects.
 ///
-/// Behaviour (mirrors the FluidVoice recorder):
+/// Recorder behavior:
 /// - Pressing a standalone modifier on its own (no other modifiers held) arms a
 ///   pending modifier-only candidate but does NOT commit. This is what lets
 ///   combos like Left Option+Space still record: Space arrives as a key-down

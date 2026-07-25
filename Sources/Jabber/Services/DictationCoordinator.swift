@@ -449,7 +449,7 @@ final class DictationCoordinator {
             let decodeStartedAt = ContinuousClock.now
             let text = try await transcriptionService.transcribeStreaming(samples: previewSamples)
             let decodeMilliseconds = (ContinuousClock.now - decodeStartedAt).wholeMilliseconds
-            logger.info("Preview tick: \(previewAudioMilliseconds) ms audio decoded in \(decodeMilliseconds) ms")
+            logger.notice("Preview tick: \(previewAudioMilliseconds) ms audio decoded in \(decodeMilliseconds) ms")
             try Task.checkCancellation()
 
             guard currentSessionID == sessionID, state == .recording else { return }
@@ -622,7 +622,7 @@ final class DictationCoordinator {
         let history = (historyFinishedAt - historyStartedAt).wholeMilliseconds
         let total = (finishedAt - stopStartedAt).wholeMilliseconds
 
-        logger.info(
+        logger.notice(
             "Dictation pipeline: total \(total) ms; capture shutdown \(capture) ms; final queue \(finalQueue) ms; ASR \(asr) ms; refinement \(refinement) ms; history \(history) ms"
         )
     }

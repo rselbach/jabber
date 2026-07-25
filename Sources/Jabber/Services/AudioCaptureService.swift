@@ -170,7 +170,7 @@ final class AudioCaptureService {
                 throw error
             }
         }
-        logger.info("Audio capture engine ready in \((ContinuousClock.now - startedAt).wholeMilliseconds) ms")
+        logger.notice("Audio capture engine ready in \((ContinuousClock.now - startedAt).wholeMilliseconds) ms")
     }
 
     private func handleConfigurationChange() {
@@ -179,7 +179,7 @@ final class AudioCaptureService {
         needsRebuild = true
 
         guard isCapturing else {
-            logger.info("Audio engine configuration changed while idle; rebuilding")
+            logger.notice("Audio engine configuration changed while idle; rebuilding")
             teardownEngine()
             prepare()
             return
@@ -208,7 +208,7 @@ final class AudioCaptureService {
         standbyTask = nil
         guard !isCapturing, let engine = engineStorage as? AVAudioEngine, engine.isRunning else { return }
         engine.stop()
-        logger.info("Audio engine stopped after standby")
+        logger.notice("Audio engine stopped after standby")
     }
 
     private func teardownEngine() {
@@ -347,7 +347,7 @@ final class AudioCaptureService {
         }
 
         if let firstAudioDelay {
-            logger.info("First audio arrived \(firstAudioDelay.wholeMilliseconds) ms after capture start")
+            logger.notice("First audio arrived \(firstAudioDelay.wholeMilliseconds) ms after capture start")
         }
     }
 

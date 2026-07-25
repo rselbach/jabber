@@ -171,8 +171,12 @@ final class DictationCoordinator {
         mediaPlaybackService: any MediaPlaybackProtocol = MediaPlaybackService.shared,
         dictationHistoryStore: any DictationHistoryProtocol = DictationHistoryStore.shared,
         postProcessingProvider: (any PostProcessingProvider)? = RoutedPostProcessor(),
-        streamingPreviewInterval: Duration = .milliseconds(400),
-        minimumStreamingPreviewSampleCount: Int = 16_000,
+        // A preview decode of a 15-second prefix costs well under 100 ms, so a
+        // 300 ms cadence stays cheap, and half a second of audio is already
+        // enough for Parakeet to return the opening words. FluidAudio itself
+        // refuses anything shorter than 0.3 s.
+        streamingPreviewInterval: Duration = .milliseconds(300),
+        minimumStreamingPreviewSampleCount: Int = 8_000,
         streamingPreviewStopTimeout: Duration = .seconds(5),
         maxRecordingDuration: Duration = .seconds(900),
         isPostProcessingEnabled: @escaping @MainActor () -> Bool = { TypedSettings[.postProcessingEnabled] },
@@ -394,7 +398,14 @@ final class DictationCoordinator {
         await transcriptionService.resetStreamingTranscription()
         await applyCurrentTranscriptionSettings()
 
+        // Decode first and sleep afterwards: waiting a full interval before the
+        // first pass pushed the opening preview a whole tick later than the
+        // audio it needed was available.
         while !Task.isCancelled {
+            guard currentSessionID == sessionID, state == .recording else { break }
+            await publishStreamingPreviewIfAvailable(sessionID: sessionID)
+
+            guard !Task.isCancelled else { break }
             do {
                 try await Task.sleep(for: streamingPreviewInterval)
             } catch is CancellationError {
@@ -403,10 +414,6 @@ final class DictationCoordinator {
                 logger.error("Streaming preview sleep failed: \(error.localizedDescription)")
                 break
             }
-
-            guard !Task.isCancelled else { break }
-            guard currentSessionID == sessionID, state == .recording else { break }
-            await publishStreamingPreviewIfAvailable(sessionID: sessionID)
         }
     }
 
@@ -419,12 +426,12 @@ final class DictationCoordinator {
         guard totalCount >= minimumStreamingPreviewSampleCount else { return }
         guard totalCount > lastStreamingPreviewSampleCount else { return }
 
+        // No speech gate here: it measured RMS across the whole prefix, so a
+        // pause before speaking or a quiet microphone suppressed every preview
+        // of the session. Silence decodes to empty text, which the publish
+        // guard below already drops.
         let previewSamples = audioCapture.currentSamples()
         let previewAudioMilliseconds = previewSamples.count * 1_000 / 16_000
-        guard AudioSpeechDetector.assess(samples: previewSamples).shouldTranscribe else {
-            logger.debug("Preview tick skipped: no speech in \(previewAudioMilliseconds) ms of audio")
-            return
-        }
 
         do {
             let decodeStartedAt = ContinuousClock.now

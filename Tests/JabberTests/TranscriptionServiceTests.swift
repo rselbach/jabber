@@ -12,6 +12,21 @@ final class TranscriptionServiceTests: XCTestCase {
         ).supportsStreamingTranscription)
     }
 
+    func testParakeetModelIdSelectsTheMatchingModelVersion() {
+        XCTAssertEqual(ParakeetASRProvider.modelVersion(for: AppMode.parakeetModelId), .v2)
+        XCTAssertEqual(ParakeetASRProvider.modelVersion(for: AppMode.parakeetMultilingualModelId), .v3)
+    }
+
+    func testParakeetLanguageHintMapsKnownCodesOnly() {
+        XCTAssertEqual(ParakeetASRProvider.languageHint(for: "de"), .german)
+        XCTAssertEqual(ParakeetASRProvider.languageHint(for: "ru"), .russian)
+        XCTAssertEqual(ParakeetASRProvider.languageHint(for: "el"), .greek)
+        // Auto-detect and languages the model does not know decode unfiltered.
+        XCTAssertNil(ParakeetASRProvider.languageHint(for: nil))
+        XCTAssertNil(ParakeetASRProvider.languageHint(for: "ja"))
+        XCTAssertNil(ParakeetASRProvider.languageHint(for: "xx"))
+    }
+
     func testParakeetReusesRecentPreviewWithCompleteCoverage() {
         XCTAssertTrue(ParakeetASRProvider.canReuseStreamingPreview(
             text: "Troy and Abed in the morning",

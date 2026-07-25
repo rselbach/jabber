@@ -53,7 +53,12 @@ final class ModelManagerTests: XCTestCase {
         let modelIds = modelManager.models.map { $0.id }
         XCTAssertEqual(
             modelIds,
-            [AppMode.parakeetModelId, AppMode.nemotronModelId, AppMode.appleSpeechModelId]
+            [
+                AppMode.parakeetModelId,
+                AppMode.parakeetMultilingualModelId,
+                AppMode.nemotronModelId,
+                AppMode.appleSpeechModelId
+            ]
         )
     }
 

@@ -20,7 +20,8 @@ final class LanguageModelCatalogTests: XCTestCase {
         XCTAssertTrue(route.contains { $0.modelId == AppMode.nemotronModelId })
     }
 
-    func testNonEnglishLanguageOnlyOffersAppleSpeech() {
+    func testLanguageOutsideEveryLocalModelOnlyOffersAppleSpeech() {
+        // Japanese is beyond Parakeet v3's 25 European languages.
         XCTAssertEqual(
             LanguageModelCatalog.compatibleModelIds(for: "ja"),
             [AppMode.appleSpeechModelId]
@@ -29,6 +30,52 @@ final class LanguageModelCatalogTests: XCTestCase {
             LanguageModelCatalog.recommendedModelId(for: "ja"),
             AppMode.appleSpeechModelId
         )
+    }
+
+    func testEuropeanLanguagesRecommendMultilingualParakeet() {
+        let cases: [String: String] = [
+            "german uses latin script": "de",
+            "portuguese uses latin script": "pt",
+            "russian uses cyrillic script": "ru",
+            "greek uses its own script": "el"
+        ]
+
+        for (name, code) in cases {
+            let route = LanguageModelCatalog.routes(for: code)
+
+            XCTAssertEqual(route.first?.modelId, AppMode.parakeetMultilingualModelId, name)
+            XCTAssertTrue(route.first?.isRecommended == true, name)
+            XCTAssertEqual(
+                LanguageModelCatalog.recommendedModelId(for: code),
+                AppMode.parakeetMultilingualModelId,
+                name
+            )
+            XCTAssertTrue(route.contains { $0.modelId == AppMode.appleSpeechModelId }, name)
+        }
+    }
+
+    func testEnglishStillPrefersTheEnglishOnlyModel() {
+        // v3 is offered for English but v2 scores better on it.
+        let route = LanguageModelCatalog.routes(for: "en")
+
+        XCTAssertEqual(route.first?.modelId, AppMode.parakeetModelId)
+        XCTAssertTrue(route.contains { $0.modelId == AppMode.parakeetMultilingualModelId })
+    }
+
+    func testMultilingualParakeetAcceptsItsLanguagesAndRejectsOthers() {
+        for code in ["en", "de", "ru", "el", "pl"] {
+            XCTAssertTrue(
+                LanguageModelCatalog.supportsLanguage(code, modelId: AppMode.parakeetMultilingualModelId),
+                code
+            )
+        }
+
+        for code in ["ja", "zh", "ar", "hi"] {
+            XCTAssertFalse(
+                LanguageModelCatalog.supportsLanguage(code, modelId: AppMode.parakeetMultilingualModelId),
+                code
+            )
+        }
     }
 
     func testUnknownLanguageFallsBackToAppleSpeech() {

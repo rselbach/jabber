@@ -16,17 +16,29 @@ enum LanguageModelCatalog {
 
     static func routes(for languageCode: String) -> [Route] {
         if languageCode == "auto" {
+            // Apple Speech leads because it covers every language Jabber
+            // offers; Parakeet v3 needs the language named to pick a script.
             return [
                 .init(modelId: AppMode.appleSpeechModelId, isRecommended: true),
+                .init(modelId: AppMode.parakeetMultilingualModelId, isRecommended: false),
                 .init(modelId: AppMode.parakeetModelId, isRecommended: false),
                 .init(modelId: AppMode.nemotronModelId, isRecommended: false),
             ]
         }
 
         if languageCode == "en" {
+            // v2 is English-only and more accurate on it than multilingual v3.
             return [
                 .init(modelId: AppMode.parakeetModelId, isRecommended: true),
+                .init(modelId: AppMode.parakeetMultilingualModelId, isRecommended: false),
                 .init(modelId: AppMode.nemotronModelId, isRecommended: false),
+                .init(modelId: AppMode.appleSpeechModelId, isRecommended: false)
+            ]
+        }
+
+        if AppMode.parakeetMultilingualLanguageCodes.contains(languageCode) {
+            return [
+                .init(modelId: AppMode.parakeetMultilingualModelId, isRecommended: true),
                 .init(modelId: AppMode.appleSpeechModelId, isRecommended: false)
             ]
         }

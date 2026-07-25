@@ -27,10 +27,26 @@ final class ParakeetASRProvider: TranscriptionProvider, @unchecked Sendable {
         true
     }
 
+    /// v3 is the multilingual model; every other Parakeet id Jabber ships is
+    /// the English-only v2.
+    nonisolated static func modelVersion(for modelId: String) -> AsrModelVersion {
+        modelId == AppMode.parakeetMultilingualModelId ? .v3 : .v2
+    }
+
+    /// Maps a Jabber language code onto FluidAudio's hint, which drives
+    /// script-aware token filtering on v3 — it suppresses Cyrillic candidates
+    /// while transcribing Polish, and Latin ones while transcribing Russian.
+    /// Nil for auto-detect, for languages the model does not know, and for v2,
+    /// which ignores the hint entirely.
+    nonisolated static func languageHint(for code: String?) -> Language? {
+        guard let code else { return nil }
+        return Language(rawValue: code)
+    }
+
     func load(from cacheDir: URL, progressHandler: (@Sendable (Double, String) -> Void)?) async throws {
         let models = try await AsrModels.load(
             from: cacheDir,
-            version: .v2,
+            version: Self.modelVersion(for: modelId),
             progressHandler: { progress in
                 progressHandler?(progress.fractionCompleted, Self.status(for: progress.phase))
             }
@@ -41,7 +57,7 @@ final class ParakeetASRProvider: TranscriptionProvider, @unchecked Sendable {
         readyState.withLock { $0 = true }
     }
 
-    func transcribe(samples: [Float], language _: String?) async throws -> String {
+    func transcribe(samples: [Float], language: String?) async throws -> String {
         guard let manager = finalManager else {
             throw TranscriptionError.loadFailed
         }
@@ -66,18 +82,26 @@ final class ParakeetASRProvider: TranscriptionProvider, @unchecked Sendable {
 
         let decoderLayers = await manager.decoderLayerCount
         var decoderState = try TdtDecoderState(decoderLayers: decoderLayers)
-        let result = try await manager.transcribe(samples, decoderState: &decoderState)
+        let result = try await manager.transcribe(
+            samples,
+            decoderState: &decoderState,
+            language: Self.languageHint(for: language)
+        )
         return result.text.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
-    func transcribeStreaming(samples: [Float], language _: String?) async throws -> String {
+    func transcribeStreaming(samples: [Float], language: String?) async throws -> String {
         guard let manager = streamingManager else {
             throw TranscriptionError.loadFailed
         }
 
         let decoderLayers = await manager.decoderLayerCount
         var decoderState = try TdtDecoderState(decoderLayers: decoderLayers)
-        let result = try await manager.transcribe(samples, decoderState: &decoderState)
+        let result = try await manager.transcribe(
+            samples,
+            decoderState: &decoderState,
+            language: Self.languageHint(for: language)
+        )
         let text = result.text.trimmingCharacters(in: .whitespacesAndNewlines)
         latestStreamingPreview = StreamingPreview(
             text: text,

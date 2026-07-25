@@ -2,8 +2,18 @@ import Foundation
 
 enum AppMode {
     static let parakeetModelId = "parakeet-tdt-v2"
+    static let parakeetMultilingualModelId = "parakeet-tdt-v3"
     static let nemotronModelId = "nemotron"
     static let appleSpeechModelId = "apple-speech"
+
+    /// Languages Parakeet TDT v3 transcribes, from NVIDIA's model card. The
+    /// wider set is deliberate: it also names languages Jabber does not offer
+    /// yet, so adding one to `Constants.languages` routes to v3 for free.
+    static let parakeetMultilingualLanguageCodes: Set<String> = [
+        "be", "bg", "bs", "cs", "da", "de", "el", "en", "es", "et", "fi", "fr",
+        "hr", "hu", "it", "lt", "lv", "mt", "nl", "pl", "pt", "ro", "ru", "sk",
+        "sl", "sr", "sv", "uk"
+    ]
 
     enum ModelFamily: String, CaseIterable {
         case parakeetTDT
@@ -41,6 +51,19 @@ enum AppMode {
             license: "CC BY 4.0",
             licenseUrl: "https://creativecommons.org/licenses/by/4.0/",
             attribution: "Parakeet TDT 0.6B v2 by NVIDIA; CoreML conversion by FluidInference",
+            isBuiltIn: false
+        ),
+        .init(
+            id: parakeetMultilingualModelId,
+            family: .parakeetTDT,
+            huggingFaceModelId: "FluidInference/parakeet-tdt-0.6b-v3-coreml",
+            name: "Parakeet TDT v3",
+            description: "NVIDIA Parakeet TDT v3 — 25 European languages at v2's speed",
+            sizeHint: "~443MB",
+            supportedLanguageCodes: parakeetMultilingualLanguageCodes,
+            license: "CC BY 4.0",
+            licenseUrl: "https://creativecommons.org/licenses/by/4.0/",
+            attribution: "Parakeet TDT 0.6B v3 by NVIDIA; CoreML conversion by FluidInference",
             isBuiltIn: false
         ),
         .init(

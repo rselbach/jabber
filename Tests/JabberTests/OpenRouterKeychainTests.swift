@@ -69,6 +69,11 @@ final class OpenRouterKeychainTests: XCTestCase {
         XCTAssertNoThrow(try OpenRouterKeychain.deleteKey(service: service, account: account))
     }
 
+    func testCloudProviderAccountsAreDistinct() {
+        XCTAssertEqual(OpenRouterKeychain.service, OpenCodeZenKeychain.service)
+        XCTAssertNotEqual(OpenRouterKeychain.account, OpenCodeZenKeychain.account)
+    }
+
     private func accessibilityMatchStatus() -> OSStatus {
         let query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,

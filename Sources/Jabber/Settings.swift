@@ -16,6 +16,7 @@ enum TypedSetting<T>: Sendable {
     case replacementEntries
     case postProcessingProviderKind
     case openRouterModel
+    case openCodeZenModel
     case lastModelMigrationNoticeKey
     case declinedModelMigrationNoticeKey
 
@@ -29,6 +30,7 @@ enum TypedSetting<T>: Sendable {
         case .replacementEntries: return AppSettingKey.replacementEntries
         case .postProcessingProviderKind: return AppSettingKey.postProcessingProviderKind
         case .openRouterModel: return AppSettingKey.openRouterModel
+        case .openCodeZenModel: return AppSettingKey.openCodeZenModel
         case .lastModelMigrationNoticeKey: return AppSettingKey.lastModelMigrationNoticeKey
         case .declinedModelMigrationNoticeKey: return AppSettingKey.declinedModelMigrationNoticeKey
         }
@@ -114,6 +116,8 @@ extension TypedSetting where T == String {
             return PostProcessingProviderKind.defaultValue.rawValue
         case .openRouterModel:
             return OpenRouterModelCatalog.defaultModelId
+        case .openCodeZenModel:
+            return OpenCodeZenModelCatalog.defaultModelId
         case .lastModelMigrationNoticeKey:
             return ""
         case .declinedModelMigrationNoticeKey:
@@ -160,6 +164,8 @@ struct SettingsStore: Sendable {
             return PostProcessingProviderKind.resolve(rawValue: rawValue).rawValue
         case .openRouterModel:
             return OpenRouterModelCatalog.resolveModelId(rawValue)
+        case .openCodeZenModel:
+            return OpenCodeZenModelCatalog.resolveModelId(rawValue)
         case .selectedModel, .selectedLanguage, .replacementEntries,
              .lastModelMigrationNoticeKey, .declinedModelMigrationNoticeKey:
             return rawValue
@@ -168,7 +174,7 @@ struct SettingsStore: Sendable {
 
     /// One explicit migration pass over stored string settings whose raw value
     /// may be stale after an app update (removed enum case, renamed output
-    /// mode, dropped OpenRouter slug). Writes only when a stored value differs
+    /// mode, dropped cloud-model slug). Writes only when a stored value differs
     /// from its canonical resolution, so it is idempotent: re-running each
     /// launch is a cheap no-op once migrated. Call at launch before SwiftUI
     /// views mount so `@AppStorage` reads never observe a stale value.
@@ -176,7 +182,8 @@ struct SettingsStore: Sendable {
         for setting in [TypedSetting<String>.outputMode,
                         .hotkeyActivationMode,
                         .postProcessingProviderKind,
-                        .openRouterModel] {
+                        .openRouterModel,
+                        .openCodeZenModel] {
             let raw = userDefaults.string(forKey: setting.key) ?? setting.default
             let resolved = Self.resolvedValue(for: setting, rawValue: raw)
             if resolved != raw {

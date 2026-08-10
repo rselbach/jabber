@@ -285,6 +285,106 @@ final class OpenRouterPostProcessorTests: XCTestCase {
     }
 }
 
+final class OpenCodeZenPostProcessorTests: XCTestCase {
+    private let testKey = "zen-test-greendale-abc"
+
+    func testAvailabilityAndDisplayName() {
+        XCTAssertFalse(OpenCodeZenPostProcessor(apiKey: " \n ").isAvailable)
+        XCTAssertTrue(OpenCodeZenPostProcessor(apiKey: testKey).isAvailable)
+        XCTAssertEqual(OpenCodeZenPostProcessor(apiKey: testKey).displayName, "OpenCode Zen")
+    }
+
+    func testProcessReturnsContentAndSendsZenRequestShape() async throws {
+        let captured = RequestCapture()
+        let provider = OpenCodeZenPostProcessor(
+            apiKey: testKey,
+            modelId: "minimax-m3",
+            transport: captured.transportReturning(
+                body: #"{"choices":[{"message":{"content":"Hello from Greendale."}}]}"#
+            )
+        )
+
+        let result = try await provider.process("um hello from greendale")
+        XCTAssertEqual(result, "Hello from Greendale.")
+
+        let request = try XCTUnwrap(captured.requests.first)
+        XCTAssertEqual(request.httpMethod, "POST")
+        XCTAssertEqual(request.url, OpenCodeZenPostProcessor.endpoint)
+        XCTAssertEqual(request.timeoutInterval, OpenCodeZenPostProcessor.requestTimeout)
+        XCTAssertEqual(request.value(forHTTPHeaderField: "Content-Type"), "application/json")
+        XCTAssertEqual(request.value(forHTTPHeaderField: "Authorization"), "Bearer \(testKey)")
+        XCTAssertNil(request.value(forHTTPHeaderField: "X-Title"))
+        XCTAssertNil(request.value(forHTTPHeaderField: "HTTP-Referer"))
+
+        let body = try XCTUnwrap(request.httpBody)
+        let json = try XCTUnwrap(try JSONSerialization.jsonObject(with: body) as? [String: Any])
+        XCTAssertEqual(json["model"] as? String, "minimax-m3")
+        XCTAssertEqual(json["stream"] as? Bool, false)
+        XCTAssertEqual(json["temperature"] as? Int, 0)
+
+        let messages = try XCTUnwrap(json["messages"] as? [[String: Any]])
+        XCTAssertEqual(messages.count, 2)
+        XCTAssertEqual(messages[0]["role"] as? String, "system")
+        XCTAssertEqual(messages[0]["content"] as? String, AppleIntelligencePostProcessor.instructions)
+        XCTAssertEqual(messages[1]["role"] as? String, "user")
+        XCTAssertEqual(messages[1]["content"] as? String, "um hello from greendale")
+    }
+
+    func testUnknownModelFallsBackToDefault() async throws {
+        let captured = RequestCapture()
+        let provider = OpenCodeZenPostProcessor(
+            apiKey: testKey,
+            modelId: "gpt-5.4-mini",
+            transport: captured.transportReturning(
+                body: #"{"choices":[{"message":{"content":"ok"}}]}"#
+            )
+        )
+
+        _ = try await provider.process("cool cool cool")
+
+        let body = try XCTUnwrap(captured.requests.first?.httpBody)
+        let json = try XCTUnwrap(try JSONSerialization.jsonObject(with: body) as? [String: Any])
+        XCTAssertEqual(json["model"] as? String, OpenCodeZenModelCatalog.defaultModelId)
+    }
+
+    func testMissingKeyUsesZenSpecificError() async {
+        let provider = OpenCodeZenPostProcessor(
+            apiKey: " ",
+            transport: RequestCapture().transportReturning(body: "{}")
+        )
+
+        do {
+            _ = try await provider.process("hello")
+            XCTFail("Expected missingApiKey")
+        } catch let error as OpenCodeZenPostProcessingError {
+            XCTAssertEqual(error, .missingApiKey)
+            XCTAssertEqual(error.errorDescription, "OpenCode Zen API key is not set.")
+        } catch {
+            XCTFail("Unexpected error: \(error)")
+        }
+    }
+
+    func testHTTPFailureUsesZenSpecificErrorAndMessage() async {
+        let provider = OpenCodeZenPostProcessor(
+            apiKey: testKey,
+            transport: RequestCapture().transportReturning(
+                body: #"{"error":{"message":"No more credits, Troy."}}"#,
+                status: 402
+            )
+        )
+
+        do {
+            _ = try await provider.process("hello")
+            XCTFail("Expected httpFailure")
+        } catch let error as OpenCodeZenPostProcessingError {
+            XCTAssertEqual(error, .httpFailure(402, "No more credits, Troy."))
+            XCTAssertEqual(error.errorDescription, "OpenCode Zen returned HTTP 402: No more credits, Troy.")
+        } catch {
+            XCTFail("Unexpected error: \(error)")
+        }
+    }
+}
+
 // MARK: - Request capture helper
 
 private func extractHttpFailureMessage(_ error: OpenRouterPostProcessingError) -> String? {
@@ -304,14 +404,14 @@ private final class RequestCapture: @unchecked Sendable {
 
     func transportReturning(body: String, status: Int = 200) -> @Sendable (URLRequest) async throws -> (Data, URLResponse) {
         let data = Data(body.utf8)
-        let response = HTTPURLResponse(
-            url: OpenRouterPostProcessor.endpoint,
-            statusCode: status,
-            httpVersion: "HTTP/1.1",
-            headerFields: nil
-        )!
         return { [self] request in
             self.lock.withLock { self._requests.append(request) }
+            let response = HTTPURLResponse(
+                url: request.url!,
+                statusCode: status,
+                httpVersion: "HTTP/1.1",
+                headerFields: nil
+            )!
             return (data, response)
         }
     }

@@ -5,6 +5,7 @@ import Foundation
 enum PostProcessingProviderKind: String, CaseIterable, Sendable, Identifiable {
     case appleIntelligence
     case openRouter
+    case openCodeZen
 
     /// Default provider: on-device Apple Intelligence.
     static let defaultValue: PostProcessingProviderKind = .appleIntelligence
@@ -20,6 +21,8 @@ enum PostProcessingProviderKind: String, CaseIterable, Sendable, Identifiable {
             "Apple Intelligence"
         case .openRouter:
             "OpenRouter"
+        case .openCodeZen:
+            "OpenCode Zen"
         }
     }
 
@@ -69,6 +72,41 @@ enum OpenRouterModelCatalog {
     /// that removed a slug from the catalog) to a valid model id, falling back
     /// to the default. Pure function shared by the settings accessor and the
     /// non-isolated provider router.
+    static func resolveModelId(_ raw: String?) -> String {
+        guard let raw, model(forId: raw) != nil else {
+            return defaultModelId
+        }
+        return raw
+    }
+}
+
+/// Curated OpenCode Zen models that use its OpenAI-compatible Chat Completions
+/// endpoint. Zen's GPT, Claude, and Gemini models use different wire protocols,
+/// so they must not be offered by this client. Free models are intentionally
+/// excluded because Zen marks them as temporary and may use submitted data for
+/// model improvement; dictated transcripts can contain sensitive information.
+enum OpenCodeZenModelCatalog {
+    struct Model: Identifiable, Sendable, Equatable {
+        let id: String
+        let displayName: String
+    }
+
+    static let models: [Model] = [
+        .init(id: "deepseek-v4-flash", displayName: "DeepSeek V4 Flash"),
+        .init(id: "minimax-m3", displayName: "MiniMax M3"),
+        .init(id: "glm-5.2", displayName: "GLM 5.2")
+    ]
+
+    static let defaultModelId = "deepseek-v4-flash"
+
+    static var defaultModel: Model {
+        models.first { $0.id == defaultModelId } ?? models[0]
+    }
+
+    static func model(forId id: String) -> Model? {
+        models.first { $0.id == id }
+    }
+
     static func resolveModelId(_ raw: String?) -> String {
         guard let raw, model(forId: raw) != nil else {
             return defaultModelId

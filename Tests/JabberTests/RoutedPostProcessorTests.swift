@@ -30,6 +30,11 @@ final class RoutedPostProcessorTests: XCTestCase {
         XCTAssertEqual(RoutedPostProcessor(defaults: defaults).displayName, "OpenRouter")
     }
 
+    func testDisplayNameReflectsOpenCodeZenSelection() {
+        defaults.set(PostProcessingProviderKind.openCodeZen.rawValue, forKey: AppSettingKey.postProcessingProviderKind)
+        XCTAssertEqual(RoutedPostProcessor(defaults: defaults).displayName, "OpenCode Zen")
+    }
+
     func testDisplayNameReflectsAppleIntelligenceSelection() {
         defaults.set(PostProcessingProviderKind.appleIntelligence.rawValue, forKey: AppSettingKey.postProcessingProviderKind)
         XCTAssertEqual(RoutedPostProcessor(defaults: defaults).displayName, "Apple Intelligence")

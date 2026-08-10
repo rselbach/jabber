@@ -1048,7 +1048,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// reach this path; guardrail rejections are surfaced non-disruptively via
     /// `overlayWindow.showFallbackNotice` instead. The message names the
     /// currently selected provider so it never blames Apple Intelligence when
-    /// OpenRouter is the one that failed.
+    /// a cloud provider is the one that failed.
     private func showPostProcessingFailureNotice(_ error: Error) {
         let now = CFAbsoluteTimeGetCurrent()
         guard now - lastPostProcessingFailureNotice > 1.5 else { return }

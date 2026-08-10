@@ -1,22 +1,11 @@
 import Foundation
 import Security
-import os
 
-/// Minimal Keychain wrapper for the OpenRouter API key only. Stores the key as
-/// a generic password item so it lives in the macOS Keychain (never in
-/// UserDefaults). Service/account are namespaced to Jabber's bundle id.
-///
-/// All operations throw `OpenRouterKeychain.Error` on unexpected OSStatus values
-/// — no silent failures. `errSecItemNotFound` is treated as "no key stored" and
-/// is therefore not an error for read/delete. The Settings UI calls these
-/// throwing functions directly and surfaces failures as inline red text.
-enum OpenRouterKeychain {
-    /// Keychain service. Matches Jabber's bundle/log subsystem id.
-    static let service = "com.rselbach.jabber"
-
-    /// Keychain account identifying the OpenRouter API key item.
-    static let account = "openRouterApiKey"
-
+/// Shared generic-password operations for cloud post-processing API keys.
+/// Provider wrappers below supply separate accounts so credentials never
+/// overwrite each other. `errSecItemNotFound` means "no key stored" for reads
+/// and deletes; every other unexpected status is surfaced to the Settings UI.
+private enum PostProcessingKeychain {
     enum Error: LocalizedError {
         case unexpectedStatus(OSStatus, String)
 
@@ -30,7 +19,7 @@ enum OpenRouterKeychain {
 
     /// Reads the stored API key. Returns `nil` when no item is stored.
     /// Throws on any keychain status other than success/item-not-found.
-    static func readKey(service: String = service, account: String = account) throws -> String? {
+    static func readKey(service: String, account: String) throws -> String? {
         let query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: service,
@@ -54,11 +43,7 @@ enum OpenRouterKeychain {
 
     /// Stores `key`, creating or updating the item. An empty/whitespace key
     /// should be deleted via `deleteKey()` instead.
-    static func saveKey(
-        _ key: String,
-        service: String = service,
-        account: String = account
-    ) throws {
+    static func saveKey(_ key: String, service: String, account: String) throws {
         let data = Data(key.utf8)
 
         // Update an existing item first; if none exists, add a new one.
@@ -94,7 +79,7 @@ enum OpenRouterKeychain {
     }
 
     /// Deletes the stored API key. No-op (not an error) when no item exists.
-    static func deleteKey(service: String = service, account: String = account) throws {
+    static func deleteKey(service: String, account: String) throws {
         let query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: service,
@@ -107,5 +92,51 @@ enum OpenRouterKeychain {
         default:
             throw Error.unexpectedStatus(status, "delete")
         }
+    }
+}
+
+/// Keychain-backed storage for the OpenRouter API key.
+enum OpenRouterKeychain {
+    static let service = "com.rselbach.jabber"
+    static let account = "openRouterApiKey"
+
+    static func readKey(service: String = service, account: String = account) throws -> String? {
+        try PostProcessingKeychain.readKey(service: service, account: account)
+    }
+
+    static func saveKey(
+        _ key: String,
+        service: String = service,
+        account: String = account
+    ) throws {
+        try PostProcessingKeychain.saveKey(key, service: service, account: account)
+    }
+
+    static func deleteKey(service: String = service, account: String = account) throws {
+        try PostProcessingKeychain.deleteKey(service: service, account: account)
+    }
+}
+
+/// Keychain-backed storage for the OpenCode Zen API key. The account differs
+/// from OpenRouter's so selecting or editing one provider cannot affect the
+/// other's credential.
+enum OpenCodeZenKeychain {
+    static let service = "com.rselbach.jabber"
+    static let account = "openCodeZenApiKey"
+
+    static func readKey(service: String = service, account: String = account) throws -> String? {
+        try PostProcessingKeychain.readKey(service: service, account: account)
+    }
+
+    static func saveKey(
+        _ key: String,
+        service: String = service,
+        account: String = account
+    ) throws {
+        try PostProcessingKeychain.saveKey(key, service: service, account: account)
+    }
+
+    static func deleteKey(service: String = service, account: String = account) throws {
+        try PostProcessingKeychain.deleteKey(service: service, account: account)
     }
 }

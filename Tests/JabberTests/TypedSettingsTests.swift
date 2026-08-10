@@ -36,6 +36,7 @@ final class TypedSettingsTests: XCTestCase {
         XCTAssertEqual(settings.replacementEntries, [], "Default replacement entries array should be empty")
         XCTAssertEqual(settings[.postProcessingProviderKind], PostProcessingProviderKind.defaultValue.rawValue)
         XCTAssertEqual(settings[.openRouterModel], OpenRouterModelCatalog.defaultModelId)
+        XCTAssertEqual(settings[.openCodeZenModel], OpenCodeZenModelCatalog.defaultModelId)
         XCTAssertEqual(settings[.lastModelMigrationNoticeKey], "")
         XCTAssertEqual(settings[.declinedModelMigrationNoticeKey], "")
     }
@@ -88,6 +89,28 @@ final class TypedSettingsTests: XCTestCase {
 
         XCTAssertEqual(settings[.openRouterModel], OpenRouterModelCatalog.defaultModelId)
         XCTAssertEqual(userDefaults.string(forKey: AppSettingKey.openRouterModel), OpenRouterModelCatalog.defaultModelId)
+    }
+
+    func testOpenCodeZenModelDefaultsAndPersistence() {
+        XCTAssertEqual(settings[.openCodeZenModel], OpenCodeZenModelCatalog.defaultModelId)
+        XCTAssertFalse(settings.isSet(.openCodeZenModel))
+
+        settings[.openCodeZenModel] = "minimax-m3"
+        XCTAssertEqual(settings[.openCodeZenModel], "minimax-m3")
+        XCTAssertTrue(settings.isSet(.openCodeZenModel))
+
+        settings.remove(.openCodeZenModel)
+        XCTAssertEqual(settings[.openCodeZenModel], OpenCodeZenModelCatalog.defaultModelId)
+        XCTAssertFalse(settings.isSet(.openCodeZenModel))
+    }
+
+    func testInvalidStoredOpenCodeZenModelMigratesToDefault() {
+        userDefaults.set("gpt-5.4-mini", forKey: AppSettingKey.openCodeZenModel)
+
+        settings.migrateStoredValues()
+
+        XCTAssertEqual(settings[.openCodeZenModel], OpenCodeZenModelCatalog.defaultModelId)
+        XCTAssertEqual(userDefaults.string(forKey: AppSettingKey.openCodeZenModel), OpenCodeZenModelCatalog.defaultModelId)
     }
 
     func testLegacyPasteOutputModeMigratesToDirectTyping() {

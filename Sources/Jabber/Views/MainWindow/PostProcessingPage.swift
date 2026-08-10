@@ -5,19 +5,7 @@ struct PostProcessingPage: View {
     @AppStorage(AppSettingKey.postProcessingEnabled) private var postProcessingEnabled = false
     @AppStorage(AppSettingKey.postProcessingProviderKind) private var postProcessingProviderKindRaw = PostProcessingProviderKind.defaultValue.rawValue
     @AppStorage(AppSettingKey.openRouterModel) private var openRouterModel = OpenRouterModelCatalog.defaultModelId
-
-    @State private var openRouterApiKey: String = ""
-    @State private var keychainError: String?
-    /// True only when `loadOpenRouterAPIKey` read the keychain successfully.
-    /// When false (read failed, e.g. user cancelled the auth prompt), the
-    /// empty field must not be persisted back as a deletion on the next
-    /// `onDisappear` — that would clobber the real stored key.
-    @State private var didLoadKeySuccessfully = false
-    /// Last value successfully loaded from the keychain. Used to skip
-    /// gratuitous `SecItemUpdate` calls when the field is unchanged.
-    @State private var loadedApiKey: String = ""
-    @State private var isLoadingOpenRouterAPIKey = false
-    @State private var loadOpenRouterAPIKeyTask: Task<Void, Never>?
+    @AppStorage(AppSettingKey.openCodeZenModel) private var openCodeZenModel = OpenCodeZenModelCatalog.defaultModelId
 
     var body: some View {
         Form {
@@ -37,14 +25,8 @@ struct PostProcessingPage: View {
                             .font(.caption)
                             .foregroundStyle(.secondary)
                     case .openRouter:
-                        SecureField("OpenRouter API key", text: $openRouterApiKey)
-                            .textContentType(.password)
-                            .onChange(of: openRouterApiKey) { _, _ in
-                                cancelOpenRouterAPIKeyLoadAfterUserEdit()
-                            }
-                            .onSubmit {
-                                saveOpenRouterAPIKey()
-                            }
+                        CloudProviderAPIKeyField(provider: .openRouter)
+                            .id(PostProcessingProviderKind.openRouter)
 
                         Picker("Model", selection: $openRouterModel) {
                             ForEach(OpenRouterModelCatalog.models) { model in
@@ -52,13 +34,20 @@ struct PostProcessingPage: View {
                             }
                         }
 
-                        if let keychainError {
-                            Text(keychainError)
-                                .font(.caption)
-                                .foregroundStyle(.red)
+                        Text("Cloud post-processing sends your transcript to OpenRouter and the selected model provider for processing. The API key is stored in your macOS Keychain, not in preferences. Falls back to the raw transcript if the request fails.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    case .openCodeZen:
+                        CloudProviderAPIKeyField(provider: .openCodeZen)
+                            .id(PostProcessingProviderKind.openCodeZen)
+
+                        Picker("Model", selection: $openCodeZenModel) {
+                            ForEach(OpenCodeZenModelCatalog.models) { model in
+                                Text(model.displayName).tag(model.id)
+                            }
                         }
 
-                        Text("Cloud post-processing sends your transcript to OpenRouter and the selected model provider for processing. The API key is stored in your macOS Keychain, not in preferences. Falls back to the raw transcript if the request fails.")
+                        Text("Cloud post-processing sends your transcript to OpenCode Zen and the selected model provider for processing. Jabber offers stable paid models only; Zen's temporary free models are excluded because submitted data may be used for model improvement. The API key is stored in your macOS Keychain. Falls back to the raw transcript if the request fails.")
                             .font(.caption)
                             .foregroundStyle(.secondary)
                     }
@@ -68,45 +57,75 @@ struct PostProcessingPage: View {
             }
         }
         .formStyle(.grouped)
-        .onAppear {
-            loadOpenRouterAPIKey()
-        }
-        // The main window is retained when closed, so onDisappear is not
-        // guaranteed to fire; persist the key on window close as well.
-        // Filter to the main window only — willCloseNotification fires for
-        // every window (onboarding, migration notice, etc.) and acting on
-        // those would clobber the SecureField mid-typing and could silently
-        // delete a saved key.
-        .onReceive(NotificationCenter.default.publisher(for: NSWindow.willCloseNotification)) { notification in
-            guard let window = notification.object as? NSWindow,
-                  window.identifier == NSUserInterfaceItemIdentifier("com.rselbach.jabber.main") else { return }
-            saveOpenRouterAPIKey()
-        }
-        // Quitting (Cmd-Q) bypasses both onDisappear and
-        // willCloseNotification for still-open windows. Flush on app
-        // termination so a pasted key isn't lost.
-        .onReceive(NotificationCenter.default.publisher(for: NSApplication.willTerminateNotification)) { _ in
-            saveOpenRouterAPIKey()
-        }
-        .onDisappear {
-            saveOpenRouterAPIKey()
-        }
     }
 
     private var selectedPostProcessingProviderKind: PostProcessingProviderKind {
         PostProcessingProviderKind(rawValue: postProcessingProviderKindRaw) ?? .defaultValue
     }
+}
 
-    /// Loads the OpenRouter API key from the Keychain into the SecureField.
+/// Reusable Keychain-backed API key field for cloud post-processing providers.
+/// Each instance loads and saves one provider's isolated credential.
+private struct CloudProviderAPIKeyField: View {
+    let provider: CloudPostProcessingProvider
+
+    @State private var apiKey: String = ""
+    @State private var keychainError: String?
+    /// True only when the Keychain read succeeded. A failed read must not turn
+    /// the field's initial empty value into an accidental credential deletion.
+    @State private var didLoadKeySuccessfully = false
+    /// Last successfully loaded/saved value, used to skip gratuitous writes.
+    @State private var loadedApiKey: String = ""
+    @State private var isLoadingAPIKey = false
+    @State private var loadAPIKeyTask: Task<Void, Never>?
+
+    var body: some View {
+        Group {
+            SecureField("\(provider.displayName) API key", text: $apiKey)
+                .textContentType(.password)
+                .onChange(of: apiKey) { _, _ in
+                    cancelAPIKeyLoadAfterUserEdit()
+                }
+                .onSubmit {
+                    saveAPIKey()
+                }
+
+            if let keychainError {
+                Text(keychainError)
+                    .font(.caption)
+                    .foregroundStyle(.red)
+            }
+        }
+        .onAppear {
+            loadAPIKey()
+        }
+        // The main window is retained when closed, so onDisappear is not
+        // guaranteed to fire. Ignore close notifications from other windows.
+        .onReceive(NotificationCenter.default.publisher(for: NSWindow.willCloseNotification)) { notification in
+            guard let window = notification.object as? NSWindow,
+                  window.identifier == NSUserInterfaceItemIdentifier("com.rselbach.jabber.main") else { return }
+            saveAPIKey()
+        }
+        // Cmd-Q bypasses both onDisappear and window-close notifications for
+        // still-open windows.
+        .onReceive(NotificationCenter.default.publisher(for: NSApplication.willTerminateNotification)) { _ in
+            saveAPIKey()
+        }
+        .onDisappear {
+            saveAPIKey()
+        }
+    }
+
+    /// Loads this provider's API key from the Keychain into the SecureField.
     /// Keychain errors are surfaced as inline red text, not a modal alert.
-    private func loadOpenRouterAPIKey() {
-        loadOpenRouterAPIKeyTask?.cancel()
-        isLoadingOpenRouterAPIKey = true
+    private func loadAPIKey() {
+        loadAPIKeyTask?.cancel()
+        isLoadingAPIKey = true
 
-        loadOpenRouterAPIKeyTask = Task {
+        loadAPIKeyTask = Task {
             let result = await Task.detached(priority: .userInitiated) {
                 do {
-                    return try APIKeyLoadResult.success(OpenRouterKeychain.readKey() ?? "")
+                    return try APIKeyLoadResult.success(provider.readKey() ?? "")
                 } catch {
                     return APIKeyLoadResult.failure(error.localizedDescription)
                 }
@@ -115,12 +134,12 @@ struct PostProcessingPage: View {
             guard !Task.isCancelled else { return }
 
             await MainActor.run {
-                loadOpenRouterAPIKeyTask = nil
-                isLoadingOpenRouterAPIKey = false
+                loadAPIKeyTask = nil
+                isLoadingAPIKey = false
 
                 switch result {
                 case let .success(key):
-                    openRouterApiKey = key
+                    apiKey = key
                     loadedApiKey = key
                     didLoadKeySuccessfully = true
                     keychainError = nil
@@ -128,7 +147,7 @@ struct PostProcessingPage: View {
                     // Don't treat the empty field as a deletion: a transient
                     // read failure (e.g. user cancelled the auth prompt) must
                     // not wipe the real stored key on the next save.
-                    openRouterApiKey = ""
+                    apiKey = ""
                     loadedApiKey = ""
                     didLoadKeySuccessfully = false
                     keychainError = message
@@ -143,33 +162,33 @@ struct PostProcessingPage: View {
         }
     }
 
-    private func cancelOpenRouterAPIKeyLoadAfterUserEdit() {
-        guard isLoadingOpenRouterAPIKey else { return }
-        loadOpenRouterAPIKeyTask?.cancel()
-        loadOpenRouterAPIKeyTask = nil
-        isLoadingOpenRouterAPIKey = false
+    private func cancelAPIKeyLoadAfterUserEdit() {
+        guard isLoadingAPIKey else { return }
+        loadAPIKeyTask?.cancel()
+        loadAPIKeyTask = nil
+        isLoadingAPIKey = false
         didLoadKeySuccessfully = false
         loadedApiKey = ""
     }
 
     /// Persists the SecureField's API key to the Keychain. An empty/whitespace
     /// value deletes the stored key. Errors are surfaced as inline red text.
-    private func saveOpenRouterAPIKey() {
+    private func saveAPIKey() {
         guard APIKeyPersistenceDecision.shouldPersist(
             didLoadSuccessfully: didLoadKeySuccessfully,
-            isLoadInProgress: isLoadingOpenRouterAPIKey,
+            isLoadInProgress: isLoadingAPIKey,
             loadedValue: loadedApiKey,
-            currentValue: openRouterApiKey
+            currentValue: apiKey
         ) else { return }
 
-        let trimmed = openRouterApiKey.trimmingCharacters(in: .whitespacesAndNewlines)
+        let trimmed = apiKey.trimmingCharacters(in: .whitespacesAndNewlines)
         do {
             if trimmed.isEmpty {
-                try OpenRouterKeychain.deleteKey()
+                try provider.deleteKey()
             } else {
-                try OpenRouterKeychain.saveKey(trimmed)
+                try provider.saveKey(trimmed)
             }
-            openRouterApiKey = trimmed
+            apiKey = trimmed
             loadedApiKey = trimmed
             didLoadKeySuccessfully = true
             keychainError = nil
@@ -179,8 +198,49 @@ struct PostProcessingPage: View {
     }
 }
 
-/// Decides whether `PostProcessingPage.saveOpenRouterAPIKey` should write to
-/// the keychain. Guards against two failure modes that previously clobbered
+private enum CloudPostProcessingProvider: Sendable {
+    case openRouter
+    case openCodeZen
+
+    var displayName: String {
+        switch self {
+        case .openRouter:
+            "OpenRouter"
+        case .openCodeZen:
+            "OpenCode Zen"
+        }
+    }
+
+    func readKey() throws -> String? {
+        switch self {
+        case .openRouter:
+            try OpenRouterKeychain.readKey()
+        case .openCodeZen:
+            try OpenCodeZenKeychain.readKey()
+        }
+    }
+
+    func saveKey(_ key: String) throws {
+        switch self {
+        case .openRouter:
+            try OpenRouterKeychain.saveKey(key)
+        case .openCodeZen:
+            try OpenCodeZenKeychain.saveKey(key)
+        }
+    }
+
+    func deleteKey() throws {
+        switch self {
+        case .openRouter:
+            try OpenRouterKeychain.deleteKey()
+        case .openCodeZen:
+            try OpenCodeZenKeychain.deleteKey()
+        }
+    }
+}
+
+/// Decides whether a cloud API key field should write to the Keychain. Guards
+/// against failure modes that could otherwise clobber
 /// the user's real stored key:
 ///
 /// - A transient keychain read failure (e.g. user cancelled the auth prompt)

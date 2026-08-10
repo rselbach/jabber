@@ -52,9 +52,36 @@ final class OpenRouterModelCatalogTests: XCTestCase {
     }
 }
 
+final class OpenCodeZenModelCatalogTests: XCTestCase {
+    func testHasThreeCuratedChatCompletionsModels() {
+        XCTAssertEqual(OpenCodeZenModelCatalog.models.count, 3)
+    }
+
+    func testModelsAreUniqueAndDefaultIsPresent() {
+        let ids = OpenCodeZenModelCatalog.models.map(\.id)
+        let names = OpenCodeZenModelCatalog.models.map(\.displayName)
+        XCTAssertEqual(Set(ids).count, ids.count)
+        XCTAssertEqual(Set(names).count, names.count)
+        XCTAssertEqual(OpenCodeZenModelCatalog.defaultModel.id, OpenCodeZenModelCatalog.defaultModelId)
+    }
+
+    func testCuratedModels() {
+        let byId = Dictionary(uniqueKeysWithValues: OpenCodeZenModelCatalog.models.map { ($0.id, $0.displayName) })
+        XCTAssertEqual(byId["deepseek-v4-flash"], "DeepSeek V4 Flash")
+        XCTAssertEqual(byId["minimax-m3"], "MiniMax M3")
+        XCTAssertEqual(byId["glm-5.2"], "GLM 5.2")
+    }
+
+    func testResolution() {
+        XCTAssertEqual(OpenCodeZenModelCatalog.resolveModelId(nil), OpenCodeZenModelCatalog.defaultModelId)
+        XCTAssertEqual(OpenCodeZenModelCatalog.resolveModelId("gpt-5.4-mini"), OpenCodeZenModelCatalog.defaultModelId)
+        XCTAssertEqual(OpenCodeZenModelCatalog.resolveModelId("minimax-m3"), "minimax-m3")
+    }
+}
+
 final class PostProcessingProviderKindTests: XCTestCase {
-    func testAllCasesContainBothProviders() {
-        XCTAssertEqual(Set(PostProcessingProviderKind.allCases), [.appleIntelligence, .openRouter])
+    func testAllCasesContainAllProviders() {
+        XCTAssertEqual(Set(PostProcessingProviderKind.allCases), [.appleIntelligence, .openRouter, .openCodeZen])
     }
 
     func testDefaultIsAppleIntelligence() {
@@ -64,6 +91,7 @@ final class PostProcessingProviderKindTests: XCTestCase {
     func testDisplayNames() {
         XCTAssertEqual(PostProcessingProviderKind.appleIntelligence.displayName, "Apple Intelligence")
         XCTAssertEqual(PostProcessingProviderKind.openRouter.displayName, "OpenRouter")
+        XCTAssertEqual(PostProcessingProviderKind.openCodeZen.displayName, "OpenCode Zen")
     }
 
     func testResolveNilReturnsDefault() {
@@ -76,6 +104,7 @@ final class PostProcessingProviderKindTests: XCTestCase {
 
     func testResolveValidReturnsIt() {
         XCTAssertEqual(PostProcessingProviderKind.resolve(rawValue: "openRouter"), .openRouter)
+        XCTAssertEqual(PostProcessingProviderKind.resolve(rawValue: "openCodeZen"), .openCodeZen)
         XCTAssertEqual(PostProcessingProviderKind.resolve(rawValue: "appleIntelligence"), .appleIntelligence)
     }
 

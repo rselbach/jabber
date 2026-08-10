@@ -39,6 +39,135 @@ enum OpenRouterPostProcessingError: LocalizedError, Equatable {
     }
 }
 
+/// Errors surfaced by `OpenCodeZenPostProcessor`. Kept provider-specific so
+/// user-facing failures name the service that actually failed.
+enum OpenCodeZenPostProcessingError: LocalizedError, Equatable {
+    case missingApiKey
+    case httpFailure(Int, String?)
+    case malformedResponse
+    case emptyResponse
+    case networkError(String)
+
+    var errorDescription: String? {
+        switch self {
+        case .missingApiKey:
+            "OpenCode Zen API key is not set."
+        case let .httpFailure(code, message):
+            if let message {
+                "OpenCode Zen returned HTTP \(code): \(message)"
+            } else {
+                "OpenCode Zen returned HTTP \(code)."
+            }
+        case .malformedResponse:
+            "OpenCode Zen response could not be parsed."
+        case .emptyResponse:
+            "OpenCode Zen returned an empty response."
+        case let .networkError(message):
+            "OpenCode Zen request failed: \(message)"
+        }
+    }
+}
+
+/// Provider-neutral failure from the shared OpenAI-compatible transport.
+/// Public post-processors map it to provider-specific errors before surfacing
+/// anything to the coordinator.
+private enum OpenAICompatiblePostProcessingError: Error {
+    case httpFailure(Int, String?)
+    case malformedResponse
+    case emptyResponse
+    case networkError(String)
+}
+
+/// Shared non-streaming Chat Completions request/response implementation used
+/// by OpenRouter and OpenCode Zen. Provider wrappers own credential checks,
+/// model allowlists, attribution headers, and user-facing error names.
+private struct OpenAICompatiblePostProcessingClient: Sendable {
+    private static let maxHttpFailureMessageLength = 200
+
+    let endpoint: URL
+    let apiKey: String
+    let modelId: String
+    let additionalHeaders: [String: String]
+    let requestTimeout: TimeInterval
+    let transport: @Sendable (URLRequest) async throws -> (Data, URLResponse)
+
+    func process(_ transcript: String) async throws -> String {
+        var request = URLRequest(url: endpoint, timeoutInterval: requestTimeout)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
+        for (field, value) in additionalHeaders {
+            request.setValue(value, forHTTPHeaderField: field)
+        }
+
+        let body: [String: Any] = [
+            "model": modelId,
+            "messages": [
+                ["role": "system", "content": AppleIntelligencePostProcessor.instructions],
+                ["role": "user", "content": transcript]
+            ],
+            "stream": false,
+            "temperature": 0
+        ]
+        request.httpBody = try JSONSerialization.data(withJSONObject: body)
+
+        let data: Data
+        let response: URLResponse
+        do {
+            (data, response) = try await transport(request)
+        } catch is CancellationError {
+            throw CancellationError()
+        } catch let urlError as URLError where urlError.code == .cancelled {
+            // URLSession.data(for:) reacts to task cancellation with
+            // URLError(.cancelled), not CancellationError.
+            throw CancellationError()
+        } catch {
+            throw OpenAICompatiblePostProcessingError.networkError(error.localizedDescription)
+        }
+
+        guard let http = response as? HTTPURLResponse else {
+            throw OpenAICompatiblePostProcessingError.malformedResponse
+        }
+        guard (200 ..< 300).contains(http.statusCode) else {
+            throw OpenAICompatiblePostProcessingError.httpFailure(
+                http.statusCode,
+                Self.errorMessage(from: data)
+            )
+        }
+
+        guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            throw OpenAICompatiblePostProcessingError.malformedResponse
+        }
+        guard let choices = json["choices"] as? [[String: Any]], !choices.isEmpty else {
+            throw OpenAICompatiblePostProcessingError.emptyResponse
+        }
+        guard let first = choices.first,
+              let message = first["message"] as? [String: Any],
+              let content = message["content"] as? String
+        else {
+            throw OpenAICompatiblePostProcessingError.malformedResponse
+        }
+
+        return content
+    }
+
+    /// Both services use the OpenAI-compatible
+    /// `{"error":{"message":...}}` failure shape. Parsing is best effort and
+    /// bounded so a provider cannot produce an unreadable notification.
+    private static func errorMessage(from data: Data) -> String? {
+        do {
+            let json = try JSONSerialization.jsonObject(with: data) as? [String: Any]
+            guard let error = json?["error"] as? [String: Any],
+                  let message = error["message"] as? String else {
+                return nil
+            }
+            return String(message.prefix(maxHttpFailureMessageLength))
+        } catch {
+            return nil
+        }
+    }
+}
+
 /// OpenRouter-backed transcript refinement. Conforms to the same
 /// `PostProcessingProvider` contract as the on-device Apple Intelligence
 /// processor, so the coordinator's existing guardrails/retry/raw-fallback
@@ -113,98 +242,114 @@ struct OpenRouterPostProcessor: PostProcessingProvider {
         !apiKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
 
-    /// Best-effort extraction of OpenRouter's `{"error":{"message":...}}` body
-    /// for inclusion in an `httpFailure` error. Returns `nil` for any shape that
-    /// does not match (including a flat string error or non-JSON body), so the
-    /// caller falls back to a status-only message. The API key is never present
-    /// in response bodies. Truncated so a long provider message cannot produce
-    /// an unreadable alert.
-    private static func openRouterErrorMessage(from data: Data) -> String? {
-        do {
-            let json = try JSONSerialization.jsonObject(with: data) as? [String: Any]
-            guard let error = json?["error"] as? [String: Any],
-                  let message = error["message"] as? String else {
-                return nil
-            }
-            return String(message.prefix(Self.maxHttpFailureMessageLength))
-        } catch {
-            return nil
-        }
-    }
-
-    private static let maxHttpFailureMessageLength = 200
-
     func process(_ transcript: String) async throws -> String {
         guard isAvailable else {
             throw OpenRouterPostProcessingError.missingApiKey
         }
 
-        var request = URLRequest(url: Self.endpoint, timeoutInterval: Self.requestTimeout)
-        request.httpMethod = "POST"
-        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
-        // OpenRouter attribution headers. X-Title is the app name; HTTP-Referer
-        // uses the stable app/appcast URL already referenced in Info.plist/README
-        // (no invented URL).
-        request.setValue("Jabber", forHTTPHeaderField: "X-Title")
-        request.setValue("https://rselbach.github.io/jabber/", forHTTPHeaderField: "HTTP-Referer")
-
-        let body: [String: Any] = [
-            "model": modelId,
-            "messages": [
-                ["role": "system", "content": AppleIntelligencePostProcessor.instructions],
-                ["role": "user", "content": transcript]
-            ],
-            "stream": false,
-            "temperature": 0
-        ]
-        request.httpBody = try JSONSerialization.data(withJSONObject: body)
-
-        let data: Data
-        let response: URLResponse
         do {
-            (data, response) = try await transport(request)
-        } catch is CancellationError {
-            throw CancellationError()
-        } catch let urlError as URLError where urlError.code == .cancelled {
-            // URLSession.data(for:) reacts to task cancellation by throwing
-            // URLError(.cancelled), not CancellationError. Map it so a
-            // cancelled dictation is not surfaced to the user as a spurious
-            // network failure.
-            throw CancellationError()
-        } catch {
-            throw OpenRouterPostProcessingError.networkError(error.localizedDescription)
+            return try await OpenAICompatiblePostProcessingClient(
+                endpoint: Self.endpoint,
+                apiKey: apiKey,
+                modelId: modelId,
+                additionalHeaders: [
+                    "X-Title": "Jabber",
+                    "HTTP-Referer": "https://rselbach.github.io/jabber/"
+                ],
+                requestTimeout: Self.requestTimeout,
+                transport: transport
+            ).process(transcript)
+        } catch let error as OpenAICompatiblePostProcessingError {
+            throw OpenRouterPostProcessingError(error)
+        }
+    }
+}
+
+private extension OpenRouterPostProcessingError {
+    init(_ error: OpenAICompatiblePostProcessingError) {
+        switch error {
+        case let .httpFailure(code, message):
+            self = .httpFailure(code, message)
+        case .malformedResponse:
+            self = .malformedResponse
+        case .emptyResponse:
+            self = .emptyResponse
+        case let .networkError(message):
+            self = .networkError(message)
+        }
+    }
+}
+
+/// OpenCode Zen-backed transcript refinement using Zen's OpenAI-compatible
+/// Chat Completions endpoint. The model catalog only includes IDs documented
+/// for this endpoint; other Zen model families use incompatible protocols.
+struct OpenCodeZenPostProcessor: PostProcessingProvider {
+    static let endpoint = URL(string: "https://opencode.ai/zen/v1/chat/completions")!
+    static let requestTimeout: TimeInterval = 60
+
+    private static let defaultSession: URLSession = {
+        let configuration = URLSessionConfiguration.default
+        configuration.timeoutIntervalForRequest = requestTimeout
+        configuration.timeoutIntervalForResource = requestTimeout
+        return URLSession(configuration: configuration)
+    }()
+
+    let apiKey: String
+    let modelId: String
+    let transport: @Sendable (URLRequest) async throws -> (Data, URLResponse)
+
+    init(
+        apiKey: String,
+        modelId: String = OpenCodeZenModelCatalog.defaultModelId,
+        transport: @Sendable @escaping (URLRequest) async throws -> (Data, URLResponse) = { request in
+            try await Self.defaultSession.data(for: request)
+        }
+    ) {
+        self.apiKey = apiKey
+        self.modelId = OpenCodeZenModelCatalog.resolveModelId(modelId)
+        self.transport = transport
+    }
+
+    var displayName: String {
+        "OpenCode Zen"
+    }
+
+    var isAvailable: Bool {
+        !apiKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
+    func process(_ transcript: String) async throws -> String {
+        guard isAvailable else {
+            throw OpenCodeZenPostProcessingError.missingApiKey
         }
 
-        guard let http = response as? HTTPURLResponse else {
-            throw OpenRouterPostProcessingError.malformedResponse
+        do {
+            return try await OpenAICompatiblePostProcessingClient(
+                endpoint: Self.endpoint,
+                apiKey: apiKey,
+                modelId: modelId,
+                additionalHeaders: [:],
+                requestTimeout: Self.requestTimeout,
+                transport: transport
+            ).process(transcript)
+        } catch let error as OpenAICompatiblePostProcessingError {
+            throw OpenCodeZenPostProcessingError(error)
         }
-        guard (200 ..< 300).contains(http.statusCode) else {
-            throw OpenRouterPostProcessingError.httpFailure(
-                http.statusCode,
-                Self.openRouterErrorMessage(from: data)
-            )
-        }
+    }
+}
 
-        guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
-            throw OpenRouterPostProcessingError.malformedResponse
+private extension OpenCodeZenPostProcessingError {
+    init(_ error: OpenAICompatiblePostProcessingError) {
+        switch error {
+        case let .httpFailure(code, message):
+            self = .httpFailure(code, message)
+        case .malformedResponse:
+            self = .malformedResponse
+        case .emptyResponse:
+            self = .emptyResponse
+        case let .networkError(message):
+            self = .networkError(message)
         }
-        guard let choices = json["choices"] as? [[String: Any]], !choices.isEmpty else {
-            // Parsed, but no choices to use.
-            throw OpenRouterPostProcessingError.emptyResponse
-        }
-        guard let first = choices.first,
-              let message = first["message"] as? [String: Any],
-              let content = message["content"] as? String
-        else {
-            // Choices present but the message/content shape is wrong.
-            throw OpenRouterPostProcessingError.malformedResponse
-        }
-
-        // Preserve the post-processing contract: return content verbatim. An
-        // empty/whitespace string is a valid cancellation outcome handled by the
-        // coordinator (it trims and treats empty as "type nothing").
-        return content
     }
 }
 
@@ -237,6 +382,8 @@ struct RoutedPostProcessor: PostProcessingProvider {
             return AppleIntelligencePostProcessor().isAvailable
         case .openRouter:
             return OpenRouterPostProcessor(apiKey: Self.currentApiKey(), modelId: currentModelId()).isAvailable
+        case .openCodeZen:
+            return OpenCodeZenPostProcessor(apiKey: Self.currentOpenCodeZenApiKey(), modelId: currentOpenCodeZenModelId()).isAvailable
         }
     }
 
@@ -248,6 +395,11 @@ struct RoutedPostProcessor: PostProcessingProvider {
             return try await OpenRouterPostProcessor(
                 apiKey: Self.currentApiKey(),
                 modelId: currentModelId()
+            ).process(transcript)
+        case .openCodeZen:
+            return try await OpenCodeZenPostProcessor(
+                apiKey: Self.currentOpenCodeZenApiKey(),
+                modelId: currentOpenCodeZenModelId()
             ).process(transcript)
         }
     }
@@ -266,6 +418,12 @@ struct RoutedPostProcessor: PostProcessingProvider {
         )
     }
 
+    private func currentOpenCodeZenModelId() -> String {
+        OpenCodeZenModelCatalog.resolveModelId(
+            defaults.string(forKey: AppSettingKey.openCodeZenModel)
+        )
+    }
+
     /// Reads the API key from Keychain. A keychain read failure is logged and
     /// treated as "no key" so dictation falls back to raw transcript instead of
     /// surfacing a disruptive alert; the Settings UI surfaces keychain errors
@@ -275,6 +433,15 @@ struct RoutedPostProcessor: PostProcessingProvider {
             return try OpenRouterKeychain.readKey() ?? ""
         } catch {
             logger.error("OpenRouter API key read failed: \(error.localizedDescription)")
+            return ""
+        }
+    }
+
+    private static func currentOpenCodeZenApiKey() -> String {
+        do {
+            return try OpenCodeZenKeychain.readKey() ?? ""
+        } catch {
+            logger.error("OpenCode Zen API key read failed: \(error.localizedDescription)")
             return ""
         }
     }

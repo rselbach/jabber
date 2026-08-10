@@ -14,6 +14,7 @@ enum AppSettingKey {
     static let postProcessingEnabled = "postProcessingEnabled"
     static let postProcessingProviderKind = "postProcessingProviderKind"
     static let openRouterModel = "openRouterModel"
+    static let openCodeZenModel = "openCodeZenModel"
     static let didShowFirstRunSetup = "didShowFirstRunSetup"
     static let onboardingCompleted = "onboardingCompleted"
     static let lastModelMigrationNoticeKey = "lastModelMigrationNoticeKey"

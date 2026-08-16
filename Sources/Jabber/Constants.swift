@@ -21,6 +21,10 @@ enum Constants {
         /// Posted when a model download starts/progresses/finishes
         static let modelDownloadStateDidChange = Notification.Name("com.rselbach.jabber.modelDownloadStateDidChange")
 
+        /// Posted when an input device connects, disconnects, or becomes the
+        /// system default.
+        static let audioInputDevicesDidChange = Notification.Name("com.rselbach.jabber.audioInputDevicesDidChange")
+
         /// Posted when the configured hotkey shortcut changes. `object` is the
         /// new `HotkeyShortcut`. Observed by AppDelegate to re-register the
         /// global hotkey.

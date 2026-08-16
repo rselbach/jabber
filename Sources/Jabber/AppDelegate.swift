@@ -421,12 +421,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         dictationCoordinator.onAudioConversionError = { [weak self] error in
             guard let self else { return }
-            self.logger.error("Audio conversion error: \(error.localizedDescription)")
-            NotificationService.shared.showError(
-                title: "Audio Processing Error",
-                message: "Failed to process audio: \(error.localizedDescription)",
-                critical: false
-            )
+            self.showAudioCaptureError(error)
         }
 
         dictationCoordinator.onNoSpeechDetected = { [weak self] in
@@ -1029,6 +1024,32 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         NotificationService.shared.showWarning(
             title: "No Speech Detected",
             message: "Could not detect any speech in the recording. Try speaking louder or closer to the microphone."
+        )
+    }
+
+    private func showAudioCaptureError(_ error: Error) {
+        logger.error("Audio capture error: \(error.localizedDescription)")
+
+        if let captureError = error as? AudioCaptureError {
+            switch captureError {
+            case .inputUnavailable, .deviceChangeRecoveryFailed,
+                 .selectedInputUnavailable, .inputDeviceSelectionUnavailable,
+                 .couldNotSelectInput:
+                NotificationService.shared.showError(
+                    title: "Microphone Unavailable",
+                    message: error.localizedDescription,
+                    critical: false
+                )
+                return
+            case .invalidFormat, .converterUnavailable, .conversionFailed:
+                break
+            }
+        }
+
+        NotificationService.shared.showError(
+            title: "Audio Processing Error",
+            message: "Failed to process audio: \(error.localizedDescription)",
+            critical: false
         )
     }
 

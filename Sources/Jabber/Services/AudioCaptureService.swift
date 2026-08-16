@@ -1,10 +1,12 @@
 @preconcurrency import AVFoundation
+@preconcurrency import AudioToolbox
 import Foundation
 import os
 
 @MainActor
 final class AudioCaptureService {
     private var engineStorage: AnyObject?
+    private let inputDeviceMonitor = AudioInputDeviceMonitor.shared
     private let targetSampleRate: Double = 16_000
     private let converterQueue = DispatchQueue(label: "com.jabber.audioconverter")
     nonisolated(unsafe) private var converter: AVAudioConverter?
@@ -17,18 +19,41 @@ final class AudioCaptureService {
         var lastLevelUpdate: CFAbsoluteTime = 0
         var capturedSamples: [Float] = []
         var isCapturing = false
+        var engineGeneration = 0
+        var firstBufferGeneration = 0
         /// Set when capture starts, cleared once the tap delivers its first
         /// buffer, so the wait for CoreAudio can be logged exactly once.
         var captureStartedAt: ContinuousClock.Instant?
     }
 
+    private enum InputRebuildReason: Equatable, CustomStringConvertible {
+        case defaultDeviceChanged
+        case deviceListChanged
+        case selectionChanged
+        case engineConfigurationChanged
+        case missingFirstBuffer
+
+        var description: String {
+            switch self {
+            case .defaultDeviceChanged:
+                return "the default input changed"
+            case .deviceListChanged:
+                return "the available input devices changed"
+            case .selectionChanged:
+                return "the selected input changed"
+            case .engineConfigurationChanged:
+                return "the audio engine configuration changed"
+            case .missingFirstBuffer:
+                return "the input delivered no audio"
+            }
+        }
+    }
+
     var onAudioLevel: ((Float) -> Void)?
     var onConversionError: ((Error) -> Void)?
-    /// Invoked when the engine's configuration changes mid-capture (input
-    /// device unplugged, AirPods disconnect). AVAudioEngine stops itself in
-    /// that case and the tap simply goes silent, so without this signal the
-    /// session would keep "recording" dead air with a frozen level meter.
-    var onCaptureInterrupted: (() -> Void)?
+    /// Invoked only when input recovery fails, so the coordinator can stop the
+    /// session, preserve captured audio, and surface the failure.
+    var onCaptureInterrupted: ((Error) -> Void)?
     private var configurationChangeObserver: (any NSObjectProtocol)?
     /// Engine built, converter created, tap installed. The microphone is only
     /// open once the engine is also running.
@@ -37,14 +62,32 @@ final class AudioCaptureService {
     /// new input device instead of being kept warm in a stale configuration.
     private var needsRebuild = false
     private var standbyTask: Task<Void, Never>?
+    private var inputRecoveryTask: Task<Void, Never>?
+    private var inputRecoveryGeneration = 0
+    private var firstBufferWatchdogTask: Task<Void, Never>?
+    private var didRetryMissingFirstBuffer = false
+    private var configuredInputDeviceID: AudioDeviceID?
     /// How long the engine keeps running after a session. Back-to-back
     /// dictations then skip the start cost; a lone one releases the
     /// microphone, and its indicator, shortly after.
     private let standbyDuration: Duration = .seconds(8)
+    private let firstBufferTimeout: Duration = .seconds(2)
+    private let inputReadinessRetryDelay: Duration = .milliseconds(200)
+    private let inputReadinessAttempts = 6
 
     init() {
         captureState.withLock {
             $0.capturedSamples.reserveCapacity(Self.initialCapturedSampleCapacity)
+        }
+        inputDeviceMonitor.onDefaultInputDeviceChange = { [weak self] in
+            guard TypedSettings[.inputDeviceUID].isEmpty else { return }
+            self?.requestInputRebuild(reason: .defaultDeviceChanged)
+        }
+        inputDeviceMonitor.onDeviceListChange = { [weak self] in
+            self?.handleDeviceListChange()
+        }
+        inputDeviceMonitor.onSelectionChange = { [weak self] in
+            self?.requestInputRebuild(reason: .selectionChanged)
         }
     }
 
@@ -95,6 +138,7 @@ final class AudioCaptureService {
     private func buildEngine() throws {
         let engine = audioEngine()
         let inputNode = engine.inputNode
+        try configureInputDevice(inputNode)
         let inputFormat = inputNode.inputFormat(forBus: 0)
 
         // A device that is still waking up reports a zero-rate format; a tap
@@ -117,8 +161,12 @@ final class AudioCaptureService {
         }
         setConverter(converter)
 
+        let generation = captureState.withLock { state in
+            state.engineGeneration += 1
+            return state.engineGeneration
+        }
         inputNode.installTap(onBus: 0, bufferSize: 1024, format: inputFormat) { [weak self] buffer, _ in
-            self?.processBuffer(buffer)
+            self?.processBuffer(buffer, generation: generation)
         }
 
         configurationChangeObserver = NotificationCenter.default.addObserver(
@@ -136,12 +184,41 @@ final class AudioCaptureService {
         needsRebuild = false
     }
 
+    private func configureInputDevice(_ inputNode: AVAudioInputNode) throws {
+        let selectedUID = TypedSettings[.inputDeviceUID]
+        guard !selectedUID.isEmpty else {
+            configuredInputDeviceID = nil
+            return
+        }
+        guard var deviceID = inputDeviceMonitor.deviceID(forUID: selectedUID) else {
+            throw AudioCaptureError.selectedInputUnavailable
+        }
+        guard let audioUnit = inputNode.audioUnit else {
+            throw AudioCaptureError.inputDeviceSelectionUnavailable
+        }
+
+        let status = AudioUnitSetProperty(
+            audioUnit,
+            kAudioOutputUnitProperty_CurrentDevice,
+            kAudioUnitScope_Global,
+            0,
+            &deviceID,
+            UInt32(MemoryLayout<AudioDeviceID>.size)
+        )
+        guard status == noErr else {
+            throw AudioCaptureError.couldNotSelectInput(status)
+        }
+        configuredInputDeviceID = deviceID
+    }
+
     func startCapture() throws {
         guard !isCapturing else { return }
 
         let startedAt = ContinuousClock.now
+        cancelInputRecovery()
         standbyTask?.cancel()
         standbyTask = nil
+        didRetryMissingFirstBuffer = false
 
         if needsRebuild || !isPrepared {
             teardownEngine()
@@ -156,37 +233,121 @@ final class AudioCaptureService {
         captureState.withLock {
             $0.capturedSamples.removeAll(keepingCapacity: true)
             $0.isCapturing = true
+            $0.firstBufferGeneration = 0
             $0.captureStartedAt = startedAt
         }
 
-        if !engine.isRunning {
-            do {
+        do {
+            if !engine.isRunning {
                 try engine.start()
-            } catch {
-                // Whatever the engine was holding is suspect now; make the
-                // next attempt build from scratch rather than reuse it.
-                needsRebuild = true
-                stopCapture()
-                throw error
             }
+            armFirstBufferWatchdog()
+        } catch {
+            // Whatever the engine was holding is suspect now; make the next
+            // attempt build from scratch rather than reuse it.
+            needsRebuild = true
+            stopCapture()
+            throw error
         }
         logger.notice("Audio capture engine ready in \((ContinuousClock.now - startedAt).wholeMilliseconds) ms")
     }
 
     private func handleConfigurationChange() {
-        // The input format may have changed, so the tap and converter built
-        // against the old device have to go, whether or not audio is flowing.
-        needsRebuild = true
+        requestInputRebuild(reason: .engineConfigurationChanged)
+    }
 
-        guard isCapturing else {
-            logger.notice("Audio engine configuration changed while idle; rebuilding")
-            teardownEngine()
-            prepare()
+    private func handleDeviceListChange() {
+        let selectedUID = TypedSettings[.inputDeviceUID]
+        guard !selectedUID.isEmpty else { return }
+
+        let resolvedDeviceID = inputDeviceMonitor.deviceID(forUID: selectedUID)
+        guard resolvedDeviceID != configuredInputDeviceID else { return }
+        configuredInputDeviceID = resolvedDeviceID
+        requestInputRebuild(reason: .deviceListChanged)
+    }
+
+    private func requestInputRebuild(reason: InputRebuildReason) {
+        needsRebuild = true
+        guard isPrepared || isCapturing else {
+            logger.notice("Deferring input rebuild until capture is prepared")
+            return
+        }
+        guard inputRecoveryTask == nil else {
+            logger.notice("Coalescing input rebuild after \(reason)")
+            return
+        }
+        if reason != .missingFirstBuffer {
+            didRetryMissingFirstBuffer = false
+        }
+
+        logger.notice("Scheduling input rebuild because \(reason)")
+        inputRecoveryGeneration += 1
+        let recoveryGeneration = inputRecoveryGeneration
+        inputRecoveryTask = Task { @MainActor [weak self] in
+            guard let self else { return }
+            await self.rebuildInput(reason: reason, recoveryGeneration: recoveryGeneration)
+        }
+    }
+
+    private func rebuildInput(reason: InputRebuildReason, recoveryGeneration: Int) async {
+        let wasCapturing = isCapturing
+        teardownEngine(drainConverterTail: wasCapturing)
+
+        var lastError: Error = AudioCaptureError.invalidFormat
+        for attempt in 0 ..< inputReadinessAttempts {
+            guard !Task.isCancelled else {
+                finishInputRecovery(generation: recoveryGeneration)
+                return
+            }
+            if attempt > 0 {
+                do {
+                    try await Task.sleep(for: inputReadinessRetryDelay)
+                } catch {
+                    finishInputRecovery(generation: recoveryGeneration)
+                    return
+                }
+            }
+
+            do {
+                try buildEngine()
+                if isCapturing {
+                    captureState.withLock {
+                        $0.captureStartedAt = .now
+                    }
+                    try audioEngine().start()
+                    armFirstBufferWatchdog()
+                }
+                needsRebuild = false
+                finishInputRecovery(generation: recoveryGeneration)
+                logger.notice("Rebuilt audio input after \(reason)")
+                return
+            } catch {
+                lastError = error
+                logger.warning(
+                    "Audio input rebuild attempt \(attempt + 1) failed: \(error.localizedDescription)"
+                )
+                teardownEngine()
+            }
+        }
+
+        finishInputRecovery(generation: recoveryGeneration)
+        guard wasCapturing, isCapturing else {
+            logger.error("Could not prepare audio input after \(reason): \(lastError.localizedDescription)")
             return
         }
 
-        logger.warning("Audio engine configuration changed during capture")
-        onCaptureInterrupted?()
+        onCaptureInterrupted?(AudioCaptureError.deviceChangeRecoveryFailed(lastError))
+    }
+
+    private func cancelInputRecovery() {
+        inputRecoveryGeneration += 1
+        inputRecoveryTask?.cancel()
+        inputRecoveryTask = nil
+    }
+
+    private func finishInputRecovery(generation: Int) {
+        guard inputRecoveryGeneration == generation else { return }
+        inputRecoveryTask = nil
     }
 
     private func scheduleStandbyRetirement() {
@@ -211,9 +372,11 @@ final class AudioCaptureService {
         logger.notice("Audio engine stopped after standby")
     }
 
-    private func teardownEngine() {
+    private func teardownEngine(drainConverterTail: Bool = false) {
         standbyTask?.cancel()
         standbyTask = nil
+        firstBufferWatchdogTask?.cancel()
+        firstBufferWatchdogTask = nil
 
         if let configurationChangeObserver {
             NotificationCenter.default.removeObserver(configurationChangeObserver)
@@ -221,14 +384,18 @@ final class AudioCaptureService {
         }
 
         if let engine = engineStorage as? AVAudioEngine {
+            engine.stop()
             if isPrepared {
                 engine.inputNode.removeTap(onBus: 0)
             }
-            engine.stop()
+        }
+        if drainConverterTail {
+            drainConverter()
         }
 
         setConverter(nil)
         isPrepared = false
+        engineStorage = nil
     }
 
     func stopCapture() {
@@ -242,6 +409,9 @@ final class AudioCaptureService {
             $0.isCapturing = false
             $0.captureStartedAt = nil
         }
+        cancelInputRecovery()
+        firstBufferWatchdogTask?.cancel()
+        firstBufferWatchdogTask = nil
         drainConverter()
 
         // The engine stays built either way. A route change invalidated the
@@ -301,10 +471,53 @@ final class AudioCaptureService {
         }
     }
 
-    nonisolated private func processBuffer(_ buffer: AVAudioPCMBuffer) {
+    private func armFirstBufferWatchdog() {
+        firstBufferWatchdogTask?.cancel()
+        let generation = captureState.withLock { $0.engineGeneration }
+        firstBufferWatchdogTask = Task { @MainActor [weak self] in
+            guard let self else { return }
+            do {
+                try await Task.sleep(for: firstBufferTimeout)
+            } catch {
+                return
+            }
+
+            let isStillMissing = captureState.withLock { state in
+                state.isCapturing &&
+                    state.engineGeneration == generation &&
+                    state.firstBufferGeneration != generation
+            }
+            guard isStillMissing else { return }
+
+            firstBufferWatchdogTask = nil
+            guard !didRetryMissingFirstBuffer else {
+                logger.error("Audio input delivered no buffers after a fresh engine retry")
+                onCaptureInterrupted?(AudioCaptureError.inputUnavailable)
+                return
+            }
+
+            didRetryMissingFirstBuffer = true
+            logger.warning("Audio input delivered no buffers; rebuilding the engine once")
+            requestInputRebuild(reason: .missingFirstBuffer)
+        }
+    }
+
+    private func didReceiveFirstBuffer(generation: Int) {
+        let isCurrentGeneration = captureState.withLock {
+            $0.engineGeneration == generation && $0.firstBufferGeneration == generation
+        }
+        guard isCurrentGeneration else { return }
+
+        firstBufferWatchdogTask?.cancel()
+        firstBufferWatchdogTask = nil
+    }
+
+    nonisolated private func processBuffer(_ buffer: AVAudioPCMBuffer, generation: Int) {
         // The tap keeps firing while the engine idles in standby; drop those
         // buffers rather than resampling audio no session asked for.
-        guard captureState.withLock({ $0.isCapturing }) else { return }
+        guard captureState.withLock({
+            $0.isCapturing && $0.engineGeneration == generation
+        }) else { return }
 
         let rms = calculateRms(from: buffer)
         let now = CFAbsoluteTimeGetCurrent()
@@ -338,16 +551,21 @@ final class AudioCaptureService {
         guard frames > 0 else { return }
 
         let samples = Array(UnsafeBufferPointer(start: channelData, count: frames))
-        let firstAudioDelay: Duration? = captureState.withLock {
-            guard $0.isCapturing else { return nil }
+        let firstAudio: (delay: Duration, generation: Int)? = captureState.withLock {
+            guard $0.isCapturing, $0.engineGeneration == generation else { return nil }
             $0.capturedSamples.append(contentsOf: samples)
+            guard $0.firstBufferGeneration != generation else { return nil }
+            $0.firstBufferGeneration = generation
             guard let startedAt = $0.captureStartedAt else { return nil }
             $0.captureStartedAt = nil
-            return ContinuousClock.now - startedAt
+            return (ContinuousClock.now - startedAt, generation)
         }
 
-        if let firstAudioDelay {
-            logger.notice("First audio arrived \(firstAudioDelay.wholeMilliseconds) ms after capture start")
+        if let firstAudio {
+            logger.notice("First audio arrived \(firstAudio.delay.wholeMilliseconds) ms after capture start")
+            DispatchQueue.main.async { [weak self] in
+                self?.didReceiveFirstBuffer(generation: firstAudio.generation)
+            }
         }
     }
 
@@ -428,7 +646,11 @@ enum AudioCaptureError: Error, LocalizedError {
     case invalidFormat
     case converterUnavailable
     case conversionFailed(Error)
-    case deviceChanged
+    case inputUnavailable
+    case deviceChangeRecoveryFailed(Error)
+    case selectedInputUnavailable
+    case inputDeviceSelectionUnavailable
+    case couldNotSelectInput(OSStatus)
 
     var errorDescription: String? {
         switch self {
@@ -438,8 +660,16 @@ enum AudioCaptureError: Error, LocalizedError {
             return "Audio converter could not be created"
         case .conversionFailed(let error):
             return "Audio conversion failed: \(error.localizedDescription)"
-        case .deviceChanged:
-            return "The audio input device changed during recording"
+        case .inputUnavailable:
+            return "The microphone connected, but did not provide any audio"
+        case .deviceChangeRecoveryFailed(let error):
+            return "Could not reconnect to the microphone: \(error.localizedDescription)"
+        case .selectedInputUnavailable:
+            return "The selected microphone is not connected"
+        case .inputDeviceSelectionUnavailable:
+            return "Jabber could not access audio input device selection"
+        case .couldNotSelectInput(let status):
+            return "Jabber could not select the microphone (OSStatus \(status))"
         }
     }
 }

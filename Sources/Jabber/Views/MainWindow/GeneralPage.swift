@@ -4,14 +4,41 @@ import SwiftUI
 struct GeneralPage: View {
     @ObservedObject var updaterController: UpdaterController
 
+    @AppStorage(AppSettingKey.inputDeviceUID) private var inputDeviceUID = ""
     @AppStorage(AppSettingKey.outputMode) private var outputMode = TypingService.OutputMode.directTyping.rawValue
     @AppStorage(AppSettingKey.pauseMediaDuringRecording) private var pauseMediaDuringRecording = false
     @AppStorage(AppSettingKey.soundFeedbackEnabled) private var soundFeedbackEnabled = true
 
     @State private var permissionRefreshTick = false
+    @State private var inputDevices: [AudioInputDevice] = []
+    @State private var inputDeviceRefreshTick = false
 
     var body: some View {
         Form {
+            Section {
+                Picker("Input", selection: $inputDeviceUID) {
+                    Text("System Default").tag("")
+                    ForEach(inputDevices) { device in
+                        Text(device.name).tag(device.uid)
+                    }
+                    if isSelectedInputUnavailable {
+                        Text("Unavailable Microphone").tag(inputDeviceUID)
+                    }
+                }
+
+                if isSelectedInputUnavailable {
+                    Text("The selected microphone is not connected. Jabber will not fall back to another input.")
+                        .font(.caption)
+                        .foregroundStyle(.orange)
+                } else {
+                    Text(inputDeviceDescription)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            } header: {
+                Text("Microphone")
+            }
+
             Section {
                 Picker("After transcription", selection: $outputMode) {
                     Text("Copy to clipboard").tag(TypingService.OutputMode.clipboard.rawValue)
@@ -79,7 +106,14 @@ struct GeneralPage: View {
         .formStyle(.grouped)
         .onAppear {
             outputMode = TypingService.migratedOutputModeRawValue(outputMode)
+            refreshInputDevices()
             permissionRefreshTick.toggle()
+        }
+        .onChange(of: inputDeviceUID) {
+            AudioInputDeviceMonitor.shared.selectionDidChange()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: Constants.Notifications.audioInputDevicesDidChange)) { _ in
+            refreshInputDevices()
         }
         .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
             permissionRefreshTick.toggle()
@@ -88,6 +122,26 @@ struct GeneralPage: View {
 
     private var selectedOutputMode: TypingService.OutputMode {
         TypingService.OutputMode(rawValue: TypingService.migratedOutputModeRawValue(outputMode)) ?? .directTyping
+    }
+
+    private var isSelectedInputUnavailable: Bool {
+        !inputDeviceUID.isEmpty && !inputDevices.contains { $0.uid == inputDeviceUID }
+    }
+
+    private var inputDeviceDescription: String {
+        _ = inputDeviceRefreshTick
+        if inputDeviceUID.isEmpty {
+            let name = AudioInputDeviceMonitor.shared.defaultInputDevice?.name ?? "the macOS default"
+            return "Follows the input selected in macOS. Currently using \(name)."
+        }
+
+        let name = inputDevices.first { $0.uid == inputDeviceUID }?.name ?? "the selected microphone"
+        return "Jabber will keep using \(name) when the system default changes."
+    }
+
+    private func refreshInputDevices() {
+        inputDevices = AudioInputDeviceMonitor.shared.devices
+        inputDeviceRefreshTick.toggle()
     }
 
     private var isAccessibilityTrusted: Bool {

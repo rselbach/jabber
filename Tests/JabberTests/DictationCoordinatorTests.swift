@@ -100,7 +100,7 @@ final class DictationCoordinatorTests: XCTestCase {
         audioCapture.startShouldSucceed = false
 
         var reportedError: Error?
-        coordinator.onTranscriptionError = { error in
+        coordinator.onAudioConversionError = { error in
             reportedError = error
         }
 
@@ -600,25 +600,48 @@ final class DictationCoordinatorTests: XCTestCase {
         XCTAssertTrue(dictationHistoryStore.sessions.isEmpty)
     }
 
-    func testCaptureInterruptionStopsRecordingAndTranscribesCapturedAudio() async {
+    func testCaptureRecoveryFailureStopsRecordingAndTranscribesCapturedAudio() async {
+        struct GreendaleAudioError: Error {}
+
         audioCapture.storedSamples = makeLoudSamples()
         transcriptionService.transcribeResult = .success("troy barnes")
 
         let errorSurfaced = expectation(description: "interruption error surfaced")
         coordinator.onAudioConversionError = { error in
-            guard case AudioCaptureError.deviceChanged = error else { return }
+            guard case AudioCaptureError.deviceChangeRecoveryFailed = error else { return }
             errorSurfaced.fulfill()
         }
         let output = expectation(description: "captured audio transcribed and typed")
         typingService.onOutput = { _ in output.fulfill() }
 
         XCTAssertTrue(coordinator.start(targetProcessID: 12_345))
-        // Simulate the input device disappearing mid-recording.
-        audioCapture.onCaptureInterrupted?()
+        audioCapture.onCaptureInterrupted?(
+            AudioCaptureError.deviceChangeRecoveryFailed(GreendaleAudioError())
+        )
 
         await fulfillment(of: [errorSurfaced, output], timeout: 1.0)
         XCTAssertEqual(typingService.outputs, ["troy barnes"])
         XCTAssertTrue(audioCapture.didStop)
+    }
+
+    func testUnavailableInputStopsEmptyRecordingAndSurfacesError() {
+        var surfacedError: AudioCaptureError?
+        coordinator.onAudioConversionError = { error in
+            surfacedError = error as? AudioCaptureError
+        }
+
+        XCTAssertTrue(coordinator.start())
+        audioCapture.onCaptureInterrupted?(AudioCaptureError.inputUnavailable)
+
+        XCTAssertTrue(coordinator.isIdle)
+        XCTAssertTrue(audioCapture.didStop)
+        XCTAssertTrue(typingService.outputs.isEmpty)
+        guard let surfacedError else {
+            return XCTFail("input-unavailable error was not surfaced")
+        }
+        guard case .inputUnavailable = surfacedError else {
+            return XCTFail("input-unavailable error was not surfaced")
+        }
     }
 
     func testCancelDuringHistorySaveDiscardsOutput() async {
@@ -1197,7 +1220,7 @@ final class DictationCoordinatorTests: XCTestCase {
 final class FakeAudioCapture: AudioCaptureProtocol, @unchecked Sendable {
     var onAudioLevel: ((Float) -> Void)?
     var onConversionError: ((Error) -> Void)?
-    var onCaptureInterrupted: (() -> Void)?
+    var onCaptureInterrupted: ((Error) -> Void)?
 
     var startShouldSucceed = true
     var startError: Error?

@@ -30,6 +30,7 @@ final class TypedSettingsTests: XCTestCase {
     func testDefaultValues() {
         XCTAssertEqual(settings[.selectedModel], LanguageModelCatalog.recommendedModelId(for: Constants.defaultLanguage), "Default model should match the default language recommendation")
         XCTAssertEqual(settings[.selectedLanguage], Constants.defaultLanguage, "Default language should match system")
+        XCTAssertEqual(settings[.inputDeviceUID], "")
         XCTAssertEqual(settings[.outputMode], TypingService.OutputMode.directTyping.rawValue)
         XCTAssertEqual(settings[.hotkeyActivationMode], HotkeyActivationMode.defaultMode.rawValue)
         XCTAssertEqual(settings[.replacementEntries], "", "Default replacement entries should be empty JSON string")
@@ -39,6 +40,19 @@ final class TypedSettingsTests: XCTestCase {
         XCTAssertEqual(settings[.openCodeZenModel], OpenCodeZenModelCatalog.defaultModelId)
         XCTAssertEqual(settings[.lastModelMigrationNoticeKey], "")
         XCTAssertEqual(settings[.declinedModelMigrationNoticeKey], "")
+    }
+
+    func testInputDeviceUIDDefaultsAndPersistence() {
+        XCTAssertEqual(settings[.inputDeviceUID], "")
+        XCTAssertFalse(settings.isSet(.inputDeviceUID))
+
+        settings[.inputDeviceUID] = "GreendalePodcastMicrophone"
+        XCTAssertEqual(settings[.inputDeviceUID], "GreendalePodcastMicrophone")
+        XCTAssertTrue(settings.isSet(.inputDeviceUID))
+
+        settings.remove(.inputDeviceUID)
+        XCTAssertEqual(settings[.inputDeviceUID], "")
+        XCTAssertFalse(settings.isSet(.inputDeviceUID))
     }
 
     func testPostProcessingProviderKindDefaultsAndPersistence() {

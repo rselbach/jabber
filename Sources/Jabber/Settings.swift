@@ -11,6 +11,7 @@ import Foundation
 enum TypedSetting<T>: Sendable {
     case selectedModel
     case selectedLanguage
+    case inputDeviceUID
     case outputMode
     case hotkeyActivationMode
     case replacementEntries
@@ -25,6 +26,7 @@ enum TypedSetting<T>: Sendable {
         switch self {
         case .selectedModel: return AppSettingKey.selectedModel
         case .selectedLanguage: return AppSettingKey.selectedLanguage
+        case .inputDeviceUID: return AppSettingKey.inputDeviceUID
         case .outputMode: return AppSettingKey.outputMode
         case .hotkeyActivationMode: return AppSettingKey.hotkeyActivationMode
         case .replacementEntries: return AppSettingKey.replacementEntries
@@ -106,6 +108,8 @@ extension TypedSetting where T == String {
             return LanguageModelCatalog.recommendedModelId(for: Constants.defaultLanguage)
         case .selectedLanguage:
             return Constants.defaultLanguage
+        case .inputDeviceUID:
+            return ""
         case .outputMode:
             return TypingService.OutputMode.directTyping.rawValue
         case .hotkeyActivationMode:
@@ -166,7 +170,7 @@ struct SettingsStore: Sendable {
             return OpenRouterModelCatalog.resolveModelId(rawValue)
         case .openCodeZenModel:
             return OpenCodeZenModelCatalog.resolveModelId(rawValue)
-        case .selectedModel, .selectedLanguage, .replacementEntries,
+        case .selectedModel, .selectedLanguage, .inputDeviceUID, .replacementEntries,
              .lastModelMigrationNoticeKey, .declinedModelMigrationNoticeKey:
             return rawValue
         }

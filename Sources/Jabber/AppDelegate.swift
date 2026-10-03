@@ -59,6 +59,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var automaticHotkeyPressStartedAt: CFAbsoluteTime?
     private var automaticHotkeyPressStartedRecording = false
 
+    // A modifier-only shortcut that failed to register for lack of
+    // Accessibility is retried once the grant appears; the poll task exists
+    // only while the policy is pending.
+    private var hotkeyRetryPolicy = ModifierOnlyRegistrationRetryPolicy()
+    private var hotkeyRetryTask: Task<Void, Never>?
+
     private var modelState: TranscriptionService.State = .notReady
 
     private var currentTargetProcessID: pid_t?
@@ -124,6 +130,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         firstRunSetupTask?.cancel()
         audioPrepareTask?.cancel()
         modelMigrationNoticeTask?.cancel()
+        hotkeyRetryTask?.cancel()
         onboardingCoordinator?.stop()
         dictationCoordinator.cancel()
         NotificationCenter.default.removeObserver(self)
@@ -162,6 +169,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             self,
             selector: #selector(handleHotkeyCaptureEnd),
             name: Constants.Notifications.hotkeyCaptureDidEnd,
+            object: nil
+        )
+
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(handleApplicationDidBecomeActive),
+            name: NSApplication.didBecomeActiveNotification,
             object: nil
         )
 
@@ -410,8 +424,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
 
         hotkeyManager.onRegistrationFailure = { [weak self] status in
-            self?.logger.error("Hotkey registration failed with status: \(status)")
+            guard let self else { return }
+            self.logger.error("Hotkey registration failed with status: \(status)")
             let shortcut = TypedSettings.hotkeyShortcut
+            let shouldNotify = self.hotkeyRetryPolicy.recordFailure(
+                isModifierOnly: shortcut.isModifierOnly,
+                isTrusted: self.permissionService.refreshAccessibilityPermissionStatus()
+            )
+            self.updateHotkeyRetryPolling()
+            guard shouldNotify else { return }
+
             let display = shortcut.displayString
             let message: String
             if shortcut.isModifierOnly {
@@ -514,6 +536,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     @objc private func handleHotkeyCaptureBegin() {
+        stopHotkeyRetry()
         hotkeyManager.unregister()
     }
 
@@ -521,8 +544,57 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         registerConfiguredHotkey()
     }
 
+    @objc private func handleApplicationDidBecomeActive() {
+        retryHotkeyRegistrationIfTrusted()
+    }
+
     private func registerConfiguredHotkey() {
+        stopHotkeyRetry()
         hotkeyManager.register(TypedSettings.hotkeyShortcut)
+    }
+
+    private func stopHotkeyRetry() {
+        hotkeyRetryPolicy.reset()
+        updateHotkeyRetryPolling()
+    }
+
+    private func updateHotkeyRetryPolling() {
+        guard hotkeyRetryPolicy.isPending else {
+            hotkeyRetryTask?.cancel()
+            hotkeyRetryTask = nil
+            return
+        }
+        guard hotkeyRetryTask == nil else { return }
+
+        hotkeyRetryTask = Task { [weak self] in
+            while !Task.isCancelled {
+                do {
+                    try await Task.sleep(for: ModifierOnlyRegistrationRetryPolicy.pollInterval)
+                } catch is CancellationError {
+                    return
+                } catch {
+                    self?.logger.error("Hotkey retry polling failed: \(error.localizedDescription)")
+                    return
+                }
+
+                guard let self else { return }
+                self.retryHotkeyRegistrationIfTrusted()
+            }
+        }
+    }
+
+    private func retryHotkeyRegistrationIfTrusted() {
+        guard hotkeyRetryPolicy.isPending else { return }
+        let isTrusted = permissionService.refreshAccessibilityPermissionStatus()
+        guard hotkeyRetryPolicy.recordTrust(isTrusted) else { return }
+
+        logger.info("Accessibility granted; re-registering modifier-only hotkey")
+        // On failure the manager reports through onRegistrationFailure, which
+        // keeps the retry pending without notifying again.
+        guard hotkeyManager.register(TypedSettings.hotkeyShortcut) == noErr else { return }
+
+        logger.notice("Re-registered modifier-only hotkey after Accessibility was granted")
+        stopHotkeyRetry()
     }
 
     private var hasActiveOrPendingRecording: Bool {

@@ -368,7 +368,9 @@ final class DictationCoordinatorTests: XCTestCase {
         limitedCoordinator.onRecordingLimitReached = { limitReached.fulfill() }
         let idleExpectation = XCTestExpectation(description: "coordinator returns to idle after limit stop")
         limitedCoordinator.onStateChange = { state in
-            if state == .idle { idleExpectation.fulfill() }
+            if state == .idle {
+                idleExpectation.fulfill()
+            }
         }
 
         XCTAssertTrue(limitedCoordinator.start())

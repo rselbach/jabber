@@ -2,6 +2,12 @@ import AppKit
 import Foundation
 import SwiftUI
 
+/// A short titled message shown on the overlay in place of its live content.
+struct OverlayNotice: Equatable {
+    let title: String
+    let message: String
+}
+
 @MainActor
 final class WaveformView: ObservableObject {
     private var circularBuffer: [Float] = []
@@ -10,10 +16,11 @@ final class WaveformView: ObservableObject {
     @Published private(set) var processingLabel = "Transcribing..."
     @Published private(set) var partialTranscription = ""
     @Published private(set) var targetAppIcon: NSImage?
-    /// Brief, non-disruptive message shown on the overlay when post-processing
-    /// fell back to the raw transcript after a guardrail rejection. Auto-clears
-    /// after `fallbackNoticeDuration` so no click-to-dismiss UI is needed.
-    @Published private(set) var fallbackNotice: String?
+    /// Brief, non-disruptive message shown on the overlay: post-processing
+    /// fell back to the raw transcript, or a message NotificationService could
+    /// not post as a system notification. Auto-clears after
+    /// `fallbackNoticeDuration` so no click-to-dismiss UI is needed.
+    @Published private(set) var fallbackNotice: OverlayNotice?
 
     /// Invoked when the fallback notice auto-clears (after its duration) or is
     /// cleared explicitly, so the overlay window can complete a deferred hide.
@@ -25,7 +32,7 @@ final class WaveformView: ObservableObject {
     private var writeIndex = 0
     private var isFull = false
     private var fallbackClearTask: Task<Void, Never>?
-    private let fallbackNoticeDuration: TimeInterval = 2.0
+    private let fallbackNoticeDuration: TimeInterval = 4.0
 
     var hasActiveFallbackNotice: Bool {
         fallbackNotice != nil
@@ -83,13 +90,13 @@ final class WaveformView: ObservableObject {
         processingLabel = "Refining..."
     }
 
-    /// Shows a brief red fallback notice on the overlay. Auto-clears after
+    /// Shows a brief fallback notice on the overlay. Auto-clears after
     /// `fallbackNoticeDuration` and fires `onFallbackNoticeCleared` so the
     /// overlay window can complete a deferred hide once the notice has been
     /// read. Replaces any prior notice.
-    func showFallbackNotice(_ text: String) {
+    func showFallbackNotice(title: String, message: String) {
         fallbackClearTask?.cancel()
-        fallbackNotice = text
+        fallbackNotice = OverlayNotice(title: title, message: message)
         let duration = fallbackNoticeDuration
         fallbackClearTask = Task { [weak self] in
             do {

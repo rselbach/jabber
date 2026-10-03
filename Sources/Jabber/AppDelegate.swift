@@ -71,7 +71,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // `@AppStorage` reads never observe a pre-migration value and the
         // SettingsStore getters can stay pure (no writes during view updates).
         TypedSettings.migrateStoredValues()
-        _ = NotificationService.shared
+        setupOverlayNotices()
         setupMenuBar()
         setupHotkey()
         setupDictationCoordinator()
@@ -95,6 +95,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // download via its own model-download step. Starting the load task
         // here would pull a multi-GB default model the user may not pick.
         if !willShowOnboarding {
+            // Users who already answered get their recorded choice back with
+            // no prompt. New users are asked when the onboarding window closes
+            // (windowWillClose) so the prompt never covers the welcome screen.
+            NotificationService.shared.requestAuthorization()
             if let pendingNotice {
                 scheduleModelMigrationNoticePresentation(pendingNotice)
             } else if !startDeclinedModelMigrationFallbackIfNeeded() {
@@ -212,7 +216,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             let transcriptionService = appDelegate.transcriptionService
             await transcriptionService.setSessionModelOverride(nil)
             await transcriptionService.unloadModel()
-            if Task.isCancelled { return }
+            if Task.isCancelled {
+                return
+            }
             await appDelegate.loadModel()
         }
     }
@@ -406,6 +412,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         registerConfiguredHotkey()
     }
 
+    /// Routes messages NotificationService cannot post as notifications to
+    /// the recording overlay instead of modal alerts.
+    private func setupOverlayNotices() {
+        NotificationService.shared.noticePresenter = { [weak self] title, message in
+            self?.showOverlayNotice(title: title, message: message)
+        }
+        overlayWindow.onFallbackNoticeCleared = { [weak self] in
+            self?.syncNonDictationUI()
+        }
+    }
+
+    private func showOverlayNotice(title: String, message: String) {
+        overlayWindow.showFallbackNotice(title: title, message: message)
+        // The notice takes the download overlay's spot until it clears; see
+        // showDownloadOverlay.
+        downloadOverlay.hide()
+    }
+
     private func setupDictationCoordinator() {
         dictationCoordinator.onStateChange = { [weak self] state in
             self?.handleDictationStateChange(state)
@@ -451,7 +475,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         dictationCoordinator.onPostProcessingFallback = { [weak self] in
             guard let self else { return }
             self.logger.notice("Post-processing fell back to raw transcript after guardrail rejection")
-            self.overlayWindow.showFallbackNotice("Post-processing looked wrong — used raw transcript")
+            self.overlayWindow.showFallbackNotice(
+                title: "Used Raw Transcript",
+                message: "Post-processing looked wrong."
+            )
         }
 
         dictationCoordinator.onRecordingLimitReached = { [weak self] in
@@ -601,10 +628,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         let hasMicrophonePermission = await permissionService.requestMicrophonePermission()
         guard hasMicrophonePermission else {
-            NotificationService.shared.showPermissionWarning(
+            NotificationService.shared.showWarning(
                 title: "Microphone Permission Required",
-                message: "Jabber needs microphone access to record speech.",
-                section: .microphone
+                message: "Jabber needs microphone access to record speech."
             )
             showSetupGuidanceIfNeeded()
             return
@@ -618,7 +644,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         guard ensureOutputPermissionReady() else { return }
 
-        if dictationCoordinator.isRecording { return }
+        if dictationCoordinator.isRecording {
+            return
+        }
 
         guard dictationCoordinator.canStart else {
             showTranscriptionBusyNotice()
@@ -656,10 +684,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func showAccessibilityPermissionWarning() {
-        NotificationService.shared.showPermissionWarning(
+        NotificationService.shared.showWarning(
             title: "Accessibility Permission Required",
-            message: "Grant accessibility permission before dictating into the active app, or switch output to Copy to clipboard in Settings.",
-            section: .accessibility
+            message: "Grant accessibility permission before dictating into the active app, or switch output to Copy to clipboard in Settings."
         )
         showSetupGuidanceIfNeeded()
 
@@ -1184,11 +1211,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             downloadOverlay.hide()
             updateStatusIcon(state: .ready)
         case .downloading(let download):
-            downloadOverlay.show()
+            showDownloadOverlay()
             downloadOverlay.updateProgress(download.progress, status: download.status)
             updateStatusIcon(state: .downloading)
         case .loadingModel(let status, let progress):
-            downloadOverlay.show()
+            showDownloadOverlay()
             if let progress {
                 downloadOverlay.updateProgress(progress, status: status)
             } else {
@@ -1199,6 +1226,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             downloadOverlay.hide()
             updateStatusIcon(state: .error)
         }
+    }
+
+    /// The download overlay shares the recording overlay's spot, so it stays
+    /// hidden while an overlay notice is up. The notice's cleared callback
+    /// re-syncs (setupOverlayNotices).
+    private func showDownloadOverlay() {
+        guard !overlayWindow.hasActiveFallbackNotice else {
+            downloadOverlay.hide()
+            return
+        }
+        downloadOverlay.show()
     }
 }
 
@@ -1216,6 +1254,10 @@ extension AppDelegate: NSWindowDelegate {
             if abandoned {
                 handleAbandonedOnboarding(previouslyCompleted: previouslyCompleted)
             }
+            // Onboarding is out of the way, finished or abandoned, so the
+            // notification prompt no longer competes with it. After a rerun
+            // the user already answered and nothing is shown.
+            NotificationService.shared.requestAuthorization()
         } else if window === modelMigrationNoticeWindow {
             if !modelMigrationNoticeHandled,
                let notice = presentedModelMigrationNotice {

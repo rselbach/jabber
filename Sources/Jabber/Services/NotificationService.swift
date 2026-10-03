@@ -7,12 +7,26 @@ final class NotificationService: NSObject {
     static let shared = NotificationService()
     nonisolated static let foregroundPresentationOptions: UNNotificationPresentationOptions = [.banner, .sound]
 
+    /// How a message reaches the user.
+    enum Delivery: Equatable {
+        /// Modal `NSAlert`, reserved for critical messages.
+        case alert
+        /// System notification through `UNUserNotificationCenter`.
+        case notification
+        /// Transient on-screen notice through `noticePresenter`.
+        case notice
+    }
+
+    /// Shows messages that cannot be posted as system notifications without
+    /// blocking the user. AppDelegate points this at the recording overlay so
+    /// the service stays free of window management.
+    var noticePresenter: ((_ title: String, _ message: String) -> Void)?
+
     private let logger = Logger(subsystem: "com.rselbach.jabber", category: "NotificationService")
     private let notificationCenter: UNUserNotificationCenter?
-    private let isValidBundle: Bool
 
     private override init() {
-        isValidBundle = Bundle.main.bundleIdentifier != nil
+        let isValidBundle = Bundle.main.bundleIdentifier != nil
 
         if isValidBundle {
             notificationCenter = UNUserNotificationCenter.current()
@@ -24,88 +38,77 @@ final class NotificationService: NSObject {
 
         if isValidBundle {
             notificationCenter?.delegate = self
-            setupNotifications()
         } else {
-            logger.info("Running without proper bundle - notifications will use alerts")
+            logger.info("Running without proper bundle - notifications will use on-screen notices")
         }
     }
 
-    private func setupNotifications() {
+    /// Asks for permission to post notifications. Only the first request
+    /// prompts; once the user has answered, the system returns the recorded
+    /// choice without showing anything. AppDelegate holds this back until
+    /// onboarding is out of the way so the prompt never covers the welcome
+    /// screen.
+    func requestAuthorization() {
         guard let center = notificationCenter else { return }
         let logger = self.logger
 
-        center.requestAuthorization(options: [.alert, .sound]) { [weak self] granted, error in
+        center.requestAuthorization(options: [.alert, .sound]) { granted, error in
             if let error {
                 logger.error("Failed to request notification authorization: \(error.localizedDescription)")
             }
-            Task { @MainActor in
-                guard let self else { return }
-                if !granted {
-                    logger.info("User denied notification permissions, will use alert fallback")
-                }
+            if !granted {
+                logger.info("Notification permission not granted, will use on-screen notices")
             }
         }
     }
 
     func showError(title: String, message: String, critical: Bool = false) {
-        if critical {
-            showAlert(title: title, message: message, style: .critical)
-        } else {
-            showNotification(title: title, message: message)
-        }
+        deliver(title: title, message: message, critical: critical)
     }
 
     func showWarning(title: String, message: String) {
-        showNotification(title: title, message: message)
+        deliver(title: title, message: message, critical: false)
     }
 
-    func showPermissionWarning(
-        title: String,
-        message: String,
-        section: PermissionService.PermissionSection
-    ) {
-        showNotification(title: title, message: message, permissionSection: section)
-    }
-
-    func showNotification(
-        title: String,
-        message: String,
-        permissionSection: PermissionService.PermissionSection? = nil
-    ) {
-        guard isValidBundle, let center = notificationCenter else {
-            logger.info("Using alert fallback for notification: \(title)")
-            showAlert(
-                title: title,
-                message: message,
-                style: .informational,
-                permissionSection: permissionSection
-            )
-            return
-        }
+    private func deliver(title: String, message: String, critical: Bool) {
+        let center = notificationCenter
 
         // Recheck authorization on every send. The user can revoke notification
         // permission in System Settings after initially granting it, in which
         // case `center.add` still succeeds but the system never displays the
         // notification and all non-critical warnings vanish silently. Reading
         // the current settings is async and cheap, so re-verify per send and
-        // fall back to an alert when revoked.
+        // fall back to the on-screen notice when revoked. Bundle-less binaries
+        // have no center and never touch `UNUserNotificationCenter`.
         Task { @MainActor [weak self] in
+            let status = await center?.notificationSettings().authorizationStatus
             guard let self else { return }
-            let settings = await center.notificationSettings()
-            let authorised = Self.isAuthorized(status: settings.authorizationStatus)
-            guard authorised else {
-                self.logger.info("Notification permission not granted, using alert fallback: \(title)")
-                self.showAlert(
-                    title: title,
-                    message: message,
-                    style: .informational,
-                    permissionSection: permissionSection
-                )
-                return
-            }
 
-            await self.sendNotificationRequest(title: title, message: message, center: center)
+            switch Self.delivery(critical: critical, authorizationStatus: status) {
+            case .alert:
+                self.showAlert(title: title, message: message)
+            case .notification:
+                // A non-nil status implies a center.
+                guard let center else { return }
+                await self.sendNotificationRequest(title: title, message: message, center: center)
+            case .notice:
+                self.showNotice(title: title, message: message)
+            }
         }
+    }
+
+    /// Picks how a message reaches the user. Pure so the routing is testable
+    /// without the `UNUserNotificationCenter` singleton. Only critical
+    /// messages block with a modal alert; everything else posts a
+    /// notification when authorized and otherwise shows the non-modal notice.
+    /// `authorizationStatus` is nil when there is no notification center,
+    /// which is the case for bundle-less binaries such as bare `swift run`.
+    static func delivery(critical: Bool, authorizationStatus: UNAuthorizationStatus?) -> Delivery {
+        if critical {
+            return .alert
+        }
+        guard let authorizationStatus, isAuthorized(status: authorizationStatus) else { return .notice }
+        return .notification
     }
 
     /// Maps a `UNAuthorizationStatus` to whether Jabber may post. Pure so the
@@ -143,27 +146,21 @@ final class NotificationService: NSObject {
         }
     }
 
-    private func showAlert(
-        title: String,
-        message: String,
-        style: NSAlert.Style,
-        permissionSection: PermissionService.PermissionSection? = nil
-    ) {
+    private func showNotice(title: String, message: String) {
+        guard let noticePresenter else {
+            logger.error("No on-screen notice presenter, dropping message: \(title)")
+            return
+        }
+        logger.info("Showing on-screen notice: \(title)")
+        noticePresenter(title, message)
+    }
+
+    private func showAlert(title: String, message: String) {
         let alert = NSAlert()
         alert.messageText = title
         alert.informativeText = message
-        alert.alertStyle = style
+        alert.alertStyle = .critical
         alert.addButton(withTitle: "OK")
-
-        if let permissionSection {
-            alert.addButton(withTitle: "Open Privacy Settings")
-            let response = alert.runModal()
-            if response == .alertSecondButtonReturn {
-                PermissionService.shared.openPrivacySettings(for: permissionSection)
-            }
-            return
-        }
-
         alert.runModal()
     }
 }

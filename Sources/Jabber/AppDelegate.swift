@@ -11,6 +11,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// Shown only while the coordinator keeps a failed dictation; refreshed on
     /// every menu open.
     private var retryFailedDictationItem: NSMenuItem?
+    private var discardFailedDictationItem: NSMenuItem?
+    /// Shown only after a model load failed; refreshed on every menu open.
+    private var retryModelLoadItem: NSMenuItem?
     private var currentAppState: AppState = .ready
     private var onboardingWindow: NSWindow?
     private var onboardingCoordinator: OnboardingCoordinator?
@@ -114,6 +117,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 startModelLoadingTask()
             }
         }
+        // Replace the menu bar's placeholder state with the real one before
+        // any model state arrives; without a load in flight that is "no model",
+        // not "ready".
+        syncNonDictationUI(forceLoading: modelLoadTask != nil)
         scheduleUIReadyFallbackIfNeeded()
         scheduleFirstRunSetupPrompt()
         prepareAudioCaptureWhenReady()
@@ -265,19 +272,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
+    /// Loads usually fail at launch or after a model change, while the user is
+    /// in another app, so this reports without taking focus. The status menu
+    /// offers Retry Loading Model until a load succeeds.
     private func showModelLoadError(_ error: Error) {
-        let alert = NSAlert()
-        alert.messageText = "Failed to Load Model"
-        alert.informativeText = "The transcription model could not be loaded: \(error.localizedDescription)\n\nDictation is unavailable until a model loads successfully. Please check your internet connection and try restarting the app."
-        alert.alertStyle = .warning
-        alert.addButton(withTitle: "Retry")
-        alert.addButton(withTitle: "OK")
+        NotificationService.shared.showError(
+            title: "Couldn't Load Speech Model",
+            message: "\(error.localizedDescription) Check your internet connection, then choose Retry Loading Model from the menu bar icon."
+        )
+    }
 
-        NSApp.activate(ignoringOtherApps: true)
-        let response = alert.runModal()
-        if response == .alertFirstButtonReturn {
-            startModelLoadingTask()
-        }
+    @objc private func retryModelLoad() {
+        guard !isModelLoadInProgress else { return }
+        startModelLoadingTask()
     }
 
     private func handleModelState(_ state: TranscriptionService.State) {
@@ -340,7 +347,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             return
         }
 
-        button.image = NSImage(systemSymbolName: state.symbolName, accessibilityDescription: state.accessibilityDescription)
+        // Matches the menu header, which says setup is unfinished rather than
+        // that a model failed.
+        let description = state == .error && shouldShowAutomaticOnboarding()
+            ? "Jabber, finish setup to dictate"
+            : state.accessibilityDescription
+        button.image = NSImage(systemSymbolName: state.symbolName, accessibilityDescription: description)
         button.contentTintColor = state == .recording ? .systemRed : nil
     }
 
@@ -363,45 +375,55 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         // Disabled header reflecting the current state; refreshed in
         // menuWillOpen so it shows the live state and hotkey when opened.
-        let statusHeaderItem = NSMenuItem(title: statusMenuTitle(), action: nil, keyEquivalent: "")
+        let statusHeaderItem = NSMenuItem(title: currentStatusMenuState().header, action: nil, keyEquivalent: "")
         self.statusHeaderItem = statusHeaderItem
 
         let retryItem = NSMenuItem(title: "Retry Failed Dictation", action: #selector(retryFailedDictation), keyEquivalent: "")
         retryFailedDictationItem = retryItem
+        let discardItem = NSMenuItem(title: "Discard Failed Recording", action: #selector(discardFailedDictation), keyEquivalent: "")
+        discardFailedDictationItem = discardItem
+        let retryLoadItem = NSMenuItem(title: "Retry Loading Model", action: #selector(retryModelLoad), keyEquivalent: "")
+        retryModelLoadItem = retryLoadItem
         let openItem = NSMenuItem(title: "Open Jabber", action: #selector(openJabber), keyEquivalent: "")
         let settingsItem = NSMenuItem(title: "Settings…", action: #selector(openSettings), keyEquivalent: ",")
         let updatesItem = NSMenuItem(title: "Check for Updates…", action: #selector(checkForUpdates), keyEquivalent: "")
         let quitItem = NSMenuItem(title: "Quit Jabber", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
 
-        for item in [retryItem, openItem, settingsItem, updatesItem] {
+        for item in [retryItem, discardItem, retryLoadItem, openItem, settingsItem, updatesItem] {
             item.target = self
         }
         // quitItem has no target → routes through the responder chain to NSApp.terminate.
         // statusHeaderItem has no action either, so autoenablesItems keeps it disabled.
 
-        menu.items = [statusHeaderItem, retryItem, .separator(), openItem, settingsItem,
+        menu.items = [statusHeaderItem, retryItem, discardItem, retryLoadItem, .separator(), openItem, settingsItem,
                       .separator(), updatesItem, .separator(), quitItem]
         menu.delegate = self
+        applyStatusMenuState(currentStatusMenuState())
         return menu
     }
 
-    private func statusMenuTitle() -> String {
-        switch currentAppState {
-        case .downloading:
-            return "Downloading Model…"
-        case .ready:
-            let shortcut = HotkeyShortcut(
-                keyCode: UInt32(TypedSettings[.hotkeyKeyCode]),
-                modifiers: UInt32(TypedSettings[.hotkeyModifiers])
-            )
-            return "Ready to Dictate — \(shortcut.displayString)"
-        case .recording:
-            return "Recording…"
-        case .transcribing:
-            return "Transcribing…"
-        case .error:
-            return "Model Unavailable"
+    private func currentStatusMenuState() -> StatusMenuState {
+        let hasModelLoadFailed: Bool
+        if case .error = modelState {
+            hasModelLoadFailed = !isModelLoadInProgress
+        } else {
+            hasModelLoadFailed = false
         }
+        return StatusMenuState.resolve(
+            appState: currentAppState,
+            hotkeyDisplay: TypedSettings.hotkeyShortcut.displayString,
+            isSetupPending: shouldShowAutomaticOnboarding(),
+            hasFailedDictation: dictationCoordinator.hasFailedDictation,
+            canStartSession: dictationCoordinator.canStart,
+            hasModelLoadFailed: hasModelLoadFailed
+        )
+    }
+
+    private func applyStatusMenuState(_ state: StatusMenuState) {
+        statusHeaderItem?.title = state.header
+        retryFailedDictationItem?.isHidden = !state.showsFailedDictationItems
+        discardFailedDictationItem?.isHidden = !state.showsFailedDictationItems
+        retryModelLoadItem?.isHidden = !state.showsRetryModelLoad
     }
 
     @objc private func openJabber() {
@@ -442,6 +464,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let targetProcessID = TypingService.captureFocusedProcessID()
         currentTargetProcessID = targetProcessID
         _ = dictationCoordinator.retryFailedDictation(targetProcessID: targetProcessID)
+    }
+
+    @objc private func discardFailedDictation() {
+        dictationCoordinator.discardFailedDictation()
     }
 
     private func setupHotkey() {
@@ -1443,8 +1469,7 @@ extension AppDelegate: NSWindowDelegate {
 
 extension AppDelegate: NSMenuDelegate {
     func menuWillOpen(_ menu: NSMenu) {
-        statusHeaderItem?.title = statusMenuTitle()
-        retryFailedDictationItem?.isHidden = !dictationCoordinator.hasFailedDictation
+        applyStatusMenuState(currentStatusMenuState())
     }
 }
 
@@ -1458,8 +1483,8 @@ extension AppDelegate: NSMenuItemValidation {
         if item.action == #selector(checkForUpdates) {
             return updaterController.canCheckForUpdates
         }
-        if item.action == #selector(retryFailedDictation) {
-            return dictationCoordinator.hasFailedDictation && dictationCoordinator.canStart
+        if item.action == #selector(retryFailedDictation) || item.action == #selector(discardFailedDictation) {
+            return currentStatusMenuState().canActOnFailedDictation
         }
         return true
     }

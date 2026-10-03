@@ -338,6 +338,15 @@ final class DictationCoordinator {
         return true
     }
 
+    /// Drops the kept failed dictation without retrying it. Refused while a
+    /// retry of it is in flight.
+    @discardableResult
+    func discardFailedDictation() -> Bool {
+        guard failedDictationSamples != nil, !isRetryingFailedDictation else { return false }
+        failedDictationSamples = nil
+        return true
+    }
+
     /// Cancels the current session immediately. Any in-flight transcription
     /// task will finish in the background but will not update state.
     func cancel() {

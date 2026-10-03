@@ -824,6 +824,37 @@ final class DictationCoordinatorTests: XCTestCase {
         XCTAssertEqual(stateChangeCount, 0)
     }
 
+    func testDiscardFailedDictationDropsRecording() async {
+        XCTAssertFalse(coordinator.discardFailedDictation(), "nothing kept, nothing to discard")
+
+        await failDictation(samples: makeLoudSamples())
+        XCTAssertTrue(coordinator.discardFailedDictation())
+
+        XCTAssertFalse(coordinator.hasFailedDictation)
+        XCTAssertFalse(coordinator.retryFailedDictation())
+    }
+
+    func testDiscardIsRefusedWhileRetryIsInFlight() async {
+        await failDictation(samples: makeLoudSamples())
+
+        transcriptionService.holdTranscribeUntilReleased = true
+        transcriptionService.transcribeResult = .success("señor chang")
+        let transcribeStarted = XCTestExpectation(description: "retry transcription started")
+        transcriptionService.onTranscribeStarted = { transcribeStarted.fulfill() }
+        let idleExpectation = expectationForIdle()
+
+        XCTAssertTrue(coordinator.retryFailedDictation(targetProcessID: 54_321))
+        await fulfillment(of: [transcribeStarted], timeout: 1.0)
+
+        XCTAssertFalse(coordinator.discardFailedDictation())
+        XCTAssertTrue(coordinator.hasFailedDictation)
+
+        transcriptionService.releaseTranscribe()
+        await fulfillment(of: [idleExpectation], timeout: 1.0)
+        XCTAssertEqual(typingService.outputs, ["señor chang"])
+        XCTAssertFalse(coordinator.hasFailedDictation)
+    }
+
     func testRetryIsRejectedWhileRecording() async {
         await failDictation(samples: makeLoudSamples())
 

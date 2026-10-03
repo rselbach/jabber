@@ -212,7 +212,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             let transcriptionService = appDelegate.transcriptionService
             await transcriptionService.setSessionModelOverride(nil)
             await transcriptionService.unloadModel()
-            if Task.isCancelled { return }
+            if Task.isCancelled {
+                return
+            }
             await appDelegate.loadModel()
         }
     }
@@ -618,7 +620,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         guard ensureOutputPermissionReady() else { return }
 
-        if dictationCoordinator.isRecording { return }
+        if dictationCoordinator.isRecording {
+            return
+        }
 
         guard dictationCoordinator.canStart else {
             showTranscriptionBusyNotice()
@@ -716,6 +720,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let coordinator = OnboardingCoordinator()
         let rootView = OnboardingView(
             coordinator: coordinator,
+            onReachReady: { [weak self] in
+                self?.startOnboardingModelLoadIfNeeded()
+            },
             onComplete: { [weak self] in
                 self?.completeOnboarding()
             },
@@ -753,10 +760,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         onboardingCompletedBeforeUserInitiatedRun = false
         // windowWillClose refreshes the activation policy.
         onboardingWindow?.close()
-        // Now that onboarding has settled the user's model choice, kick off
-        // the load. It was intentionally skipped at launch (see
-        // applicationDidFinishLaunching) so the default model wouldn't
-        // auto-download during onboarding.
+        startOnboardingModelLoadIfNeeded()
+    }
+
+    /// Loads the model onboarding settled on. The launch path skips the load
+    /// while onboarding is pending (see applicationDidFinishLaunching) so the
+    /// default model can't auto-download. Every arrival at the Ready step
+    /// calls this so its "Try it" field works, and completion calls it again
+    /// in case that load failed. A load already in flight is left alone:
+    /// restarting it would throw away a partly loaded model. No `isReady`
+    /// guard: re-running onboarding can change the selection without a
+    /// modelDidChange, and ensureModelLoaded is a no-op when the right model
+    /// is already loaded.
+    private func startOnboardingModelLoadIfNeeded() {
+        guard !isModelLoadInProgress else { return }
         startModelLoadingTask()
     }
 

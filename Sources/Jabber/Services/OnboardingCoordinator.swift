@@ -28,7 +28,7 @@ final class OnboardingCoordinator {
         }
     }
 
-    private(set) var step: Step = .welcome
+    private(set) var step: Step
     private(set) var isNavigatingForward = true
     private(set) var microphoneStatus: AVAuthorizationStatus = .notDetermined
     private(set) var isAccessibilityTrusted = false
@@ -44,10 +44,12 @@ final class OnboardingCoordinator {
 
     init(
         permissionService: PermissionService = .shared,
-        modelManager: ModelManager = .shared
+        modelManager: ModelManager = .shared,
+        step: Step = .welcome
     ) {
         self.permissionService = permissionService
         self.modelManager = modelManager
+        self.step = step
         onboardingSelectedLanguage = TypedSettings[.selectedLanguage]
         selectedModelId = TypedSettings[.selectedModel]
     }
@@ -151,7 +153,9 @@ final class OnboardingCoordinator {
         permissionPollingTask = nil
     }
 
-    func continueFromCurrentStep(onComplete: () -> Void) {
+    /// `onReachReady` runs on every arrival at the Ready step: the model
+    /// choice is settled there and the user is invited to try dictating.
+    func continueFromCurrentStep(onReachReady: () -> Void, onComplete: () -> Void) {
         guard canContinue else { return }
 
         switch step {
@@ -166,6 +170,7 @@ final class OnboardingCoordinator {
             move(to: .modelDownload)
         case .modelDownload:
             move(to: .ready)
+            onReachReady()
         case .ready:
             onComplete()
         }

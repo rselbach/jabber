@@ -117,7 +117,9 @@ enum PostProcessingValidator {
         let trimmed = String(firstLine).trimmingCharacters(in: .whitespaces)
         guard !trimmed.isEmpty else { return false }
 
-        if trimmed.hasPrefix("#") { return true } // ATX heading
+        if trimmed.hasPrefix("#") {
+            return true
+        } // ATX heading
         if trimmed.hasPrefix("- ") || trimmed.hasPrefix("* ") || trimmed.hasPrefix("+ ") {
             return true // bullet list
         }

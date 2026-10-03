@@ -3,6 +3,7 @@ import SwiftUI
 
 struct OnboardingView: View {
     @Bindable var coordinator: OnboardingCoordinator
+    let onReachReady: () -> Void
     let onComplete: () -> Void
     let onAppearAction: () -> Void
 
@@ -148,7 +149,7 @@ struct OnboardingView: View {
             }
 
             Button(coordinator.primaryButtonTitle) {
-                coordinator.continueFromCurrentStep(onComplete: onComplete)
+                coordinator.continueFromCurrentStep(onReachReady: onReachReady, onComplete: onComplete)
             }
             .buttonStyle(.borderedProminent)
             .controlSize(.large)
@@ -797,5 +798,5 @@ struct OnboardingView: View {
 }
 
 #Preview {
-    OnboardingView(coordinator: OnboardingCoordinator(), onComplete: {}, onAppearAction: {})
+    OnboardingView(coordinator: OnboardingCoordinator(), onReachReady: {}, onComplete: {}, onAppearAction: {})
 }

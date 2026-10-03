@@ -169,7 +169,7 @@ actor TranscriptionService {
                 TypedSettings[.selectedLanguage] = "auto"
                 NotificationService.shared.showWarning(
                     title: "Invalid Language Setting",
-                    message: "The language code '\(language)' is not recognized. Auto-detect has been enabled instead."
+                    message: "The language code '\(language)' is not recognized. The language has been set to Automatic instead."
                 )
             }
         }

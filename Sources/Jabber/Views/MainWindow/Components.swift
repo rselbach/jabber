@@ -8,7 +8,7 @@ struct LanguagePicker: View {
 
     var body: some View {
         Picker("Language", selection: $selectedLanguage) {
-            Text("Auto-detect").tag("auto")
+            Text("Automatic").tag("auto")
             Divider()
             ForEach(Constants.sortedLanguages, id: \.code) { lang in
                 Text(lang.name).tag(lang.code)
@@ -41,6 +41,8 @@ struct KeycapsView: View {
 struct ModelRow: View {
     let model: ModelManager.Model
     let isSelected: Bool
+    /// Name of the selected language when this model can't transcribe it.
+    let unsupportedLanguageName: String?
     let onSelect: () -> Void
     let onDownload: () -> Void
     let onDelete: () -> Void
@@ -61,6 +63,12 @@ struct ModelRow: View {
                 Text(model.description)
                     .font(.caption)
                     .foregroundStyle(.secondary)
+
+                if let unsupportedLanguageName {
+                    Text("Doesn't support \(unsupportedLanguageName)")
+                        .font(.caption)
+                        .foregroundStyle(.orange)
+                }
             }
 
             Spacer()

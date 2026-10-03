@@ -415,7 +415,9 @@ final class ModelManager {
 
     private func installedModelIds() -> [String] {
         modelDefinitions.compactMap { def in
-            if def.isBuiltIn { return def.id }
+            if def.isBuiltIn {
+                return def.id
+            }
             return modelFolder(for: def.id) != nil ? def.id : nil
         }
     }

@@ -59,7 +59,9 @@ enum AudioSpeechDetector {
 
         for sample in samples {
             let absSample = abs(sample)
-            if absSample > peak { peak = absSample }
+            if absSample > peak {
+                peak = absSample
+            }
             let squared = sample * sample
             sumOfSquares += squared
             frameSumOfSquares += squared

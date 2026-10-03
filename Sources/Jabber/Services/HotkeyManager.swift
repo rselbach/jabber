@@ -844,3 +844,66 @@ enum EventTapReenablePolicy: Sendable {
         return (updated, reenable)
     }
 }
+
+/// Pure decision logic for re-registering a modifier-only shortcut once
+/// Accessibility permission is granted.
+///
+/// The modifier-only CGEventTap needs Accessibility, and registration
+/// otherwise runs only at launch, on shortcut change, and after hotkey
+/// capture. Without a retry, granting (or re-granting, e.g. after an update
+/// reset the grant) Accessibility in System Settings leaves the hotkey dead
+/// until relaunch. The caller records each failure here, re-checks trust
+/// every `pollInterval` while `isPending`, and resets the policy on success
+/// or whenever it registers a shortcut itself.
+///
+/// A retry fires only when trust is observed going from untrusted to
+/// trusted, so every retry follows a change in System Settings. A failure
+/// while already trusted (tap creation failing despite the grant, or the tap
+/// torn down after repeated timeouts) waits for Accessibility to be toggled
+/// rather than retrying on a schedule: the tap is a `.defaultTap` at the head
+/// of the session event stream, and re-creating it while the main thread
+/// keeps stalling would delay every keystroke system-wide again.
+///
+/// Only the first failure of an episode asks the caller to notify the user;
+/// failed automatic retries stay silent.
+struct ModifierOnlyRegistrationRetryPolicy: Sendable {
+    /// How often the caller re-checks Accessibility trust while pending.
+    static let pollInterval: Duration = .seconds(2)
+
+    /// Trust last observed during the pending episode; `nil` when nothing is
+    /// pending.
+    private var lastObservedTrust: Bool?
+
+    var isPending: Bool {
+        lastObservedTrust != nil
+    }
+
+    /// Record a failed registration. Returns `true` when the caller should
+    /// notify the user: always for a Carbon shortcut (it never needs
+    /// Accessibility, so there is nothing to retry), and for the first failure
+    /// of a modifier-only episode.
+    mutating func recordFailure(isModifierOnly: Bool, isTrusted: Bool) -> Bool {
+        guard isModifierOnly else {
+            lastObservedTrust = nil
+            return true
+        }
+        let isNewEpisode = lastObservedTrust == nil
+        lastObservedTrust = isTrusted
+        return isNewEpisode
+    }
+
+    /// Record a trust check. Returns `true` when the caller should
+    /// re-register: an episode is pending and trust just went from untrusted
+    /// to trusted.
+    mutating func recordTrust(_ isTrusted: Bool) -> Bool {
+        guard let wasTrusted = lastObservedTrust else { return false }
+        lastObservedTrust = isTrusted
+        return !wasTrusted && isTrusted
+    }
+
+    /// End the episode after a successful registration or when a new
+    /// registration replaces the pending one.
+    mutating func reset() {
+        lastObservedTrust = nil
+    }
+}

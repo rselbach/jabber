@@ -67,7 +67,9 @@ enum LanguageModelCatalog {
     static func supportsLanguage(_ languageCode: String, modelId: String) -> Bool {
         guard let def = AppMode.modelDefinition(for: modelId) else { return false }
         guard let supported = def.supportedLanguageCodes else { return true }
-        if languageCode == "auto" { return true }
+        if languageCode == "auto" {
+            return true
+        }
         return supported.contains(languageCode)
     }
 

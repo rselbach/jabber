@@ -25,6 +25,7 @@ struct MainWindowView: View {
         case hotkey
         case speech
         case postProcessing
+        case replacements
         case history
         case about
 
@@ -39,6 +40,7 @@ struct MainWindowView: View {
             case .hotkey: return "Hotkey"
             case .speech: return "Speech"
             case .postProcessing: return "Post-Processing"
+            case .replacements: return "Replacements"
             case .history: return "History"
             case .about: return "About"
             }
@@ -51,6 +53,7 @@ struct MainWindowView: View {
             case .hotkey: return "keyboard.fill"
             case .speech: return "waveform"
             case .postProcessing: return "wand.and.stars"
+            case .replacements: return "arrow.left.arrow.right"
             case .history: return "clock.arrow.circlepath"
             case .about: return "info"
             }
@@ -63,6 +66,7 @@ struct MainWindowView: View {
             case .hotkey: return .indigo
             case .speech: return .blue
             case .postProcessing: return .purple
+            case .replacements: return .orange
             case .history: return .teal
             case .about: return .secondary
             }
@@ -96,6 +100,7 @@ struct MainWindowView: View {
                 sidebarRow(.hotkey)
                 sidebarRow(.speech)
                 sidebarRow(.postProcessing)
+                sidebarRow(.replacements)
             }
 
             SwiftUI.Section("Activity") {
@@ -139,6 +144,8 @@ struct MainWindowView: View {
             SpeechPage()
         case .postProcessing:
             PostProcessingPage()
+        case .replacements:
+            ReplacementsPage()
         case .history:
             HistoryPage()
         case .about:

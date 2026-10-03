@@ -18,7 +18,7 @@ final class OverlayWindowTests: XCTestCase {
         let tokenAfterFirstShow = overlay.visibilityToken
         XCTAssertEqual(tokenAfterFirstShow, 1)
 
-        overlay.showFallbackNotice("session A — raw transcript used")
+        overlay.showFallbackNotice(title: "Session A", message: "Raw transcript used.")
         XCTAssertTrue(overlay.waveformView?.hasActiveFallbackNotice ?? false)
 
         overlay.hide()
@@ -30,7 +30,7 @@ final class OverlayWindowTests: XCTestCase {
         let tokenAfterSecondShow = overlay.visibilityToken
         XCTAssertEqual(tokenAfterSecondShow, 2)
 
-        overlay.showFallbackNotice("session B — refinement failed")
+        overlay.showFallbackNotice(title: "Session B", message: "Refinement failed.")
         XCTAssertTrue(overlay.waveformView?.hasActiveFallbackNotice ?? false)
 
         // Simulate session B's notice auto-clearing. The stale deferred hide
@@ -42,6 +42,104 @@ final class OverlayWindowTests: XCTestCase {
             tokenAfterSecondShow,
             "stale pendingHide leaked into session B and hid the active overlay"
         )
+    }
+
+    /// NotificationService routes messages it cannot post as notifications to
+    /// the overlay, usually while no dictation is running. The notice must
+    /// bring the panel up itself and take it down once the notice clears.
+    func testNoticeWhileIdleShowsPanelUntilNoticeClears() {
+        let overlay = TestOverlayWindow()
+
+        overlay.showFallbackNotice(title: "Model Not Ready", message: "Troy Barnes has to wait a moment.")
+
+        XCTAssertEqual(overlay.window?.isVisible, true)
+        XCTAssertTrue(overlay.hasActiveFallbackNotice)
+        XCTAssertEqual(
+            overlay.waveformView?.fallbackNotice,
+            OverlayNotice(title: "Model Not Ready", message: "Troy Barnes has to wait a moment.")
+        )
+        let tokenWhileNoticeVisible = overlay.visibilityToken
+
+        overlay.waveformView?.clearFallbackNotice()
+
+        XCTAssertEqual(
+            overlay.visibilityToken,
+            tokenWhileNoticeVisible + 1,
+            "clearing the notice must hide the panel it brought up"
+        )
+    }
+
+    /// A notice that lands mid-session must not reset or hide the live
+    /// overlay: it covers the content until it clears, then the session
+    /// carries on with its state intact.
+    func testNoticeDuringSessionKeepsSessionOverlay() {
+        let overlay = TestOverlayWindow()
+        overlay.show()
+        overlay.updatePartialTranscription("Greendale is where I belong")
+        let tokenDuringSession = overlay.visibilityToken
+
+        overlay.showFallbackNotice(title: "Clipboard Restore Failed", message: "Señor Chang took it.")
+
+        XCTAssertEqual(overlay.visibilityToken, tokenDuringSession, "a mid-session notice must not re-show or hide the overlay")
+        XCTAssertTrue(overlay.hasActiveFallbackNotice)
+        XCTAssertEqual(overlay.waveformView?.partialTranscription, "Greendale is where I belong")
+
+        overlay.waveformView?.clearFallbackNotice()
+
+        XCTAssertEqual(overlay.visibilityToken, tokenDuringSession, "the session still owns the overlay after the notice clears")
+        XCTAssertEqual(overlay.waveformView?.partialTranscription, "Greendale is where I belong")
+    }
+
+    /// Session-end notices (No Speech Detected, Transcription Failed) arrive
+    /// just after the session's hide started. The notice must interrupt that
+    /// hide and keep the panel up until it clears.
+    func testNoticeAfterSessionHideKeepsPanelUntilNoticeClears() {
+        let overlay = TestOverlayWindow()
+        overlay.show()
+        overlay.hide()
+        let tokenAfterSessionHide = overlay.visibilityToken
+
+        overlay.showFallbackNotice(title: "No Speech Detected", message: "Abed said nothing.")
+
+        XCTAssertEqual(overlay.visibilityToken, tokenAfterSessionHide + 1, "the notice must interrupt the in-flight hide")
+        XCTAssertTrue(overlay.hasActiveFallbackNotice)
+
+        overlay.waveformView?.clearFallbackNotice()
+
+        XCTAssertEqual(overlay.visibilityToken, tokenAfterSessionHide + 2, "the panel must hide once the notice clears")
+    }
+
+    /// A dictation that starts while an idle notice is up takes over the
+    /// panel. The notice is dropped and its auto-hide must not hide the
+    /// new session.
+    func testSessionStartDuringIdleNoticeTakesOverPanel() {
+        let overlay = TestOverlayWindow()
+        overlay.showFallbackNotice(title: "Still Transcribing", message: "Britta is still talking.")
+        XCTAssertTrue(overlay.hasActiveFallbackNotice)
+        let tokenWhileNoticeVisible = overlay.visibilityToken
+
+        overlay.show()
+        let tokenAfterSessionShow = overlay.visibilityToken
+
+        XCTAssertEqual(tokenAfterSessionShow, tokenWhileNoticeVisible + 1, "a session show must take over the notice panel")
+        XCTAssertFalse(overlay.hasActiveFallbackNotice)
+
+        overlay.waveformView?.clearFallbackNotice()
+
+        XCTAssertEqual(overlay.visibilityToken, tokenAfterSessionShow, "the dropped notice must not hide the session")
+    }
+
+    /// AppDelegate keeps the download overlay out of the notice's spot and
+    /// restores it from this callback, so it must fire when the notice clears.
+    func testClearingNoticeNotifiesOwner() {
+        let overlay = TestOverlayWindow()
+        var clearedCount = 0
+        overlay.onFallbackNoticeCleared = { clearedCount += 1 }
+
+        overlay.showFallbackNotice(title: "Model Download Failed", message: "Pierce unplugged the router.")
+        overlay.waveformView?.clearFallbackNotice()
+
+        XCTAssertEqual(clearedCount, 1)
     }
 
     // Regression: hide() during an in-flight hide bumped visibilityToken, so

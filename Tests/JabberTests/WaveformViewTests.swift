@@ -7,10 +7,13 @@ final class WaveformViewTests: XCTestCase {
         let view = WaveformView()
         XCTAssertFalse(view.hasActiveFallbackNotice)
 
-        view.showFallbackNotice("Refinement looked wrong — used raw transcript")
+        view.showFallbackNotice(title: "Used Raw Transcript", message: "Refinement looked wrong.")
 
         XCTAssertTrue(view.hasActiveFallbackNotice)
-        XCTAssertEqual(view.fallbackNotice, "Refinement looked wrong — used raw transcript")
+        XCTAssertEqual(
+            view.fallbackNotice,
+            OverlayNotice(title: "Used Raw Transcript", message: "Refinement looked wrong.")
+        )
     }
 
     func testClearFallbackNoticeInvokesCallback() {
@@ -18,7 +21,7 @@ final class WaveformViewTests: XCTestCase {
         var cleared = false
         view.onFallbackNoticeCleared = { cleared = true }
 
-        view.showFallbackNotice("x")
+        view.showFallbackNotice(title: "x", message: "y")
         view.clearFallbackNotice()
 
         XCTAssertFalse(view.hasActiveFallbackNotice)
@@ -31,7 +34,7 @@ final class WaveformViewTests: XCTestCase {
         var cleared = false
         view.onFallbackNoticeCleared = { cleared = true }
 
-        view.showFallbackNotice("x")
+        view.showFallbackNotice(title: "x", message: "y")
         view.reset()
 
         // reset() abandons the notice (new session) and must NOT fire the

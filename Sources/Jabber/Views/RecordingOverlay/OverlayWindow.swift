@@ -7,7 +7,7 @@ class OverlayWindowController {
     var window: NSPanel?
     var visibilityToken: UInt64 = 0
     let animationDuration: TimeInterval
-    private var isHiding = false
+    private(set) var isHiding = false
 
     init(animationDuration: TimeInterval) {
         self.animationDuration = animationDuration
@@ -100,6 +100,22 @@ class OverlayWindow: OverlayWindowController {
     /// is deferred until the notice auto-clears so the user has time to read it.
     private var pendingHide = false
 
+    /// Fires whenever the fallback notice clears, after any deferred hide has
+    /// started, so the owner can restore UI the notice displaced. Not fired
+    /// when a new session's `show()` drops the notice.
+    var onFallbackNoticeCleared: (() -> Void)?
+
+    var hasActiveFallbackNotice: Bool {
+        waveformView?.hasActiveFallbackNotice == true
+    }
+
+    /// A dictation session has the overlay up. Once the overlay is hidden,
+    /// hiding, or waiting on a deferred hide, no session owns it: the session
+    /// ended or only a notice is showing.
+    private var isSessionOnScreen: Bool {
+        window?.isVisible == true && !isHiding && !pendingHide
+    }
+
     init() {
         super.init(animationDuration: 0.2)
     }
@@ -138,12 +154,26 @@ class OverlayWindow: OverlayWindowController {
         waveformView?.showRefining()
     }
 
-    /// Shows a brief, non-disruptive red notice on the overlay when
-    /// post-processing fell back to the raw transcript. The overlay is already
-    /// on screen (we are mid-transcription/refining), so this only updates the
-    /// waveform view; it does not reset existing state.
-    func showFallbackNotice(_ text: String) {
-        waveformView?.showFallbackNotice(text)
+    /// Shows a brief, non-disruptive notice on the overlay. While a dictation
+    /// session has the overlay up, the notice covers the live content until it
+    /// clears and the session's own hide waits for it; recording and
+    /// transcription carry on underneath. Otherwise the panel comes up just
+    /// for the notice and hides once it clears; a session that starts in the
+    /// meantime takes the panel over and drops the notice.
+    func showFallbackNotice(title: String, message: String) {
+        let showsForNotice = !isSessionOnScreen
+        if showsForNotice {
+            show()
+        }
+        guard let waveformView else {
+            logger.error("Dropped overlay notice \(title): no overlay panel")
+            return
+        }
+        waveformView.showFallbackNotice(title: title, message: message)
+        if showsForNotice {
+            // Deferred while the notice is up; its auto-clear finishes the hide.
+            hide()
+        }
     }
 
     override func hide() {
@@ -158,9 +188,11 @@ class OverlayWindow: OverlayWindowController {
     }
 
     func fallbackNoticeCleared() {
-        guard pendingHide else { return }
-        pendingHide = false
-        super.hide()
+        if pendingHide {
+            pendingHide = false
+            super.hide()
+        }
+        onFallbackNoticeCleared?()
     }
 
     func setTargetAppIcon(_ icon: NSImage?) {
@@ -281,17 +313,24 @@ struct WaveformContainer: View {
         }
     }
 
-    /// Brief, non-disruptive red indicator shown when post-processing fell
-    /// back to the raw transcript. Auto-clears (no click-to-dismiss UI).
-    private func fallbackNoticeView(_ text: String) -> some View {
-        HStack(spacing: 8) {
+    /// Brief, non-disruptive notice: a post-processing fallback or a message
+    /// that could not be posted as a system notification. Auto-clears (no
+    /// click-to-dismiss UI). One title line plus up to three message lines
+    /// fit the 400x104 panel.
+    private func fallbackNoticeView(_ notice: OverlayNotice) -> some View {
+        HStack(spacing: 10) {
             Image(systemName: "exclamationmark.triangle.fill")
                 .foregroundStyle(.red)
-            Text(text)
-                .font(.subheadline)
-                .foregroundStyle(.red)
-                .lineLimit(2)
-                .frame(maxWidth: .infinity, alignment: .leading)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(notice.title)
+                    .font(.headline)
+                    .lineLimit(1)
+                Text(notice.message)
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(3)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
         }
         .padding(.horizontal, 18)
         .padding(.vertical, 12)

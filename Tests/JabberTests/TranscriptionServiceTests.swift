@@ -390,7 +390,9 @@ private actor TestLatch {
     private var continuations: [CheckedContinuation<Void, Never>] = []
 
     func wait() async {
-        if isOpen { return }
+        if isOpen {
+            return
+        }
         await withCheckedContinuation { continuation in
             continuations.append(continuation)
         }
@@ -580,7 +582,9 @@ private actor SelectedModelProbe {
     }
 
     func waitForCallCount(_ want: Int) async {
-        if callCount >= want { return }
+        if callCount >= want {
+            return
+        }
         await withCheckedContinuation { continuation in
             waitForCallCountContinuations.append((want, continuation))
         }

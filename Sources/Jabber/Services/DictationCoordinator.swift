@@ -104,12 +104,16 @@ final class DictationCoordinator {
     }
 
     var isRecording: Bool {
-        if case .recording = state { return true }
+        if case .recording = state {
+            return true
+        }
         return false
     }
 
     var isTranscribing: Bool {
-        if case .transcribing = state { return true }
+        if case .transcribing = state {
+            return true
+        }
         return false
     }
 

@@ -1068,7 +1068,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     /// Non-blocking notice that transcript refinement failed and the raw
-    /// transcript was typed instead. Rate-limited so a flaky provider does not
+    /// transcript was delivered instead. Rate-limited so a flaky provider does not
     /// spam a notification on every dictation. Only true provider failures
     /// reach this path; guardrail rejections are surfaced non-disruptively via
     /// `overlayWindow.showFallbackNotice` instead. The message names the
@@ -1079,11 +1079,31 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         guard now - lastPostProcessingFailureNotice > 1.5 else { return }
         lastPostProcessingFailureNotice = now
 
-        let providerName = TypedSettings.postProcessingProviderKind.displayName
         NotificationService.shared.showWarning(
             title: "Couldn't Refine Transcript",
-            message: "\(providerName) cleanup failed (\(error.localizedDescription)). Typed the raw transcript instead."
+            message: Self.postProcessingFailureMessage(
+                providerName: TypedSettings.postProcessingProviderKind.displayName,
+                errorDescription: error.localizedDescription,
+                outputMode: typingService.mode
+            )
         )
+    }
+
+    /// Names where the raw transcript went, so clipboard users aren't told it
+    /// was typed.
+    static func postProcessingFailureMessage(
+        providerName: String,
+        errorDescription: String,
+        outputMode: TypingService.OutputMode
+    ) -> String {
+        let delivery: String
+        switch outputMode {
+        case .clipboard:
+            delivery = "Copied the raw transcript to the clipboard instead."
+        case .directTyping:
+            delivery = "Typed the raw transcript instead."
+        }
+        return "\(providerName) cleanup failed (\(errorDescription)). \(delivery)"
     }
 
     @objc private func handleModelDownloadState(_ notification: Notification) {

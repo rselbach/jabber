@@ -25,7 +25,9 @@ final class SoundFeedbackService {
     }
 
     private func player(for cue: Cue) -> AVAudioPlayer? {
-        if let player = players[cue] { return player }
+        if let player = players[cue] {
+            return player
+        }
 
         guard let url = soundURL(for: cue) else {
             logger.error("Missing sound resource for cue \(cue.rawValue, privacy: .public)")

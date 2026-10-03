@@ -212,7 +212,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             let transcriptionService = appDelegate.transcriptionService
             await transcriptionService.setSessionModelOverride(nil)
             await transcriptionService.unloadModel()
-            if Task.isCancelled { return }
+            if Task.isCancelled {
+                return
+            }
             await appDelegate.loadModel()
         }
     }
@@ -618,7 +620,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         guard ensureOutputPermissionReady() else { return }
 
-        if dictationCoordinator.isRecording { return }
+        if dictationCoordinator.isRecording {
+            return
+        }
 
         guard dictationCoordinator.canStart else {
             showTranscriptionBusyNotice()

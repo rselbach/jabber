@@ -36,6 +36,3 @@ jobs:
 
       - name: Build release
         run: swift build -c release
-
-      - name: Build MLX Metal library
-        run: ./scripts/build_mlx_metallib.sh debug

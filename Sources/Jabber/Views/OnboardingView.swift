@@ -789,7 +789,9 @@ struct OnboardingView: View {
 
     private var selectedLanguageName: String {
         let code = coordinator.onboardingSelectedLanguage
-        if code == "auto" { return "auto-detect" }
+        if code == "auto" {
+            return "auto-detect"
+        }
         return Constants.sortedLanguages.first { $0.code == code }?.name ?? code
     }
 }

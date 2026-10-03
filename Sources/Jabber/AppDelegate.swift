@@ -8,6 +8,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// Disabled first menu item mirroring the current app state; refreshed on
     /// every menu open.
     private var statusHeaderItem: NSMenuItem?
+    /// Shown only while the coordinator keeps a failed dictation; refreshed on
+    /// every menu open.
+    private var retryFailedDictationItem: NSMenuItem?
     private var currentAppState: AppState = .ready
     private var onboardingWindow: NSWindow?
     private var onboardingCoordinator: OnboardingCoordinator?
@@ -359,18 +362,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let statusHeaderItem = NSMenuItem(title: statusMenuTitle(), action: nil, keyEquivalent: "")
         self.statusHeaderItem = statusHeaderItem
 
+        let retryItem = NSMenuItem(title: "Retry Failed Dictation", action: #selector(retryFailedDictation), keyEquivalent: "")
+        retryFailedDictationItem = retryItem
         let openItem = NSMenuItem(title: "Open Jabber", action: #selector(openJabber), keyEquivalent: "")
         let settingsItem = NSMenuItem(title: "Settings…", action: #selector(openSettings), keyEquivalent: ",")
         let updatesItem = NSMenuItem(title: "Check for Updates…", action: #selector(checkForUpdates), keyEquivalent: "")
         let quitItem = NSMenuItem(title: "Quit Jabber", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
 
-        for item in [openItem, settingsItem, updatesItem] {
+        for item in [retryItem, openItem, settingsItem, updatesItem] {
             item.target = self
         }
         // quitItem has no target → routes through the responder chain to NSApp.terminate.
         // statusHeaderItem has no action either, so autoenablesItems keeps it disabled.
 
-        menu.items = [statusHeaderItem, .separator(), openItem, settingsItem,
+        menu.items = [statusHeaderItem, retryItem, .separator(), openItem, settingsItem,
                       .separator(), updatesItem, .separator(), quitItem]
         menu.delegate = self
         return menu
@@ -412,6 +417,27 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     @objc private func checkForUpdates() {
         updaterController.checkForUpdates()
+    }
+
+    /// Re-transcribes the kept failed dictation into whatever app is focused
+    /// now. Runs the hotkey path's readiness checks, minus the microphone:
+    /// nothing is recorded.
+    @objc private func retryFailedDictation() {
+        guard transcriptionService.isReady else {
+            showModelUnavailableNotice()
+            return
+        }
+
+        guard dictationCoordinator.canStart else {
+            showTranscriptionBusyNotice()
+            return
+        }
+
+        guard ensureOutputPermissionReady() else { return }
+
+        let targetProcessID = TypingService.captureFocusedProcessID()
+        currentTargetProcessID = targetProcessID
+        _ = dictationCoordinator.retryFailedDictation(targetProcessID: targetProcessID)
     }
 
     private func setupHotkey() {
@@ -478,7 +504,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             self.logger.error("Transcription failed: \(error.localizedDescription)")
             NotificationService.shared.showError(
                 title: "Transcription Failed",
-                message: "Could not transcribe audio: \(error.localizedDescription)",
+                message: "Jabber kept the recording. Choose Retry Failed Dictation from the menu bar icon to try again. Error: \(error.localizedDescription)",
                 critical: false
             )
         }
@@ -674,18 +700,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
 
         guard transcriptionService.isReady else {
-            let now = CFAbsoluteTimeGetCurrent()
-            if now - lastModelUnavailableNotice > 1.5 {
-                lastModelUnavailableNotice = now
-                let declinedDownload = hasDeclinedModelMigrationDownloadPending()
-                NotificationService.shared.showWarning(
-                    title: declinedDownload ? "Model Not Downloaded" : "Model Not Ready",
-                    message: declinedDownload
-                        ? "Your selected speech model isn't downloaded. Open Speech settings to download it or choose another model."
-                        : "Jabber is still preparing the speech model. Try again in a moment."
-                )
-                showSetupGuidanceIfNeeded(preferSpeechSettings: declinedDownload)
-            }
+            showModelUnavailableNotice()
             return
         }
 
@@ -1124,9 +1139,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             updateStatusIcon(state: .recording)
             SoundFeedbackService.shared.play(.dictationStart)
         case .transcribing:
+            if dictationCoordinator.isRetryingFailedDictation {
+                // A retry skips recording, so the overlay is not up yet and
+                // there is no stopped recording to cue.
+                downloadOverlay.hide()
+                overlayWindow.show()
+                overlayWindow.setTargetAppIcon(
+                    TypingService.appIcon(forTargetProcessID: currentTargetProcessID)
+                )
+            } else {
+                SoundFeedbackService.shared.play(.dictationStop)
+            }
             overlayWindow.showProcessing()
             updateStatusIcon(state: .transcribing)
-            SoundFeedbackService.shared.play(.dictationStop)
         }
     }
 
@@ -1161,6 +1186,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             message: "Failed to process audio: \(error.localizedDescription)",
             critical: false
         )
+    }
+
+    private func showModelUnavailableNotice() {
+        let now = CFAbsoluteTimeGetCurrent()
+        guard now - lastModelUnavailableNotice > 1.5 else { return }
+        lastModelUnavailableNotice = now
+        let declinedDownload = hasDeclinedModelMigrationDownloadPending()
+        NotificationService.shared.showWarning(
+            title: declinedDownload ? "Model Not Downloaded" : "Model Not Ready",
+            message: declinedDownload
+                ? "Your selected speech model isn't downloaded. Open Speech settings to download it or choose another model."
+                : "Jabber is still preparing the speech model. Try again in a moment."
+        )
+        showSetupGuidanceIfNeeded(preferSpeechSettings: declinedDownload)
     }
 
     private func showTranscriptionBusyNotice() {
@@ -1367,6 +1406,7 @@ extension AppDelegate: NSWindowDelegate {
 extension AppDelegate: NSMenuDelegate {
     func menuWillOpen(_ menu: NSMenu) {
         statusHeaderItem?.title = statusMenuTitle()
+        retryFailedDictationItem?.isHidden = !dictationCoordinator.hasFailedDictation
     }
 }
 
@@ -1379,6 +1419,9 @@ extension AppDelegate: NSMenuItemValidation {
         // landmine of `menu.item(withTitle:)`.
         if item.action == #selector(checkForUpdates) {
             return updaterController.canCheckForUpdates
+        }
+        if item.action == #selector(retryFailedDictation) {
+            return dictationCoordinator.hasFailedDictation && dictationCoordinator.canStart
         }
         return true
     }

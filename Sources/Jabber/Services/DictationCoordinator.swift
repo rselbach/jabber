@@ -117,6 +117,16 @@ final class DictationCoordinator {
         return false
     }
 
+    /// Whether audio from a dictation whose transcription failed is kept for
+    /// `retryFailedDictation(targetProcessID:)`.
+    var hasFailedDictation: Bool {
+        failedDictationSamples != nil
+    }
+
+    /// Whether the current session re-transcribes a kept failed dictation
+    /// instead of audio that was just recorded.
+    private(set) var isRetryingFailedDictation = false
+
     var onStateChange: ((State) -> Void)?
     var onAudioLevel: ((Float) -> Void)?
     var onPartialTranscription: ((String) -> Void)?
@@ -157,6 +167,11 @@ final class DictationCoordinator {
     private var streamingTask: Task<Void, Never>?
     private var currentSessionID: UUID?
     private var currentTargetProcessID: pid_t?
+    /// Audio of the most recent dictation whose transcription failed, so one
+    /// engine error cannot lose a long recording. Only one is kept (~57MB at
+    /// the session limit): a newer failure replaces it, a successful retry
+    /// drops it.
+    private var failedDictationSamples: [Float]?
     private var lastStreamingPreviewSampleCount = 0
     private var lastStreamingPreviewText = ""
     private var streamingPreviewStabilizer = StreamingPreviewStabilizer()
@@ -289,6 +304,40 @@ final class DictationCoordinator {
         }
     }
 
+    /// Transcribes the kept failed dictation again through the normal
+    /// pipeline and outputs into `targetProcessID`. Returns `false` when
+    /// nothing is kept or a session is active. The audio stays kept when this
+    /// attempt fails or is cancelled.
+    @discardableResult
+    func retryFailedDictation(targetProcessID: pid_t? = nil) -> Bool {
+        guard canStart, let samples = failedDictationSamples else { return false }
+
+        let sessionID = UUID()
+        guard activity.start(sessionID) else {
+            logger.error("Could not mark transcription activity active for retry session \(sessionID.uuidString)")
+            return false
+        }
+
+        // No recording phase, so no media pause, streaming preview, or
+        // recording limit: the session goes straight to transcribing.
+        currentSessionID = sessionID
+        currentTargetProcessID = targetProcessID
+        isRetryingFailedDictation = true
+        state = .transcribing(sessionID: sessionID)
+        onStateChange?(.transcribing(sessionID: sessionID))
+
+        let startedAt = ContinuousClock.now
+        transcriptionTask = Task { [weak self] in
+            await self?.transcribeAndOutput(
+                samples: samples,
+                sessionID: sessionID,
+                stopStartedAt: startedAt,
+                captureFinishedAt: startedAt
+            )
+        }
+        return true
+    }
+
     /// Cancels the current session immediately. Any in-flight transcription
     /// task will finish in the background but will not update state.
     func cancel() {
@@ -302,6 +351,9 @@ final class DictationCoordinator {
         let sessionID = currentSessionID
         currentSessionID = nil
         currentTargetProcessID = nil
+        // A retry never paused media, so it has nothing to resume.
+        let shouldResumeMedia = !isRetryingFailedDictation
+        isRetryingFailedDictation = false
         _ = stopStreamingPreview()
         transcriptionTask?.cancel()
         transcriptionTask = nil
@@ -319,7 +371,9 @@ final class DictationCoordinator {
             state = .idle
             onStateChange?(.idle)
         }
-        mediaPlaybackService.resumeAfterDictationIfNeeded()
+        if shouldResumeMedia {
+            mediaPlaybackService.resumeAfterDictationIfNeeded()
+        }
     }
 
     private func startStreamingPreview(sessionID: UUID) {
@@ -568,6 +622,10 @@ final class DictationCoordinator {
                 throw CancellationError()
             }
 
+            if isRetryingFailedDictation {
+                failedDictationSamples = nil
+            }
+
             let trimmedText = resolvedOutcome.outputText.trimmingCharacters(in: .whitespacesAndNewlines)
             if !trimmedText.isEmpty {
                 typingService.output(trimmedText, targetProcessID: targetProcessID)
@@ -597,6 +655,9 @@ final class DictationCoordinator {
         } catch {
             logger.error("Transcription failed: \(error.localizedDescription)")
             guard currentSessionID == sessionID else { return }
+            // Shares the buffer rather than copying it. Kept before reporting
+            // so the error UI can rely on the retry being available.
+            failedDictationSamples = samples
             onTranscriptionError?(error)
         }
     }
@@ -816,9 +877,13 @@ final class DictationCoordinator {
         currentSessionID = nil
         currentTargetProcessID = nil
         transcriptionTask = nil
+        let shouldResumeMedia = !isRetryingFailedDictation
+        isRetryingFailedDictation = false
         state = .idle
         onStateChange?(.idle)
-        mediaPlaybackService.resumeAfterDictationIfNeeded()
+        if shouldResumeMedia {
+            mediaPlaybackService.resumeAfterDictationIfNeeded()
+        }
     }
 }
 

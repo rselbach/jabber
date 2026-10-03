@@ -713,6 +713,266 @@ final class DictationCoordinatorTests: XCTestCase {
         XCTAssertNotNil(reportedError)
     }
 
+    // MARK: - Failed dictation retry
+
+    private func failDictation(samples: [Float]) async {
+        audioCapture.storedSamples = samples
+        transcriptionService.transcribeResult = .failure(NSError(domain: "Greendale", code: 42))
+        let idleExpectation = expectationForIdle()
+        XCTAssertTrue(coordinator.start(targetProcessID: 12_345))
+        coordinator.stop()
+        await fulfillment(of: [idleExpectation], timeout: 1.0)
+    }
+
+    private func retryAndWaitForIdle(targetProcessID: pid_t? = nil) async {
+        let idleExpectation = expectationForIdle()
+        XCTAssertTrue(coordinator.retryFailedDictation(targetProcessID: targetProcessID))
+        await fulfillment(of: [idleExpectation], timeout: 1.0)
+    }
+
+    func testTranscriptionFailureKeepsRecordingForRetry() async {
+        XCTAssertFalse(coordinator.hasFailedDictation)
+
+        // The UI tells the user the recording was kept, so it must already be
+        // kept when the error is reported.
+        var keptWhenReported = false
+        coordinator.onTranscriptionError = { [unowned self] _ in
+            keptWhenReported = coordinator.hasFailedDictation
+        }
+
+        await failDictation(samples: makeLoudSamples())
+
+        XCTAssertTrue(coordinator.isIdle)
+        XCTAssertTrue(keptWhenReported)
+        XCTAssertTrue(coordinator.hasFailedDictation)
+        XCTAssertTrue(typingService.outputs.isEmpty)
+    }
+
+    func testRetryFailedDictationOutputsTextAndClearsRecording() async {
+        let samples = makeLoudSamples(count: 24_000)
+        await failDictation(samples: samples)
+        let resetStreamingCallCount = transcriptionService.resetStreamingCallCount
+        let streamingCallCount = transcriptionService.streamingSampleCounts.count
+
+        transcriptionService.transcribeResult = .success("troy and abed in the morning")
+        var states: [DictationCoordinator.State] = []
+        let idleExpectation = XCTestExpectation(description: "retry returns to idle")
+        coordinator.onStateChange = { state in
+            states.append(state)
+            if state == .idle {
+                idleExpectation.fulfill()
+            }
+        }
+
+        XCTAssertTrue(coordinator.retryFailedDictation(targetProcessID: 54_321))
+        XCTAssertTrue(coordinator.isTranscribing)
+        XCTAssertTrue(coordinator.isRetryingFailedDictation)
+        XCTAssertFalse(coordinator.canStart)
+
+        await fulfillment(of: [idleExpectation], timeout: 1.0)
+
+        guard states.count == 2, case .transcribing = states[0] else {
+            return XCTFail("retry should announce transcribing, then idle; got \(states)")
+        }
+        XCTAssertEqual(states[1], .idle)
+        XCTAssertFalse(coordinator.isRetryingFailedDictation)
+        XCTAssertFalse(coordinator.hasFailedDictation)
+        // Delivered into the app focused at retry time, not the original target.
+        XCTAssertEqual(typingService.outputs, ["troy and abed in the morning"])
+        XCTAssertEqual(typingService.targetProcessIDs, [54_321])
+        // The normal pipeline runs on the kept audio, history included.
+        XCTAssertEqual(dictationHistoryStore.sessions.count, 1)
+        XCTAssertEqual(dictationHistoryStore.sessions.first?.samples, samples)
+        // A retry does not record, so it neither previews nor touches media:
+        // the single pause/resume pair belongs to the original recording.
+        XCTAssertEqual(transcriptionService.resetStreamingCallCount, resetStreamingCallCount)
+        XCTAssertEqual(transcriptionService.streamingSampleCounts.count, streamingCallCount)
+        XCTAssertEqual(mediaPlaybackService.pauseCallCount, 1)
+        XCTAssertEqual(mediaPlaybackService.resumeCallCount, 1)
+    }
+
+    func testRetryFailureKeepsRecordingForAnotherTry() async {
+        let samples = makeLoudSamples()
+        await failDictation(samples: samples)
+
+        var errorCount = 0
+        coordinator.onTranscriptionError = { _ in errorCount += 1 }
+
+        await retryAndWaitForIdle()
+
+        XCTAssertEqual(errorCount, 1)
+        XCTAssertTrue(coordinator.hasFailedDictation)
+        XCTAssertTrue(typingService.outputs.isEmpty)
+        XCTAssertTrue(dictationHistoryStore.sessions.isEmpty)
+
+        transcriptionService.transcribeResult = .success("six seasons and a movie")
+        await retryAndWaitForIdle()
+
+        XCTAssertEqual(errorCount, 1)
+        XCTAssertFalse(coordinator.hasFailedDictation)
+        XCTAssertEqual(typingService.outputs, ["six seasons and a movie"])
+        XCTAssertEqual(dictationHistoryStore.sessions.last?.samples, samples)
+    }
+
+    func testRetryWithoutFailedDictationIsRejected() {
+        var stateChangeCount = 0
+        coordinator.onStateChange = { _ in stateChangeCount += 1 }
+
+        XCTAssertFalse(coordinator.retryFailedDictation())
+
+        XCTAssertTrue(coordinator.isIdle)
+        XCTAssertEqual(stateChangeCount, 0)
+    }
+
+    func testRetryIsRejectedWhileRecording() async {
+        await failDictation(samples: makeLoudSamples())
+
+        XCTAssertTrue(coordinator.start())
+        XCTAssertFalse(coordinator.retryFailedDictation())
+
+        XCTAssertTrue(coordinator.isRecording)
+        XCTAssertFalse(coordinator.isRetryingFailedDictation)
+        XCTAssertTrue(coordinator.hasFailedDictation)
+        coordinator.cancel()
+    }
+
+    func testRetryIsRejectedWhileTranscribing() async {
+        await failDictation(samples: makeLoudSamples())
+
+        transcriptionService.transcribeResult = .success("cool cool cool")
+        transcriptionService.transcribeDelay = .milliseconds(50)
+        let idleExpectation = expectationForIdle()
+        XCTAssertTrue(coordinator.start())
+        coordinator.stop()
+        XCTAssertTrue(coordinator.isTranscribing)
+
+        XCTAssertFalse(coordinator.retryFailedDictation())
+        XCTAssertFalse(coordinator.isRetryingFailedDictation)
+
+        await fulfillment(of: [idleExpectation], timeout: 1.0)
+        XCTAssertEqual(typingService.outputs, ["cool cool cool"])
+        // Only a successful retry discards the kept recording; an unrelated
+        // dictation succeeding does not.
+        XCTAssertTrue(coordinator.hasFailedDictation)
+    }
+
+    func testCancelDuringRetryKeepsRecordingAndDiscardsResult() async {
+        let samples = makeLoudSamples()
+        await failDictation(samples: samples)
+
+        // Park the retry's inference so cancel() lands mid-flight, and let it
+        // finish afterwards the way uncancellable on-device inference does.
+        transcriptionService.holdTranscribeUntilReleased = true
+        transcriptionService.ignoresCancellationAfterTranscribeHold = true
+        transcriptionService.transcribeResult = .success("ignored")
+        let transcribeStarted = XCTestExpectation(description: "retry transcription started")
+        transcriptionService.onTranscribeStarted = { transcribeStarted.fulfill() }
+
+        XCTAssertTrue(coordinator.retryFailedDictation(targetProcessID: 54_321))
+        XCTAssertFalse(coordinator.retryFailedDictation(), "a second retry must wait for the first")
+        await fulfillment(of: [transcribeStarted], timeout: 1.0)
+
+        coordinator.cancel()
+        XCTAssertTrue(coordinator.isIdle)
+        XCTAssertTrue(coordinator.canStart)
+        XCTAssertFalse(coordinator.isRetryingFailedDictation)
+
+        let noOutput = expectation(description: "no output after cancel")
+        noOutput.isInverted = true
+        typingService.onOutput = { _ in noOutput.fulfill() }
+        let noError = expectation(description: "no transcription error after cancel")
+        noError.isInverted = true
+        coordinator.onTranscriptionError = { _ in noError.fulfill() }
+
+        transcriptionService.releaseTranscribe()
+        await fulfillment(of: [noOutput, noError], timeout: 1.0)
+
+        XCTAssertTrue(dictationHistoryStore.sessions.isEmpty)
+        // Cancelling (a model switch does this) must not throw the audio away.
+        XCTAssertTrue(coordinator.hasFailedDictation)
+        XCTAssertEqual(mediaPlaybackService.pauseCallCount, 1)
+        XCTAssertEqual(mediaPlaybackService.resumeCallCount, 1)
+
+        transcriptionService.holdTranscribeUntilReleased = false
+        transcriptionService.ignoresCancellationAfterTranscribeHold = false
+        transcriptionService.onTranscribeStarted = nil
+        transcriptionService.transcribeResult = .success("troy barnes")
+        typingService.onOutput = nil
+        coordinator.onTranscriptionError = nil
+        await retryAndWaitForIdle()
+
+        XCTAssertEqual(typingService.outputs, ["troy barnes"])
+        XCTAssertFalse(coordinator.hasFailedDictation)
+    }
+
+    func testCancelledDictationDoesNotKeepRecording() async {
+        audioCapture.storedSamples = makeLoudSamples()
+        XCTAssertTrue(coordinator.start())
+        coordinator.cancel()
+        XCTAssertFalse(coordinator.hasFailedDictation)
+
+        // A failure that surfaces only after cancel() belongs to an abandoned
+        // session and must not be kept either.
+        transcriptionService.holdTranscribeUntilReleased = true
+        transcriptionService.ignoresCancellationAfterTranscribeHold = true
+        transcriptionService.transcribeResult = .failure(NSError(domain: "Greendale", code: 42))
+        let transcribeStarted = XCTestExpectation(description: "transcription started")
+        transcriptionService.onTranscribeStarted = { transcribeStarted.fulfill() }
+        let noError = expectation(description: "no transcription error after cancel")
+        noError.isInverted = true
+        coordinator.onTranscriptionError = { _ in noError.fulfill() }
+
+        XCTAssertTrue(coordinator.start())
+        coordinator.stop()
+        await fulfillment(of: [transcribeStarted], timeout: 1.0)
+        coordinator.cancel()
+        transcriptionService.releaseTranscribe()
+        await fulfillment(of: [noError], timeout: 1.0)
+
+        XCTAssertFalse(coordinator.hasFailedDictation)
+    }
+
+    func testDictationsWithoutTranscriptionFailureDoNotKeepRecording() async {
+        let cases: [String: (samples: [Float], result: Result<String, Error>)] = [
+            // The speech gate ends the session before transcription runs, so
+            // the configured failure is never reached.
+            "no speech in audio": (
+                [Float](repeating: 0, count: 16_000),
+                .failure(NSError(domain: "Greendale", code: 42))
+            ),
+            "empty transcript": (makeLoudSamples(), .success("   ")),
+            "transcript typed": (makeLoudSamples(), .success("troy barnes")),
+            "transcription cancelled": (makeLoudSamples(), .failure(CancellationError())),
+        ]
+
+        for (name, tc) in cases {
+            audioCapture.storedSamples = tc.samples
+            transcriptionService.transcribeResult = tc.result
+            let idleExpectation = expectationForIdle()
+
+            XCTAssertTrue(coordinator.start(), name)
+            coordinator.stop()
+            await fulfillment(of: [idleExpectation], timeout: 1.0)
+
+            XCTAssertFalse(coordinator.hasFailedDictation, name)
+        }
+    }
+
+    func testNewerFailureReplacesOlderRecording() async {
+        let older = makeLoudSamples(count: 16_000)
+        let newer = makeLoudSamples(count: 32_000)
+        await failDictation(samples: older)
+        await failDictation(samples: newer)
+
+        transcriptionService.transcribeResult = .success("cool cool cool")
+        await retryAndWaitForIdle()
+
+        XCTAssertEqual(typingService.outputs, ["cool cool cool"])
+        XCTAssertEqual(dictationHistoryStore.sessions.count, 1)
+        XCTAssertEqual(dictationHistoryStore.sessions.first?.samples, newer)
+        XCTAssertFalse(coordinator.hasFailedDictation)
+    }
+
     // MARK: - Post-processing
 
     private func enablePostProcessing() {

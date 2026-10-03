@@ -45,8 +45,10 @@ struct AboutPage: View {
             }
 
             Section {
+                Link("FluidAudio — Apache 2.0", destination: URL(string: "https://github.com/FluidInference/FluidAudio")!)
                 Link("speech-swift — Apache 2.0", destination: URL(string: "https://github.com/soniqo/speech-swift")!)
                 Link("Sparkle — MIT", destination: URL(string: "https://sparkle-project.org/")!)
+                Link("mediaremote-adapter — BSD 3-Clause", destination: URL(string: "https://github.com/ungive/mediaremote-adapter")!)
             } header: {
                 Text("Libraries")
             }

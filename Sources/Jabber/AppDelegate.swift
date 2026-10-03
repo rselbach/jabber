@@ -212,7 +212,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             let transcriptionService = appDelegate.transcriptionService
             await transcriptionService.setSessionModelOverride(nil)
             await transcriptionService.unloadModel()
-            if Task.isCancelled { return }
+            if Task.isCancelled {
+                return
+            }
             await appDelegate.loadModel()
         }
     }
@@ -269,37 +271,55 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
-    private enum AppState {
+    enum AppState {
         case downloading
         case ready
         case recording
         case transcribing
         case error
+
+        var symbolName: String {
+            switch self {
+            case .downloading:
+                return "arrow.down.circle"
+            case .ready:
+                return "waveform"
+            case .recording:
+                return "waveform.circle.fill"
+            case .transcribing:
+                return "ellipsis.circle"
+            case .error:
+                return "exclamationmark.triangle"
+            }
+        }
+
+        /// What VoiceOver reads for the menu bar icon, which otherwise only
+        /// changes shape and color.
+        var accessibilityDescription: String {
+            switch self {
+            case .downloading:
+                return "Jabber, preparing speech model"
+            case .ready:
+                return "Jabber, ready to dictate"
+            case .recording:
+                return "Jabber, recording"
+            case .transcribing:
+                return "Jabber, transcribing"
+            case .error:
+                return "Jabber, model unavailable"
+            }
+        }
     }
 
     private func updateStatusIcon(state: AppState) {
         currentAppState = state
-
-        let iconName: String
-        switch state {
-        case .downloading:
-            iconName = "arrow.down.circle"
-        case .ready:
-            iconName = "waveform"
-        case .recording:
-            iconName = "waveform.circle.fill"
-        case .transcribing:
-            iconName = "ellipsis.circle"
-        case .error:
-            iconName = "exclamationmark.triangle"
-        }
 
         guard let button = statusItem?.button else {
             logger.error("Status item button unavailable when trying to update icon")
             return
         }
 
-        button.image = NSImage(systemSymbolName: iconName, accessibilityDescription: "Jabber")
+        button.image = NSImage(systemSymbolName: state.symbolName, accessibilityDescription: state.accessibilityDescription)
         button.contentTintColor = state == .recording ? .systemRed : nil
     }
 
@@ -307,7 +327,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
 
         if let button = statusItem?.button {
-            button.image = NSImage(systemSymbolName: "waveform", accessibilityDescription: "Jabber")
+            button.image = NSImage(
+                systemSymbolName: currentAppState.symbolName,
+                accessibilityDescription: currentAppState.accessibilityDescription
+            )
         }
 
         let menu = buildMenu()
@@ -618,7 +641,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         guard ensureOutputPermissionReady() else { return }
 
-        if dictationCoordinator.isRecording { return }
+        if dictationCoordinator.isRecording {
+            return
+        }
 
         guard dictationCoordinator.canStart else {
             showTranscriptionBusyNotice()

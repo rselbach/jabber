@@ -178,7 +178,9 @@ final class DictationCoordinator {
     private let streamingPreviewInterval: Duration
     private let minimumStreamingPreviewSampleCount: Int
     private let streamingPreviewStopTimeout: Duration
-    private let maxRecordingDuration: Duration
+    /// Recordings stop automatically after this long; the overlay counts down
+    /// to it.
+    let maxRecordingDuration: Duration
     private var recordingLimitTask: Task<Void, Never>?
     private let isPostProcessingEnabled: @MainActor () -> Bool
     private let replacementEntriesProvider: @MainActor () -> [ReplacementEntry]

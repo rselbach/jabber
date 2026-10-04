@@ -1185,6 +1185,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             overlayWindow.setTargetAppIcon(
                 TypingService.appIcon(forTargetProcessID: currentTargetProcessID)
             )
+            overlayWindow.startRecordingClock(
+                limit: TimeInterval(dictationCoordinator.maxRecordingDuration.components.seconds)
+            )
             updateStatusIcon(state: .recording)
             SoundFeedbackService.shared.play(.dictationStart)
         case .transcribing:

@@ -199,6 +199,10 @@ class OverlayWindow: OverlayWindowController {
         waveformView?.setTargetAppIcon(icon)
     }
 
+    func startRecordingClock(limit: TimeInterval) {
+        waveformView?.startRecordingClock(limit: limit)
+    }
+
     @discardableResult
     override func createWindow() -> Bool {
         guard let frame = frameForCurrentScreen() else { return false }
@@ -296,7 +300,26 @@ struct WaveformContainer: View {
                 }
 
                 content
+
+                if waveformView.fallbackNotice == nil, let startedAt = waveformView.recordingStartedAt {
+                    recordingClock(startedAt: startedAt)
+                        .padding(.trailing, 14)
+                }
             }
+        }
+    }
+
+    /// Elapsed recording time, turning into an orange countdown shortly
+    /// before the session limit stops the recording.
+    private func recordingClock(startedAt: Date) -> some View {
+        TimelineView(.periodic(from: startedAt, by: 1)) { context in
+            let clock = RecordingClock(
+                elapsed: context.date.timeIntervalSince(startedAt),
+                limit: waveformView.recordingLimit
+            )
+            Text(clock.text)
+                .font(.caption.monospacedDigit())
+                .foregroundStyle(clock.isWarning ? Color.orange : Color.secondary)
         }
     }
 

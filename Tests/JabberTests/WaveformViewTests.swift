@@ -16,6 +16,23 @@ final class WaveformViewTests: XCTestCase {
         )
     }
 
+    func testRecordingClockRunsOnlyWhileRecording() {
+        let cases: [String: (end: (WaveformView) -> Void, wantStartedAt: Date?)] = [
+            "still recording": ({ _ in }, Date(timeIntervalSince1970: 1_000)),
+            "transcribing": ({ $0.showProcessing() }, nil),
+            "reset for a new session": ({ $0.reset() }, nil)
+        ]
+
+        for (name, tc) in cases {
+            let view = WaveformView()
+            view.startRecordingClock(limit: 900, startedAt: Date(timeIntervalSince1970: 1_000))
+            tc.end(view)
+
+            XCTAssertEqual(view.recordingStartedAt, tc.wantStartedAt, name)
+            XCTAssertEqual(view.recordingLimit, 900, name)
+        }
+    }
+
     func testClearFallbackNoticeInvokesCallback() {
         let view = WaveformView()
         var cleared = false

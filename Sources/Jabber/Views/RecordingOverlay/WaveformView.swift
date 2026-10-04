@@ -16,6 +16,10 @@ final class WaveformView: ObservableObject {
     @Published private(set) var processingLabel = "Transcribing..."
     @Published private(set) var partialTranscription = ""
     @Published private(set) var targetAppIcon: NSImage?
+    /// When the current recording started; nil outside a recording. Drives the
+    /// overlay clock against `recordingLimit`.
+    @Published private(set) var recordingStartedAt: Date?
+    private(set) var recordingLimit: TimeInterval = 0
     /// Brief, non-disruptive message shown on the overlay: post-processing
     /// fell back to the raw transcript, or a message NotificationService could
     /// not post as a system notification. Auto-clears after
@@ -71,6 +75,7 @@ final class WaveformView: ObservableObject {
         processingLabel = "Transcribing..."
         partialTranscription = ""
         targetAppIcon = nil
+        recordingStartedAt = nil
         // Abandon any in-flight notice without firing the cleared callback: a
         // reset means the overlay is being reused for a new session, so a
         // pending deferred hide must not fire against the fresh state.
@@ -78,9 +83,15 @@ final class WaveformView: ObservableObject {
         fallbackNotice = nil
     }
 
+    func startRecordingClock(limit: TimeInterval, startedAt: Date = Date()) {
+        recordingLimit = limit
+        recordingStartedAt = startedAt
+    }
+
     func showProcessing() {
         isProcessing = true
         processingLabel = "Transcribing..."
+        recordingStartedAt = nil
     }
 
     /// Switches the processing overlay to a "Refining..." state used while

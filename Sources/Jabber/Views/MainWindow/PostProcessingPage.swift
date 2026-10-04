@@ -6,6 +6,7 @@ struct PostProcessingPage: View {
     @AppStorage(AppSettingKey.postProcessingProviderKind) private var postProcessingProviderKindRaw = PostProcessingProviderKind.defaultValue.rawValue
     @AppStorage(AppSettingKey.openRouterModel) private var openRouterModel = OpenRouterModelCatalog.defaultModelId
     @AppStorage(AppSettingKey.openCodeZenModel) private var openCodeZenModel = OpenCodeZenModelCatalog.defaultModelId
+    @State private var appleIntelligenceStatus = AppleIntelligenceStatus.current()
 
     var body: some View {
         Form {
@@ -21,7 +22,9 @@ struct PostProcessingPage: View {
 
                     switch selectedPostProcessingProviderKind {
                     case .appleIntelligence:
-                        Text("Uses the on-device Apple Intelligence model to clean up the final transcript — fixing punctuation, removing filler words and self-corrections — before typing it. Requires an Apple Intelligence-capable Mac with Apple Intelligence turned on. Falls back to the raw transcript if unavailable.")
+                        appleIntelligenceStatusRow
+
+                        Text("Uses the on-device Apple Intelligence model to clean up the final transcript — fixing punctuation, removing filler words and self-corrections — before typing it. Falls back to the raw transcript if unavailable.")
                             .font(.caption)
                             .foregroundStyle(.secondary)
                     case .openRouter:
@@ -51,16 +54,138 @@ struct PostProcessingPage: View {
                             .font(.caption)
                             .foregroundStyle(.secondary)
                     }
+
+                    PostProcessingTestRow(
+                        isProviderUnavailable: selectedPostProcessingProviderKind == .appleIntelligence
+                            && !appleIntelligenceStatus.isAvailable
+                    )
+                    // A result belongs to one provider and model; start over on a change.
+                    .id(testConfiguration)
                 }
             } header: {
                 Text("Post-Processing")
             }
         }
         .formStyle(.grouped)
+        .onAppear {
+            appleIntelligenceStatus = AppleIntelligenceStatus.current()
+        }
+        // Picks up Apple Intelligence being turned on in System Settings.
+        .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
+            appleIntelligenceStatus = AppleIntelligenceStatus.current()
+        }
+    }
+
+    private var appleIntelligenceStatusRow: some View {
+        HStack {
+            Label {
+                Text(appleIntelligenceStatus.message)
+                    .fixedSize(horizontal: false, vertical: true)
+            } icon: {
+                Image(systemName: appleIntelligenceStatus.isAvailable ? "checkmark.circle.fill" : "exclamationmark.triangle.fill")
+                    .foregroundStyle(appleIntelligenceStatus.isAvailable ? .green : .orange)
+            }
+
+            Spacer()
+
+            if appleIntelligenceStatus.canFixInSettings {
+                Button("Open Settings") {
+                    AppleIntelligenceStatus.openSettings()
+                }
+            }
+        }
     }
 
     private var selectedPostProcessingProviderKind: PostProcessingProviderKind {
         PostProcessingProviderKind(rawValue: postProcessingProviderKindRaw) ?? .defaultValue
+    }
+
+    private var testConfiguration: String {
+        switch selectedPostProcessingProviderKind {
+        case .appleIntelligence:
+            return PostProcessingProviderKind.appleIntelligence.rawValue
+        case .openRouter:
+            return "\(PostProcessingProviderKind.openRouter.rawValue)/\(openRouterModel)"
+        case .openCodeZen:
+            return "\(PostProcessingProviderKind.openCodeZen.rawValue)/\(openCodeZenModel)"
+        }
+    }
+}
+
+/// Runs sample text through the selected provider with the saved settings,
+/// the same way a dictation would, and shows the cleaned-up result.
+private struct PostProcessingTestRow: View {
+    let isProviderUnavailable: Bool
+
+    static let sampleText = "um so tell troy and abed that the study group meets at three no wait four in the library thanks"
+
+    @State private var result: String?
+    @State private var isRunning = false
+    @State private var testTask: Task<Void, Never>?
+    @State private var errorMessage: String?
+
+    var body: some View {
+        Group {
+            HStack {
+                Button("Test with Sample Text") {
+                    runTest()
+                }
+                .disabled(isRunning || isProviderUnavailable)
+
+                if isRunning {
+                    ProgressView()
+                        .controlSize(.small)
+                }
+            }
+
+            if let result {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Said: \(Self.sampleText)")
+                        .foregroundStyle(.secondary)
+                    Text("Result: \(result.isEmpty ? "(nothing — the model removed it all)" : result)")
+                }
+                .font(.caption)
+                .textSelection(.enabled)
+            }
+        }
+        .alert(
+            "Test Failed",
+            isPresented: Binding(
+                get: { errorMessage != nil },
+                set: {
+                    if !$0 {
+                        errorMessage = nil
+                    }
+                }
+            )
+        ) {
+            Button("OK") {}
+        } message: {
+            Text(errorMessage ?? "")
+        }
+        .onDisappear {
+            testTask?.cancel()
+        }
+    }
+
+    private func runTest() {
+        // End editing first so a typed but unsaved API key is saved before
+        // the provider reads it from the Keychain.
+        NSApp.keyWindow?.makeFirstResponder(nil)
+        result = nil
+        isRunning = true
+        testTask = Task {
+            defer { isRunning = false }
+            do {
+                let output = try await RoutedPostProcessor().process(Self.sampleText)
+                guard !Task.isCancelled else { return }
+                result = output.trimmingCharacters(in: .whitespacesAndNewlines)
+            } catch {
+                // Leaving the page cancels the test; that is not a failure.
+                guard !Task.isCancelled else { return }
+                errorMessage = error.localizedDescription
+            }
+        }
     }
 }
 
@@ -98,6 +223,11 @@ private struct CloudProviderAPIKeyField: View {
         }
         .onAppear {
             loadAPIKey()
+        }
+        // Saves when editing ends, such as when Test is clicked, without
+        // waiting for Return. Unchanged values are skipped.
+        .onReceive(NotificationCenter.default.publisher(for: NSControl.textDidEndEditingNotification)) { _ in
+            saveAPIKey()
         }
         // The main window is retained when closed, so onDisappear is not
         // guaranteed to fire. Ignore close notifications from other windows.

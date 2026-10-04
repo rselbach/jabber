@@ -93,7 +93,9 @@ class OverlayWindowController {
 @MainActor
 class OverlayWindow: OverlayWindowController {
     var waveformView: WaveformView?
-    private var hostingView: NSHostingView<WaveformContainer>?
+    private var hostingView: FirstMouseHostingView<WaveformContainer>?
+    /// The overlay's cancel button was clicked.
+    var onCancel: (() -> Void)?
     private let logger = Logger(subsystem: "com.rselbach.jabber", category: "OverlayWindow")
 
     /// When `hide()` is called while a fallback notice is on screen, the hide
@@ -213,8 +215,10 @@ class OverlayWindow: OverlayWindowController {
         waveform.onFallbackNoticeCleared = { [weak self] in
             self?.fallbackNoticeCleared()
         }
-        let container = WaveformContainer(waveformView: waveform)
-        let hostingView = NSHostingView(rootView: container)
+        let container = WaveformContainer(waveformView: waveform) { [weak self] in
+            self?.onCancel?()
+        }
+        let hostingView = FirstMouseHostingView(rootView: container)
         hostingView.frame = NSRect(x: 0, y: 0, width: frame.width, height: frame.height)
 
         panel.contentView = hostingView
@@ -243,6 +247,15 @@ class OverlayWindow: OverlayWindowController {
         let y = screenFrame.origin.y + bottomMargin
 
         return NSRect(x: x, y: y, width: windowWidth, height: windowHeight)
+    }
+}
+
+/// The overlay panel never becomes key or activates Jabber, so every click
+/// on it is a first click into an inactive window. Accepting it lets the
+/// cancel button work on the first press.
+final class FirstMouseHostingView<Content: View>: NSHostingView<Content> {
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool {
+        true
     }
 }
 
@@ -287,6 +300,7 @@ enum OverlayScreenResolver {
 
 struct WaveformContainer: View {
     @ObservedObject var waveformView: WaveformView
+    let onCancel: () -> Void
 
     var body: some View {
         ZStack {
@@ -301,12 +315,34 @@ struct WaveformContainer: View {
 
                 content
 
-                if waveformView.fallbackNotice == nil, let startedAt = waveformView.recordingStartedAt {
-                    recordingClock(startedAt: startedAt)
-                        .padding(.trailing, 14)
+                if waveformView.fallbackNotice == nil, isSessionActive {
+                    HStack(spacing: 8) {
+                        if let startedAt = waveformView.recordingStartedAt {
+                            recordingClock(startedAt: startedAt)
+                        }
+                        cancelButton
+                    }
+                    .padding(.trailing, 12)
                 }
             }
         }
+    }
+
+    /// Recording, transcribing, or refining: something the cancel button can
+    /// stop.
+    private var isSessionActive: Bool {
+        waveformView.recordingStartedAt != nil || waveformView.isProcessing
+    }
+
+    private var cancelButton: some View {
+        Button(action: onCancel) {
+            Image(systemName: "xmark.circle.fill")
+                .font(.title3)
+                .foregroundStyle(.secondary)
+        }
+        .buttonStyle(.plain)
+        .help("Cancel (Esc)")
+        .accessibilityLabel("Cancel Dictation")
     }
 
     /// Elapsed recording time, turning into an orange countdown shortly

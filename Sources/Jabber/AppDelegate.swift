@@ -479,6 +479,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             self?.handleHotkeyUpEvent()
         }
 
+        hotkeyManager.onCancelKey = { [weak self] in
+            self?.cancelDictationFromUser()
+        }
+
         hotkeyManager.onRegistrationFailure = { [weak self] status in
             guard let self else { return }
             self.logger.error("Hotkey registration failed with status: \(status)")
@@ -528,6 +532,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func setupDictationCoordinator() {
         dictationCoordinator.onStateChange = { [weak self] state in
             self?.handleDictationStateChange(state)
+        }
+
+        overlayWindow.onCancel = { [weak self] in
+            self?.cancelDictationFromUser()
         }
 
         dictationCoordinator.onAudioLevel = { [weak self] level in
@@ -790,6 +798,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let targetProcessID = TypingService.captureFocusedProcessID()
         currentTargetProcessID = targetProcessID
         _ = dictationCoordinator.start(targetProcessID: targetProcessID)
+    }
+
+    /// Escape or the overlay's cancel button: drop the session in progress,
+    /// recording or transcribing, without delivering anything. A cancelled
+    /// retry keeps its failed recording for another try.
+    private func cancelDictationFromUser() {
+        guard !dictationCoordinator.isIdle else { return }
+        logger.notice("Dictation cancelled by the user")
+        dictationCoordinator.cancel()
     }
 
     private func stopOrAbortDictationFromHotkey() {
@@ -1173,6 +1190,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func handleDictationStateChange(_ state: DictationCoordinator.State) {
+        // Escape cancels only while there is a session to cancel.
+        if state == .idle {
+            hotkeyManager.unregisterCancelKey()
+        } else {
+            hotkeyManager.registerCancelKey()
+        }
+
         switch state {
         case .idle:
             overlayWindow.hide()

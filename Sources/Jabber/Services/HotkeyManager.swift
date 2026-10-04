@@ -6,6 +6,8 @@ import os
 
 final class HotkeyManager: @unchecked Sendable {
     private var hotKeyRef: EventHotKeyRef?
+    /// Escape, claimed only while a dictation session runs. Held under `lock`.
+    private var cancelHotKeyRef: EventHotKeyRef?
     private var eventHandlerRef: EventHandlerRef?
     private var isDeinitialized = false
     private let lock = NSLock()
@@ -47,6 +49,8 @@ final class HotkeyManager: @unchecked Sendable {
 
     var onKeyDown: (@MainActor () -> Void)?
     var onKeyUp: (@MainActor () -> Void)?
+    /// Escape was pressed while the cancel key was registered.
+    var onCancelKey: (@MainActor () -> Void)?
     var onRegistrationFailure: (@MainActor (OSStatus) -> Void)? {
         didSet {
             replayPendingRegistrationFailure()
@@ -61,6 +65,7 @@ final class HotkeyManager: @unchecked Sendable {
         lock.lock()
         isDeinitialized = true
         let ref = hotKeyRef
+        let cancelRef = cancelHotKeyRef
         let handler = eventHandlerRef
         let tap = eventTap
         let source = runLoopSource
@@ -68,7 +73,7 @@ final class HotkeyManager: @unchecked Sendable {
         modifierOnlyDebounce = nil
         lock.unlock()
 
-        if let ref {
+        for ref in [ref, cancelRef].compactMap({ $0 }) {
             let status = UnregisterEventHotKey(ref)
             if status != noErr {
                 logger.error("Failed to unregister hotkey with status: \(status)")
@@ -184,6 +189,47 @@ final class HotkeyManager: @unchecked Sendable {
         return isDeinitialized
     }
 
+    /// Claims Escape so it can cancel the session in progress. Registered only
+    /// while a session runs, so Escape keeps working in other apps the rest of
+    /// the time. A failure only costs the Escape shortcut; the overlay's
+    /// cancel button still works, so it is logged rather than surfaced.
+    func registerCancelKey() {
+        guard let signature = OSType(fourCharCode: "JBBR") else {
+            logger.error("Failed to create cancel hotkey signature")
+            return
+        }
+
+        lock.lock()
+        defer { lock.unlock() }
+        guard cancelHotKeyRef == nil else { return }
+
+        let status = RegisterEventHotKey(
+            UInt32(kVK_Escape),
+            0,
+            EventHotKeyID(signature: signature, id: CarbonHotkeyRoute.cancelHotKeyID),
+            GetApplicationEventTarget(),
+            0,
+            &cancelHotKeyRef
+        )
+        if status != noErr {
+            cancelHotKeyRef = nil
+            logger.error("Failed to register Escape as the cancel hotkey with status: \(status)")
+        }
+    }
+
+    func unregisterCancelKey() {
+        lock.lock()
+        let ref = cancelHotKeyRef
+        cancelHotKeyRef = nil
+        lock.unlock()
+
+        guard let ref else { return }
+        let status = UnregisterEventHotKey(ref)
+        if status != noErr {
+            logger.error("Failed to unregister the cancel hotkey with status: \(status)")
+        }
+    }
+
     @discardableResult
     private func registerCarbon(keyCode: UInt32, modifiers: UInt32) -> OSStatus {
         guard let signature = OSType(fourCharCode: "JBBR") else {
@@ -195,7 +241,7 @@ final class HotkeyManager: @unchecked Sendable {
 
         let hotKeyID = EventHotKeyID(
             signature: signature,
-            id: 1
+            id: CarbonHotkeyRoute.dictationHotKeyID
         )
 
         lock.lock()
@@ -562,13 +608,36 @@ final class HotkeyManager: @unchecked Sendable {
                 guard !manager.isDeinit() else { return OSStatus(eventNotHandledErr) }
 
                 let kind = GetEventKind(event)
+                guard kind == UInt32(kEventHotKeyPressed) || kind == UInt32(kEventHotKeyReleased) else {
+                    return noErr
+                }
 
-                if kind == UInt32(kEventHotKeyPressed) {
+                var hotKeyID = EventHotKeyID()
+                let parameterStatus = GetEventParameter(
+                    event,
+                    EventParamName(kEventParamDirectObject),
+                    EventParamType(typeEventHotKeyID),
+                    nil,
+                    MemoryLayout<EventHotKeyID>.size,
+                    nil,
+                    &hotKeyID
+                )
+                guard parameterStatus == noErr else {
+                    manager.logger.error("Failed to read hotkey ID with status: \(parameterStatus)")
+                    return OSStatus(eventNotHandledErr)
+                }
+
+                switch CarbonHotkeyRoute.route(hotKeyID: hotKeyID.id, isPressed: kind == UInt32(kEventHotKeyPressed)) {
+                case .dictationDown:
                     manager.setCarbonHotkeyDown(true)
                     HotkeyManager.deliverToMain { manager.onKeyDown?() }
-                } else if kind == UInt32(kEventHotKeyReleased) {
+                case .dictationUp:
                     manager.setCarbonHotkeyDown(false)
                     HotkeyManager.deliverToMain { manager.onKeyUp?() }
+                case .cancel:
+                    HotkeyManager.deliverToMain { manager.onCancelKey?() }
+                case .ignore:
+                    break
                 }
 
                 return noErr
@@ -905,5 +974,31 @@ struct ModifierOnlyRegistrationRetryPolicy: Sendable {
     /// registration replaces the pending one.
     mutating func reset() {
         lastObservedTrust = nil
+    }
+}
+
+/// What a Carbon hotkey event means. Two hotkeys share one event handler: the
+/// dictation shortcut, and Escape, which is registered only while a session
+/// runs so it can cancel it. Pure so the dispatch is testable without the
+/// Carbon event loop.
+enum CarbonHotkeyRoute: Equatable {
+    case dictationDown
+    case dictationUp
+    case cancel
+    case ignore
+
+    static let dictationHotKeyID: UInt32 = 1
+    static let cancelHotKeyID: UInt32 = 2
+
+    static func route(hotKeyID: UInt32, isPressed: Bool) -> CarbonHotkeyRoute {
+        switch hotKeyID {
+        case dictationHotKeyID:
+            return isPressed ? .dictationDown : .dictationUp
+        case cancelHotKeyID:
+            // Cancel on press; the release has nothing left to do.
+            return isPressed ? .cancel : .ignore
+        default:
+            return .ignore
+        }
     }
 }

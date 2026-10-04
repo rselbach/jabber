@@ -41,6 +41,8 @@ struct KeycapsView: View {
 struct ModelRow: View {
     let model: ModelManager.Model
     let isSelected: Bool
+    /// The catalog's pick for the selected language.
+    let isRecommended: Bool
     /// Name of the selected language when this model can't transcribe it.
     let unsupportedLanguageName: String?
     let onSelect: () -> Void
@@ -58,6 +60,15 @@ struct ModelRow: View {
                     Text(model.sizeHint)
                         .font(.caption)
                         .foregroundStyle(.secondary)
+
+                    if isRecommended {
+                        Text("Recommended")
+                            .font(.caption2.weight(.medium))
+                            .padding(.horizontal, 6)
+                            .padding(.vertical, 1)
+                            .background(Color.accentColor.opacity(0.15), in: Capsule())
+                            .foregroundStyle(Color.accentColor)
+                    }
                 }
 
                 Text(model.description)
@@ -114,7 +125,10 @@ struct ModelRow: View {
             selectButton
         }
 
-        deleteButton
+        // Built-in models ship with macOS; there is nothing to delete.
+        if AppMode.modelDefinition(for: model.id)?.isBuiltIn != true {
+            deleteButton
+        }
     }
 
     private var selectButton: some View {
@@ -136,7 +150,7 @@ struct ModelRow: View {
     }
 
     private var downloadButton: some View {
-        Button("Download") {
+        Button("Download & Use") {
             onDownload()
         }
         .buttonStyle(.bordered)

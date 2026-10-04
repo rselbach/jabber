@@ -62,6 +62,10 @@ final class ModelManager {
     /// The stored selection is left untouched until the user explicitly acts,
     /// so a later no-op call must not clear the launch-time migration signal.
     private(set) var lastMigration: Migration?
+    /// A model to switch to once its download finishes ("Download & Use").
+    /// The app applies it while no dictation runs, so a long download that
+    /// finishes mid-dictation never cancels the session.
+    private(set) var pendingSelectionModelId: String?
     private var lastDownloadProgressReport: [String: CFAbsoluteTime] = [:]
     private var activeDownloads: [String: ActiveDownload] = [:]
     private let downloadProgressReportInterval: TimeInterval = 0.1
@@ -163,6 +167,8 @@ final class ModelManager {
     }
 
     func selectModel(_ modelId: String) -> Bool {
+        // An explicit choice replaces any switch still waiting on a download.
+        pendingSelectionModelId = nil
         guard downloadedModels.contains(where: { $0.id == modelId }) else { return false }
         guard settings[.selectedModel] != modelId else { return false }
         settings.remove(.declinedModelMigrationNoticeKey)
@@ -208,8 +214,29 @@ final class ModelManager {
     }
 
     func cancelDownload(_ modelId: String) {
+        clearPendingSelection(of: modelId)
         guard let activeDownload = activeDownloads[modelId] else { return }
         activeDownload.task.cancel()
+    }
+
+    /// Remembers to select `modelId` once its download finishes.
+    func selectWhenDownloaded(_ modelId: String) {
+        guard models.contains(where: { $0.id == modelId }) else { return }
+        pendingSelectionModelId = modelId
+    }
+
+    /// Selects the pending model if its download has finished. Returns
+    /// whether the selection changed.
+    @discardableResult
+    func applyPendingSelection() -> Bool {
+        guard let modelId = pendingSelectionModelId,
+              downloadedModels.contains(where: { $0.id == modelId }) else { return false }
+        return selectModel(modelId)
+    }
+
+    private func clearPendingSelection(of modelId: String) {
+        guard pendingSelectionModelId == modelId else { return }
+        pendingSelectionModelId = nil
     }
 
     private func clearActiveDownload(modelId: String, downloadID: UUID) {
@@ -301,6 +328,8 @@ final class ModelManager {
         do {
             modelFolder = try await downloadModelFiles(modelId: modelId, modelName: modelName)
         } catch is CancellationError {
+            // Nothing to switch to; drop any pending "Download & Use".
+            clearPendingSelection(of: modelId)
             postDownloadState(
                 modelId: modelId,
                 modelName: modelName,
@@ -312,6 +341,7 @@ final class ModelManager {
             // so a re-download picks up where it left off — do NOT clean up.
             throw CancellationError()
         } catch {
+            clearPendingSelection(of: modelId)
             if Task.isCancelled {
                 postDownloadState(
                     modelId: modelId,

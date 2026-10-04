@@ -1244,6 +1244,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             overlayWindow.setTargetAppIcon(nil)
             currentTargetProcessID = nil
             syncNonDictationUI()
+            // A "Download & Use" that finished mid-session switches now.
+            ModelManager.shared.applyPendingSelection()
         case .recording:
             downloadOverlay.hide()
             overlayWindow.show()
@@ -1407,6 +1409,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
 
         syncNonDictationUI(forceLoading: isSelectedModelFinished)
+
+        // "Download & Use": switch now unless a dictation is running; then it
+        // waits for the session to end (handleDictationStateChange) instead
+        // of being cancelled by the model change.
+        if state.phase == .finished, dictationCoordinator.isIdle {
+            ModelManager.shared.applyPendingSelection()
+        }
     }
 
     private func updateDownloadTracking(with state: ModelDownloadState) {

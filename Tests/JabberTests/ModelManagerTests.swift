@@ -349,6 +349,45 @@ final class ModelManagerTests: XCTestCase {
         }
     }
 
+    func testPendingSelectionAppliesOnlyOnceTheModelIsInstalled() throws {
+        XCTAssertFalse(modelManager.applyPendingSelection(), "nothing pending")
+
+        modelManager.selectWhenDownloaded(AppMode.parakeetModelId)
+        XCTAssertEqual(modelManager.pendingSelectionModelId, AppMode.parakeetModelId)
+        XCTAssertFalse(modelManager.applyPendingSelection(), "not downloaded yet")
+        XCTAssertEqual(settings[.selectedModel], AppMode.nemotronModelId)
+        XCTAssertEqual(modelManager.pendingSelectionModelId, AppMode.parakeetModelId, "still waiting")
+
+        try createCompleteParakeetModelFolder(at: cacheBaseURL
+            .appendingPathComponent("models", isDirectory: true)
+            .appendingPathComponent("FluidInference", isDirectory: true)
+            .appendingPathComponent("parakeet-tdt-0.6b-v2-coreml", isDirectory: true))
+        modelManager.refreshModels()
+
+        XCTAssertTrue(modelManager.applyPendingSelection())
+        XCTAssertEqual(settings[.selectedModel], AppMode.parakeetModelId)
+        XCTAssertNil(modelManager.pendingSelectionModelId)
+        XCTAssertFalse(modelManager.applyPendingSelection(), "applied only once")
+    }
+
+    func testPendingSelectionIsDroppedByOtherChoices() {
+        let cases: [String: (ModelManager) -> Void] = [
+            "picking a model explicitly": { _ = $0.selectModel(AppMode.appleSpeechModelId) },
+            "cancelling the download": { $0.cancelDownload(AppMode.parakeetModelId) }
+        ]
+
+        for (name, drop) in cases {
+            modelManager.selectWhenDownloaded(AppMode.parakeetModelId)
+            drop(modelManager)
+            XCTAssertNil(modelManager.pendingSelectionModelId, name)
+        }
+    }
+
+    func testPendingSelectionIgnoresUnknownModels() {
+        modelManager.selectWhenDownloaded("abed-nadir-v9")
+        XCTAssertNil(modelManager.pendingSelectionModelId)
+    }
+
     func testSelectModelReturnsFalseWhenModelNotDownloaded() {
         let undownloadedModel = modelManager.models.first { !$0.isDownloaded }
         guard let modelId = undownloadedModel?.id else { return }

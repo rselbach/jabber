@@ -25,12 +25,13 @@ struct SpeechPage: View {
                     ModelRow(
                         model: model,
                         isSelected: selectedModel == model.id,
+                        isRecommended: LanguageModelCatalog.recommendedModelId(for: selectedLanguage) == model.id,
                         unsupportedLanguageName: unsupportedLanguageName(for: model.id),
                         onSelect: {
                             select(model)
                         },
                         onDownload: {
-                            _ = modelManager.startDownload(model.id)
+                            downloadAndUse(model)
                         },
                         onDelete: {
                             queueAlert(.deleteModel(id: model.id, name: model.name))
@@ -146,10 +147,16 @@ struct SpeechPage: View {
                 select(model)
             }
         } else {
-            Button("Download \(model.name) (\(model.sizeHint))") {
-                _ = modelManager.startDownload(model.id)
+            Button("Download & Use \(model.name) (\(model.sizeHint))") {
+                downloadAndUse(model)
             }
         }
+    }
+
+    /// Downloads `model` and switches to it when the download finishes.
+    private func downloadAndUse(_ model: ModelManager.Model) {
+        modelManager.selectWhenDownloaded(model.id)
+        _ = modelManager.startDownload(model.id)
     }
 
     private func unsupportedLanguageName(for modelId: String) -> String? {

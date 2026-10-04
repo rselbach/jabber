@@ -6,6 +6,19 @@ import Foundation
 struct StatusMenuState: Equatable {
     /// Longest last-transcript preview shown under the menu item.
     static let previewLength = 40
+    /// Most saved transcripts listed under Recent Transcripts.
+    static let recentTranscriptCount = 5
+
+    /// A saved transcript offered under Recent Transcripts.
+    struct RecentTranscript: Equatable {
+        let id: UUID
+        /// One-line preview used as the item's title.
+        let title: String
+        /// What choosing the item delivers.
+        let text: String
+        let timestamp: Date
+        let appName: String?
+    }
 
     var header: String
     /// Start, stop, or cancel the session, depending on its phase.
@@ -13,6 +26,9 @@ struct StatusMenuState: Equatable {
     var lastTranscriptItemTitle: String
     var lastTranscriptPreview: String?
     var canDeliverLastTranscript: Bool
+    /// Newest saved transcripts; empty hides Recent Transcripts.
+    var recentTranscripts: [RecentTranscript]
+    var canDeliverRecentTranscripts: Bool
     /// Retry and Discard for a kept failed dictation.
     var showsFailedDictationItems: Bool
     var canActOnFailedDictation: Bool
@@ -26,6 +42,8 @@ struct StatusMenuState: Equatable {
         isSetupPending: Bool,
         dictationState: DictationCoordinator.State,
         lastTranscript: String?,
+        historyEntries: [DictationHistoryEntry],
+        isHistoryEnabled: Bool,
         outputMode: TypingService.OutputMode,
         hasFailedDictation: Bool,
         canStartSession: Bool,
@@ -38,10 +56,30 @@ struct StatusMenuState: Equatable {
             lastTranscriptPreview: lastTranscript.map(preview),
             // Delivering mid-session would interleave with the new dictation.
             canDeliverLastTranscript: lastTranscript != nil && dictationState == .idle,
+            recentTranscripts: isHistoryEnabled ? recentTranscripts(from: historyEntries) : [],
+            canDeliverRecentTranscripts: dictationState == .idle,
             showsFailedDictationItems: hasFailedDictation,
             canActOnFailedDictation: hasFailedDictation && canStartSession,
             showsRetryModelLoad: hasModelLoadFailed
         )
+    }
+
+    /// The newest entries with text, newest first.
+    static func recentTranscripts(from entries: [DictationHistoryEntry]) -> [RecentTranscript] {
+        entries.lazy
+            .compactMap { entry -> RecentTranscript? in
+                let text = entry.transcript.trimmingCharacters(in: .whitespacesAndNewlines)
+                guard !text.isEmpty else { return nil }
+                return RecentTranscript(
+                    id: entry.id,
+                    title: preview(text),
+                    text: text,
+                    timestamp: entry.timestamp,
+                    appName: entry.appName
+                )
+            }
+            .prefix(recentTranscriptCount)
+            .map { $0 }
     }
 
     /// One line of the transcript, cut to `previewLength` characters.

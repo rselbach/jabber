@@ -9,6 +9,8 @@ final class StatusMenuStateTests: XCTestCase {
         isSetupPending: Bool = false,
         dictationState: DictationCoordinator.State = .idle,
         lastTranscript: String? = nil,
+        historyEntries: [DictationHistoryEntry] = [],
+        isHistoryEnabled: Bool = true,
         outputMode: TypingService.OutputMode = .directTyping,
         hasFailedDictation: Bool = false,
         canStartSession: Bool = true,
@@ -21,6 +23,8 @@ final class StatusMenuStateTests: XCTestCase {
             isSetupPending: isSetupPending,
             dictationState: dictationState,
             lastTranscript: lastTranscript,
+            historyEntries: historyEntries,
+            isHistoryEnabled: isHistoryEnabled,
             outputMode: outputMode,
             hasFailedDictation: hasFailedDictation,
             canStartSession: canStartSession,
@@ -98,6 +102,43 @@ final class StatusMenuStateTests: XCTestCase {
         }
     }
 
+    func testRecentTranscriptsListTheNewestSavedText() {
+        let entries = [
+            historyEntry("  Troy and Abed in the morning  ", app: "Greendale Messenger"),
+            historyEntry("   "),
+            historyEntry("Six seasons and a movie"),
+            historyEntry("Cool. Cool cool cool."),
+            historyEntry("Streets ahead"),
+            historyEntry("Pop pop"),
+            historyEntry("Señor Chang")
+        ]
+        let cases: [String: (isHistoryEnabled: Bool, state: DictationCoordinator.State, wantTitles: [String], wantCanDeliver: Bool)] = [
+            "five newest with text": (
+                true,
+                .idle,
+                ["Troy and Abed in the morning", "Six seasons and a movie", "Cool. Cool cool cool.", "Streets ahead", "Pop pop"],
+                true
+            ),
+            "history off": (false, .idle, [], true),
+            "busy recording": (
+                true,
+                .recording,
+                ["Troy and Abed in the morning", "Six seasons and a movie", "Cool. Cool cool cool.", "Streets ahead", "Pop pop"],
+                false
+            )
+        ]
+
+        for (name, tc) in cases {
+            let got = resolve(dictationState: tc.state, historyEntries: entries, isHistoryEnabled: tc.isHistoryEnabled)
+            XCTAssertEqual(got.recentTranscripts.map(\.title), tc.wantTitles, name)
+            XCTAssertEqual(got.canDeliverRecentTranscripts, tc.wantCanDeliver, name)
+        }
+
+        let first = resolve(historyEntries: entries).recentTranscripts.first
+        XCTAssertEqual(first?.text, "Troy and Abed in the morning")
+        XCTAssertEqual(first?.appName, "Greendale Messenger")
+    }
+
     func testRecoveryItemsFollowFailures() {
         let cases: [String: (
             hasFailedDictation: Bool,
@@ -124,5 +165,22 @@ final class StatusMenuStateTests: XCTestCase {
             XCTAssertEqual(got.canActOnFailedDictation, tc.wantCanActOnFailedDictation, name)
             XCTAssertEqual(got.showsRetryModelLoad, tc.wantShowsRetryModelLoad, name)
         }
+    }
+
+    private func historyEntry(_ transcript: String, app: String? = nil) -> DictationHistoryEntry {
+        DictationHistoryEntry(
+            id: UUID(),
+            timestamp: Date(timeIntervalSince1970: 0),
+            duration: 1,
+            sampleRate: 16_000,
+            modelID: AppMode.parakeetModelId,
+            modelName: "Parakeet TDT v2",
+            language: "en",
+            transcript: transcript,
+            directoryName: "entry",
+            audioFilename: nil,
+            audioByteCount: 0,
+            appName: app
+        )
     }
 }

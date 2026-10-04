@@ -10,6 +10,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var statusHeaderItem: NSMenuItem?
     private var dictationToggleItem: NSMenuItem?
     private var lastTranscriptItem: NSMenuItem?
+    private var recentTranscriptsItem: NSMenuItem?
     /// Shown only while the coordinator keeps a failed dictation; refreshed on
     /// every menu open.
     private var retryFailedDictationItem: NSMenuItem?
@@ -134,12 +135,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         expireDictationHistory()
     }
 
-    /// Drops history that expired while Jabber wasn't running.
+    /// Drops history that expired while Jabber wasn't running. Also loads
+    /// the shared history list, so Recent Transcripts is ready when the menu
+    /// first opens.
     private func expireDictationHistory() {
         let retention = TypedSettings.historyPreferences.retention
+        let history = DictationHistoryModel.shared
         Task {
             do {
-                try await DictationHistoryStore.shared.applyRetention(retention)
+                try await history.applyRetention(retention)
             } catch {
                 logger.error("Failed to expire dictation history: \(error.localizedDescription)")
             }
@@ -415,6 +419,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         dictationToggleItem = toggleItem
         let lastItem = NSMenuItem(title: "Paste Last Transcript", action: #selector(deliverLastTranscript), keyEquivalent: "")
         lastTranscriptItem = lastItem
+        let recentItem = NSMenuItem(title: "Recent Transcripts", action: nil, keyEquivalent: "")
+        recentItem.submenu = NSMenu()
+        recentTranscriptsItem = recentItem
         let retryItem = NSMenuItem(title: "Retry Failed Dictation", action: #selector(retryFailedDictation), keyEquivalent: "")
         retryFailedDictationItem = retryItem
         let discardItem = NSMenuItem(title: "Discard Failed Recording", action: #selector(discardFailedDictation), keyEquivalent: "")
@@ -432,7 +439,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // quitItem has no target → routes through the responder chain to NSApp.terminate.
         // statusHeaderItem has no action either, so autoenablesItems keeps it disabled.
 
-        menu.items = [statusHeaderItem, toggleItem, lastItem, retryItem, discardItem, retryLoadItem,
+        menu.items = [statusHeaderItem, toggleItem, lastItem, recentItem, retryItem, discardItem, retryLoadItem,
                       .separator(), openItem, settingsItem, .separator(), updatesItem, .separator(), quitItem]
         menu.delegate = self
         applyStatusMenuState(currentStatusMenuState())
@@ -453,6 +460,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             isSetupPending: shouldShowAutomaticOnboarding(),
             dictationState: dictationCoordinator.state,
             lastTranscript: dictationCoordinator.lastTranscript,
+            historyEntries: DictationHistoryModel.shared.entries,
+            isHistoryEnabled: TypedSettings[.historyEnabled],
             outputMode: typingService.mode,
             hasFailedDictation: dictationCoordinator.hasFailedDictation,
             canStartSession: dictationCoordinator.canStart,
@@ -465,6 +474,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         dictationToggleItem?.title = state.dictationItemTitle
         lastTranscriptItem?.title = state.lastTranscriptItemTitle
         lastTranscriptItem?.subtitle = state.lastTranscriptPreview
+        recentTranscriptsItem?.isHidden = state.recentTranscripts.isEmpty
+        recentTranscriptsItem?.submenu?.items = recentTranscriptMenuItems(state.recentTranscripts)
         retryFailedDictationItem?.isHidden = !state.showsFailedDictationItems
         discardFailedDictationItem?.isHidden = !state.showsFailedDictationItems
         retryModelLoadItem?.isHidden = !state.showsRetryModelLoad
@@ -482,6 +493,33 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         NotificationCenter.default.post(
             name: Constants.Notifications.mainWindowSectionDidRequest,
             object: MainWindowView.Section.general
+        )
+    }
+
+    /// One item per recent transcript, with when and where it was dictated
+    /// underneath, then a way to the full list.
+    private func recentTranscriptMenuItems(_ transcripts: [StatusMenuState.RecentTranscript]) -> [NSMenuItem] {
+        var items = transcripts.map { transcript in
+            let item = NSMenuItem(title: transcript.title, action: #selector(deliverRecentTranscript(_:)), keyEquivalent: "")
+            item.target = self
+            item.representedObject = transcript.text
+            let time = transcript.timestamp.formatted(date: .abbreviated, time: .shortened)
+            item.subtitle = transcript.appName.map { "\(time) · \($0)" } ?? time
+            return item
+        }
+        let showAllItem = NSMenuItem(title: "Show All History…", action: #selector(openHistory), keyEquivalent: "")
+        showAllItem.target = self
+        items.append(.separator())
+        items.append(showAllItem)
+        return items
+    }
+
+    @objc private func openHistory() {
+        showMainWindow(initialSection: .history)
+        // Selects History when the window is already open; see openSettings.
+        NotificationCenter.default.post(
+            name: Constants.Notifications.mainWindowSectionDidRequest,
+            object: MainWindowView.Section.history
         )
     }
 
@@ -532,7 +570,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// Delivers the last transcript again, through the current output mode,
     /// into whatever app is focused now.
     @objc private func deliverLastTranscript() {
-        guard let text = dictationCoordinator.lastTranscript, dictationCoordinator.isIdle else { return }
+        guard let text = dictationCoordinator.lastTranscript else { return }
+        deliverTranscript(text)
+    }
+
+    /// Delivers a saved transcript chosen under Recent Transcripts.
+    @objc private func deliverRecentTranscript(_ sender: NSMenuItem) {
+        guard let text = sender.representedObject as? String else { return }
+        deliverTranscript(text)
+    }
+
+    private func deliverTranscript(_ text: String) {
+        guard dictationCoordinator.isIdle else { return }
         guard ensureOutputPermissionReady() else { return }
         typingService.output(text, targetProcessID: TypingService.captureFocusedProcessID())
     }
@@ -1601,6 +1650,9 @@ extension AppDelegate: NSMenuItemValidation {
         }
         if item.action == #selector(deliverLastTranscript) {
             return currentStatusMenuState().canDeliverLastTranscript
+        }
+        if item.action == #selector(deliverRecentTranscript(_:)) {
+            return currentStatusMenuState().canDeliverRecentTranscripts
         }
         return true
     }

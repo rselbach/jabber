@@ -17,17 +17,18 @@ final class NotificationService: NSObject {
         case notice
     }
 
-    /// Shows messages that cannot be posted as system notifications without
-    /// blocking the user. AppDelegate points this at the recording overlay so
-    /// the service stays free of window management.
+    /// Shows feedback, and messages that cannot be posted as system
+    /// notifications, without blocking the user. AppDelegate points this at
+    /// the recording overlay so the service stays free of window management.
     var noticePresenter: ((_ title: String, _ message: String) -> Void)?
 
     private let logger = Logger(subsystem: "com.rselbach.jabber", category: "NotificationService")
     private let notificationCenter: UNUserNotificationCenter?
 
-    private override init() {
-        let isValidBundle = Bundle.main.bundleIdentifier != nil
-
+    /// `isValidBundle` is false for bundle-less binaries such as bare
+    /// `swift run`, and in tests, which must not touch the
+    /// `UNUserNotificationCenter` singleton.
+    init(isValidBundle: Bool = Bundle.main.bundleIdentifier != nil) {
         if isValidBundle {
             notificationCenter = UNUserNotificationCenter.current()
         } else {
@@ -70,6 +71,14 @@ final class NotificationService: NSObject {
         deliver(title: title, message: message, critical: false)
     }
 
+    /// Feedback on something the user just did, such as a hotkey press or a
+    /// dictation that just ended. Always the on-screen notice: the user is
+    /// looking at the overlay, and a system notification would sit in
+    /// Notification Center long after it stopped mattering.
+    func showFeedback(title: String, message: String) {
+        presentNotice(title: title, message: message)
+    }
+
     private func deliver(title: String, message: String, critical: Bool) {
         let center = notificationCenter
 
@@ -92,7 +101,7 @@ final class NotificationService: NSObject {
                 guard let center else { return }
                 await self.sendNotificationRequest(title: title, message: message, center: center)
             case .notice:
-                self.showNotice(title: title, message: message)
+                self.presentNotice(title: title, message: message)
             }
         }
     }
@@ -146,7 +155,7 @@ final class NotificationService: NSObject {
         }
     }
 
-    private func showNotice(title: String, message: String) {
+    private func presentNotice(title: String, message: String) {
         guard let noticePresenter else {
             logger.error("No on-screen notice presenter, dropping message: \(title)")
             return

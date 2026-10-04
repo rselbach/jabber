@@ -507,8 +507,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         registerConfiguredHotkey()
     }
 
-    /// Routes messages NotificationService cannot post as notifications to
-    /// the recording overlay instead of modal alerts.
+    /// Routes NotificationService's on-screen notices (feedback, and messages
+    /// it cannot post as notifications) to the recording overlay.
     private func setupOverlayNotices() {
         NotificationService.shared.noticePresenter = { [weak self] title, message in
             self?.showOverlayNotice(title: title, message: message)
@@ -762,7 +762,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         let hasMicrophonePermission = await permissionService.requestMicrophonePermission()
         guard hasMicrophonePermission else {
-            NotificationService.shared.showWarning(
+            NotificationService.shared.showFeedback(
                 title: "Microphone Permission Required",
                 message: "Jabber needs microphone access to record speech."
             )
@@ -818,7 +818,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func showAccessibilityPermissionWarning() {
-        NotificationService.shared.showWarning(
+        NotificationService.shared.showFeedback(
             title: "Accessibility Permission Required",
             message: "Grant accessibility permission before dictating into the active app, or switch output to Copy to clipboard in Settings."
         )
@@ -1205,7 +1205,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func showNoSpeechDetectedWarning() {
-        NotificationService.shared.showWarning(
+        NotificationService.shared.showFeedback(
             title: "No Speech Detected",
             message: "Could not detect any speech in the recording. Try speaking louder or closer to the microphone."
         )
@@ -1219,10 +1219,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             case .inputUnavailable, .deviceChangeRecoveryFailed,
                  .selectedInputUnavailable, .inputDeviceSelectionUnavailable,
                  .couldNotSelectInput:
-                NotificationService.shared.showError(
+                NotificationService.shared.showFeedback(
                     title: "Microphone Unavailable",
-                    message: error.localizedDescription,
-                    critical: false
+                    message: error.localizedDescription
                 )
                 return
             case .invalidFormat, .converterUnavailable, .conversionFailed:
@@ -1230,10 +1229,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             }
         }
 
-        NotificationService.shared.showError(
+        NotificationService.shared.showFeedback(
             title: "Audio Processing Error",
-            message: "Failed to process audio: \(error.localizedDescription)",
-            critical: false
+            message: "Failed to process audio: \(error.localizedDescription)"
         )
     }
 
@@ -1242,7 +1240,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         guard now - lastModelUnavailableNotice > 1.5 else { return }
         lastModelUnavailableNotice = now
         let declinedDownload = hasDeclinedModelMigrationDownloadPending()
-        NotificationService.shared.showWarning(
+        NotificationService.shared.showFeedback(
             title: declinedDownload ? "Model Not Downloaded" : "Model Not Ready",
             message: declinedDownload
                 ? "Your selected speech model isn't downloaded. Open Speech settings to download it or choose another model."
@@ -1255,7 +1253,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let now = CFAbsoluteTimeGetCurrent()
         guard now - lastTranscriptionBusyNotice > 1.5 else { return }
         lastTranscriptionBusyNotice = now
-        NotificationService.shared.showWarning(
+        NotificationService.shared.showFeedback(
             title: "Still Transcribing",
             message: "Jabber is finishing the previous dictation. Try again in a moment."
         )
@@ -1273,7 +1271,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         guard now - lastPostProcessingFailureNotice > 1.5 else { return }
         lastPostProcessingFailureNotice = now
 
-        NotificationService.shared.showWarning(
+        NotificationService.shared.showFeedback(
             title: "Couldn't Refine Transcript",
             message: Self.postProcessingFailureMessage(
                 providerName: TypedSettings.postProcessingProviderKind.displayName,

@@ -139,7 +139,7 @@ final class TypingService {
             // clipboard contents. Copy without restoring and tell the user.
             logger.warning("Accessibility permission not granted; copying transcript without paste")
             copyOnly(text)
-            NotificationService.shared.showWarning(
+            NotificationService.shared.showFeedback(
                 title: "Transcript Copied to Clipboard",
                 message: "Grant Accessibility permission in Privacy & Security to enable direct typing into apps."
             )
@@ -149,10 +149,9 @@ final class TypingService {
     private func copyOnly(_ text: String) {
         let pasteboard = NSPasteboard.general
         guard copyToClipboard(text, pasteboard: pasteboard) else {
-            NotificationService.shared.showError(
+            NotificationService.shared.showFeedback(
                 title: "Copy Failed",
-                message: "Could not copy transcription to clipboard.",
-                critical: false
+                message: "Could not copy transcription to clipboard."
             )
             return
         }
@@ -164,10 +163,9 @@ final class TypingService {
 
         guard copyToClipboard(text, pasteboard: pasteboard) else {
             restoreClipboard(previousClipboard, expectedChangeCount: pasteboard.changeCount)
-            NotificationService.shared.showError(
+            NotificationService.shared.showFeedback(
                 title: "Copy Failed",
-                message: "Could not copy transcription to clipboard.",
-                critical: false
+                message: "Could not copy transcription to clipboard."
             )
             return
         }
@@ -203,10 +201,9 @@ final class TypingService {
                 // so the user can paste manually — restoring the previous
                 // clipboard here would silently discard the transcript while
                 // the notification claims it is available.
-                NotificationService.shared.showError(
+                NotificationService.shared.showFeedback(
                     title: "Paste Failed",
-                    message: "Could not simulate paste command. Text is in clipboard.",
-                    critical: false
+                    message: "Could not simulate paste command. Text is in clipboard."
                 )
                 return
             }
@@ -243,7 +240,7 @@ final class TypingService {
 
         guard snapshot.restore(to: pasteboard) else {
             logger.warning("Failed to restore previous clipboard contents")
-            NotificationService.shared.showWarning(
+            NotificationService.shared.showFeedback(
                 title: "Clipboard Restore Failed",
                 message: "Could not restore your previous clipboard contents. They may have been lost."
             )

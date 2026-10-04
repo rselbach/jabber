@@ -49,6 +49,20 @@ final class NotificationServiceTests: XCTestCase {
         }
     }
 
+    /// Feedback goes straight to the on-screen notice, synchronously and
+    /// without consulting notification authorization.
+    func testFeedbackAlwaysUsesTheOnScreenNotice() {
+        let service = NotificationService(isValidBundle: false)
+        var presented: [String] = []
+        service.noticePresenter = { title, message in
+            presented.append("\(title): \(message)")
+        }
+
+        service.showFeedback(title: "No Speech Detected", message: "Troy Barnes was too quiet.")
+
+        XCTAssertEqual(presented, ["No Speech Detected: Troy Barnes was too quiet."])
+    }
+
     func testForegroundPresentationOptionsShowBannerAndSound() {
         let options = NotificationService.foregroundPresentationOptions
 

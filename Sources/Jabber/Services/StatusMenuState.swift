@@ -18,8 +18,10 @@ struct StatusMenuState: Equatable {
     var canActOnFailedDictation: Bool
     var showsRetryModelLoad: Bool
 
+    /// - Parameter progress: Download or load progress, when known.
     static func resolve(
         appState: AppDelegate.AppState,
+        progress: Double?,
         hotkeyDisplay: String,
         isSetupPending: Bool,
         dictationState: DictationCoordinator.State,
@@ -30,7 +32,7 @@ struct StatusMenuState: Equatable {
         hasModelLoadFailed: Bool
     ) -> StatusMenuState {
         StatusMenuState(
-            header: header(for: appState, hotkeyDisplay: hotkeyDisplay, isSetupPending: isSetupPending),
+            header: header(for: appState, progress: progress, hotkeyDisplay: hotkeyDisplay, isSetupPending: isSetupPending),
             dictationItemTitle: dictationItemTitle(for: dictationState),
             lastTranscriptItemTitle: outputMode == .clipboard ? "Copy Last Transcript" : "Paste Last Transcript",
             lastTranscriptPreview: lastTranscript.map(preview),
@@ -51,12 +53,14 @@ struct StatusMenuState: Equatable {
 
     private static func header(
         for appState: AppDelegate.AppState,
+        progress: Double?,
         hotkeyDisplay: String,
         isSetupPending: Bool
     ) -> String {
         switch appState {
         case .downloading:
-            return "Preparing Speech Model…"
+            guard let progress else { return "Preparing Speech Model…" }
+            return "Preparing Speech Model… \(Int(progress * 100))%"
         case .ready:
             return "Ready to Dictate — \(hotkeyDisplay)"
         case .recording:

@@ -22,4 +22,24 @@ final class StatusIconAppearanceTests: XCTestCase {
             )
         }
     }
+
+    func testVoiceOverHearsDownloadProgress() {
+        let cases: [String: (state: AppDelegate.AppState, progress: Double?, want: String)] = [
+            "downloading with known progress": (.downloading, 0.426, "Jabber, preparing speech model, 42 percent"),
+            "downloading without progress": (.downloading, nil, "Jabber, preparing speech model"),
+            "progress ignored outside downloads": (.recording, 0.5, "Jabber, recording")
+        ]
+
+        for (name, tc) in cases {
+            XCTAssertEqual(tc.state.accessibilityDescription(progress: tc.progress), tc.want, name)
+        }
+    }
+
+    func testDownloadProgressIconIsATemplateWithItsDescription() {
+        let image = DownloadProgressIcon.image(progress: 0.5, accessibilityDescription: "Jabber, preparing speech model, 50 percent")
+
+        XCTAssertTrue(image.isTemplate)
+        XCTAssertEqual(image.size, DownloadProgressIcon.size)
+        XCTAssertEqual(image.accessibilityDescription, "Jabber, preparing speech model, 50 percent")
+    }
 }

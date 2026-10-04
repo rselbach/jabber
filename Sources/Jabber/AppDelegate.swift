@@ -17,6 +17,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// Shown only after a model load failed; refreshed on every menu open.
     private var retryModelLoadItem: NSMenuItem?
     private var currentAppState: AppState = .ready
+    /// Download or load progress shown in the icon and menu header, when known.
+    private var currentProgress: Double?
+    /// The user hid the download overlay; progress stays in the menu bar
+    /// icon until the download or load ends.
+    private var isDownloadOverlayDismissed = false
     private var onboardingWindow: NSWindow?
     private var onboardingCoordinator: OnboardingCoordinator?
     private var mainWindow: NSWindow?
@@ -323,6 +328,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             }
         }
 
+        /// Adds the download or load progress, when known, to what VoiceOver
+        /// reads for the icon.
+        func accessibilityDescription(progress: Double?) -> String {
+            guard self == .downloading, let progress else { return accessibilityDescription }
+            return "\(accessibilityDescription), \(Int(progress * 100)) percent"
+        }
+
         /// What VoiceOver reads for the menu bar icon, which otherwise only
         /// changes shape and color.
         var accessibilityDescription: String {
@@ -341,8 +353,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
-    private func updateStatusIcon(state: AppState) {
+    private func updateStatusIcon(state: AppState, progress: Double? = nil) {
         currentAppState = state
+        currentProgress = state == .downloading ? progress : nil
 
         guard let button = statusItem?.button else {
             logger.error("Status item button unavailable when trying to update icon")
@@ -353,8 +366,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // that a model failed.
         let description = state == .error && shouldShowAutomaticOnboarding()
             ? "Jabber, finish setup to dictate"
-            : state.accessibilityDescription
-        button.image = NSImage(systemSymbolName: state.symbolName, accessibilityDescription: description)
+            : state.accessibilityDescription(progress: currentProgress)
+        if let currentProgress {
+            button.image = DownloadProgressIcon.image(progress: currentProgress, accessibilityDescription: description)
+        } else {
+            button.image = NSImage(systemSymbolName: state.symbolName, accessibilityDescription: description)
+        }
         button.contentTintColor = state == .recording ? .systemRed : nil
     }
 
@@ -418,6 +435,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         return StatusMenuState.resolve(
             appState: currentAppState,
+            progress: currentProgress,
             hotkeyDisplay: TypedSettings.hotkeyShortcut.displayString,
             isSetupPending: shouldShowAutomaticOnboarding(),
             dictationState: dictationCoordinator.state,
@@ -555,6 +573,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         overlayWindow.onFallbackNoticeCleared = { [weak self] in
             self?.syncNonDictationUI()
+        }
+        downloadOverlay.onDismiss = { [weak self] in
+            self?.isDownloadOverlayDismissed = true
+            self?.downloadOverlay.hide()
         }
     }
 
@@ -1474,12 +1496,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func applyNonDictationUI(_ state: NonDictationUIState) {
         switch state {
         case .ready:
+            isDownloadOverlayDismissed = false
             downloadOverlay.hide()
             updateStatusIcon(state: .ready)
         case .downloading(let download):
             showDownloadOverlay()
             downloadOverlay.updateProgress(download.progress, status: download.status)
-            updateStatusIcon(state: .downloading)
+            updateStatusIcon(state: .downloading, progress: download.progress)
         case .loadingModel(let status, let progress):
             showDownloadOverlay()
             if let progress {
@@ -1487,8 +1510,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             } else {
                 downloadOverlay.updateProgress(0, status: status, indeterminate: true)
             }
-            updateStatusIcon(state: .downloading)
+            updateStatusIcon(state: .downloading, progress: progress)
         case .error:
+            isDownloadOverlayDismissed = false
             downloadOverlay.hide()
             updateStatusIcon(state: .error)
         }
@@ -1496,9 +1520,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     /// The download overlay shares the recording overlay's spot, so it stays
     /// hidden while an overlay notice is up. The notice's cleared callback
-    /// re-syncs (setupOverlayNotices).
+    /// re-syncs (setupOverlayNotices). Once hidden by the user it stays hidden
+    /// until the download or load ends.
     private func showDownloadOverlay() {
-        guard !overlayWindow.hasActiveFallbackNotice else {
+        guard !isDownloadOverlayDismissed, !overlayWindow.hasActiveFallbackNotice else {
             downloadOverlay.hide()
             return
         }

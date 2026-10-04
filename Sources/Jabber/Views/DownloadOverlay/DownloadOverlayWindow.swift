@@ -6,6 +6,8 @@ import os
 final class DownloadOverlayWindow: OverlayWindowController {
     private let viewModel = DownloadOverlayViewModel()
     private let logger = Logger(subsystem: "com.rselbach.jabber", category: "DownloadOverlayWindow")
+    /// The user clicked the overlay's close button.
+    var onDismiss: (() -> Void)?
 
     init() {
         super.init(animationDuration: 0.3)
@@ -27,8 +29,11 @@ final class DownloadOverlayWindow: OverlayWindowController {
 
         let panel = OverlayPanelFactory.makePanel(frame: frame)
 
-        let content = DownloadOverlayContent(viewModel: viewModel)
-        let hostingView = NSHostingView(rootView: content)
+        let content = DownloadOverlayContent(viewModel: viewModel) { [weak self] in
+            self?.onDismiss?()
+        }
+        // The panel never becomes key, so the close button needs first mouse.
+        let hostingView = FirstMouseHostingView(rootView: content)
         hostingView.frame = NSRect(x: 0, y: 0, width: frame.width, height: frame.height)
 
         panel.contentView = hostingView
@@ -68,6 +73,7 @@ final class DownloadOverlayViewModel: ObservableObject {
 
 struct DownloadOverlayContent: View {
     @ObservedObject var viewModel: DownloadOverlayViewModel
+    let onDismiss: () -> Void
 
     var body: some View {
         ZStack {
@@ -93,6 +99,15 @@ struct DownloadOverlayContent: View {
                             .progressViewStyle(.linear)
                     }
                 }
+
+                Button(action: onDismiss) {
+                    Image(systemName: "xmark.circle.fill")
+                        .font(.title3)
+                        .foregroundStyle(.secondary)
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Hide")
+                .help("Hide — progress stays in the menu bar icon")
             }
             .padding(.horizontal, 18)
             .padding(.vertical, 12)

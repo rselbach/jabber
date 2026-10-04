@@ -5,6 +5,7 @@ import XCTest
 final class StatusMenuStateTests: XCTestCase {
     private func resolve(
         appState: AppDelegate.AppState = .ready,
+        progress: Double? = nil,
         isSetupPending: Bool = false,
         dictationState: DictationCoordinator.State = .idle,
         lastTranscript: String? = nil,
@@ -15,6 +16,7 @@ final class StatusMenuStateTests: XCTestCase {
     ) -> StatusMenuState {
         StatusMenuState.resolve(
             appState: appState,
+            progress: progress,
             hotkeyDisplay: "⌥ Space",
             isSetupPending: isSetupPending,
             dictationState: dictationState,
@@ -27,17 +29,19 @@ final class StatusMenuStateTests: XCTestCase {
     }
 
     func testHeaderNamesTheCurrentState() {
-        let cases: [String: (appState: AppDelegate.AppState, isSetupPending: Bool, want: String)] = [
-            "preparing a model": (.downloading, false, "Preparing Speech Model…"),
-            "ready": (.ready, false, "Ready to Dictate — ⌥ Space"),
-            "recording": (.recording, false, "Recording…"),
-            "transcribing": (.transcribing, false, "Transcribing…"),
-            "no model after setup": (.error, false, "Model Unavailable"),
-            "no model before setup": (.error, true, "Finish Setup to Dictate")
+        let cases: [String: (appState: AppDelegate.AppState, progress: Double?, isSetupPending: Bool, want: String)] = [
+            "preparing a model": (.downloading, nil, false, "Preparing Speech Model…"),
+            "downloading with known progress": (.downloading, 0.426, false, "Preparing Speech Model… 42%"),
+            "ready": (.ready, nil, false, "Ready to Dictate — ⌥ Space"),
+            "recording": (.recording, nil, false, "Recording…"),
+            "transcribing": (.transcribing, nil, false, "Transcribing…"),
+            "no model after setup": (.error, nil, false, "Model Unavailable"),
+            "no model before setup": (.error, nil, true, "Finish Setup to Dictate")
         ]
 
         for (name, tc) in cases {
-            XCTAssertEqual(resolve(appState: tc.appState, isSetupPending: tc.isSetupPending).header, tc.want, name)
+            let got = resolve(appState: tc.appState, progress: tc.progress, isSetupPending: tc.isSetupPending)
+            XCTAssertEqual(got.header, tc.want, name)
         }
     }
 

@@ -29,7 +29,7 @@ final class SoundFeedbackService {
             return player
         }
 
-        guard let url = soundURL(for: cue) else {
+        guard let url = Self.soundURL(for: cue) else {
             logger.error("Missing sound resource for cue \(cue.rawValue, privacy: .public)")
             return nil
         }
@@ -44,14 +44,17 @@ final class SoundFeedbackService {
         }
     }
 
-    /// Release builds flatten the SwiftPM resource bundle into the app's
-    /// Resources directory (see scripts/release.sh), so look in Bundle.main
-    /// first and only then fall back to Bundle.module (dev builds via
-    /// `swift run`, where the resource bundle sits next to the bare binary).
-    private func soundURL(for cue: Cue) -> URL? {
-        if let url = Bundle.main.url(forResource: cue.rawValue, withExtension: "m4a") {
+    /// Release builds copy the SwiftPM resources flat into the app's Resources
+    /// directory (see scripts/release.sh), so look in the main bundle first.
+    /// Dev builds via `swift run` keep SwiftPM's resource bundle next to the
+    /// bare binary. That bundle is located by hand: `Bundle.module` calls
+    /// fatalError when it is missing, and a missing sound must never crash a
+    /// dictation, only silence it.
+    nonisolated static func soundURL(for cue: Cue, mainBundle: Bundle = .main) -> URL? {
+        if let url = mainBundle.url(forResource: cue.rawValue, withExtension: "m4a") {
             return url
         }
-        return Bundle.module.url(forResource: cue.rawValue, withExtension: "m4a")
+        let resourceBundleURL = mainBundle.bundleURL.appendingPathComponent("Jabber_Jabber.bundle")
+        return Bundle(url: resourceBundleURL)?.url(forResource: cue.rawValue, withExtension: "m4a")
     }
 }

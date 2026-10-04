@@ -178,11 +178,19 @@ create_bundle() {
   # Add rpath for Frameworks directory
   install_name_tool -add_rpath @executable_path/../Frameworks "${macos}/${APP_NAME}"
   
-  # Copy resources from the build (SwiftPM bundles assets here)
+  # Copy resources from the build (SwiftPM bundles assets here) flat into
+  # Contents/Resources, where the app looks them up. Newer SwiftPM builds a
+  # structured bundle with them under Contents/Resources; older ones put them
+  # at the top level.
   local bundle_resources="${PROJECT_ROOT}/.build/release/Jabber_Jabber.bundle"
-  if [[ -d "${bundle_resources}" ]]; then
-    cp -R "${bundle_resources}/"* "${resources}/"
+  if [[ -d "${bundle_resources}/Contents/Resources" ]]; then
+    bundle_resources="${bundle_resources}/Contents/Resources"
   fi
+  if [[ ! -d "${bundle_resources}" ]]; then
+    echo "Error: SwiftPM resource bundle not found at ${bundle_resources}" >&2
+    exit 1
+  fi
+  cp -R "${bundle_resources}/"* "${resources}/"
   
   # Copy Assets.xcassets icons directly (actool compile)
   compile_assets "${resources}"

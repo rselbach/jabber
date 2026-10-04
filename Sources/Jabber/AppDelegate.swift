@@ -8,6 +8,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// Disabled first menu item mirroring the current app state; refreshed on
     /// every menu open.
     private var statusHeaderItem: NSMenuItem?
+    private var dictationToggleItem: NSMenuItem?
+    private var lastTranscriptItem: NSMenuItem?
     /// Shown only while the coordinator keeps a failed dictation; refreshed on
     /// every menu open.
     private var retryFailedDictationItem: NSMenuItem?
@@ -378,6 +380,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let statusHeaderItem = NSMenuItem(title: currentStatusMenuState().header, action: nil, keyEquivalent: "")
         self.statusHeaderItem = statusHeaderItem
 
+        // Titles are placeholders; applyStatusMenuState sets the real ones.
+        let toggleItem = NSMenuItem(title: "Start Dictation", action: #selector(toggleDictationFromMenu), keyEquivalent: "")
+        dictationToggleItem = toggleItem
+        let lastItem = NSMenuItem(title: "Paste Last Transcript", action: #selector(deliverLastTranscript), keyEquivalent: "")
+        lastTranscriptItem = lastItem
         let retryItem = NSMenuItem(title: "Retry Failed Dictation", action: #selector(retryFailedDictation), keyEquivalent: "")
         retryFailedDictationItem = retryItem
         let discardItem = NSMenuItem(title: "Discard Failed Recording", action: #selector(discardFailedDictation), keyEquivalent: "")
@@ -389,14 +396,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let updatesItem = NSMenuItem(title: "Check for Updates…", action: #selector(checkForUpdates), keyEquivalent: "")
         let quitItem = NSMenuItem(title: "Quit Jabber", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
 
-        for item in [retryItem, discardItem, retryLoadItem, openItem, settingsItem, updatesItem] {
+        for item in [toggleItem, lastItem, retryItem, discardItem, retryLoadItem, openItem, settingsItem, updatesItem] {
             item.target = self
         }
         // quitItem has no target → routes through the responder chain to NSApp.terminate.
         // statusHeaderItem has no action either, so autoenablesItems keeps it disabled.
 
-        menu.items = [statusHeaderItem, retryItem, discardItem, retryLoadItem, .separator(), openItem, settingsItem,
-                      .separator(), updatesItem, .separator(), quitItem]
+        menu.items = [statusHeaderItem, toggleItem, lastItem, retryItem, discardItem, retryLoadItem,
+                      .separator(), openItem, settingsItem, .separator(), updatesItem, .separator(), quitItem]
         menu.delegate = self
         applyStatusMenuState(currentStatusMenuState())
         return menu
@@ -413,6 +420,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             appState: currentAppState,
             hotkeyDisplay: TypedSettings.hotkeyShortcut.displayString,
             isSetupPending: shouldShowAutomaticOnboarding(),
+            dictationState: dictationCoordinator.state,
+            lastTranscript: dictationCoordinator.lastTranscript,
+            outputMode: typingService.mode,
             hasFailedDictation: dictationCoordinator.hasFailedDictation,
             canStartSession: dictationCoordinator.canStart,
             hasModelLoadFailed: hasModelLoadFailed
@@ -421,6 +431,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func applyStatusMenuState(_ state: StatusMenuState) {
         statusHeaderItem?.title = state.header
+        dictationToggleItem?.title = state.dictationItemTitle
+        lastTranscriptItem?.title = state.lastTranscriptItemTitle
+        lastTranscriptItem?.subtitle = state.lastTranscriptPreview
         retryFailedDictationItem?.isHidden = !state.showsFailedDictationItems
         discardFailedDictationItem?.isHidden = !state.showsFailedDictationItems
         retryModelLoadItem?.isHidden = !state.showsRetryModelLoad
@@ -468,6 +481,29 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     @objc private func discardFailedDictation() {
         dictationCoordinator.discardFailedDictation()
+    }
+
+    /// Start, stop, or cancel from the status menu, matching what the item
+    /// said when the menu opened.
+    @objc private func toggleDictationFromMenu() {
+        switch dictationCoordinator.state {
+        case .idle:
+            Task { @MainActor [weak self] in
+                await self?.startDictation(pressID: nil)
+            }
+        case .recording:
+            dictationCoordinator.stop()
+        case .transcribing:
+            cancelDictationFromUser()
+        }
+    }
+
+    /// Delivers the last transcript again, through the current output mode,
+    /// into whatever app is focused now.
+    @objc private func deliverLastTranscript() {
+        guard let text = dictationCoordinator.lastTranscript, dictationCoordinator.isIdle else { return }
+        guard ensureOutputPermissionReady() else { return }
+        typingService.output(text, targetProcessID: TypingService.captureFocusedProcessID())
     }
 
     private func setupHotkey() {
@@ -746,16 +782,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         pendingHotkeyStartID = pressID
 
         Task { @MainActor [weak self] in
-            await self?.finishStartDictationFromHotkey(pressID: pressID)
+            await self?.startDictation(pressID: pressID)
         }
     }
 
-    private func finishStartDictationFromHotkey(pressID: Int) async {
+    /// Runs the readiness checks and starts recording into the focused app.
+    /// `pressID` identifies a hotkey press, whose release may abort the start
+    /// while microphone permission is pending; menu starts pass nil.
+    private func startDictation(pressID: Int?) async {
         defer {
-            if pendingHotkeyStartID == pressID {
-                pendingHotkeyStartID = nil
+            if let pressID {
+                if pendingHotkeyStartID == pressID {
+                    pendingHotkeyStartID = nil
+                }
+                abortedHotkeyPressIDs.remove(pressID)
             }
-            abortedHotkeyPressIDs.remove(pressID)
         }
 
         guard transcriptionService.isReady else {
@@ -780,7 +821,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         // If the key was released while we were awaiting permission, treat this
         // press as aborted rather than starting a recording after release.
-        if abortedHotkeyPressIDs.remove(pressID) != nil {
+        if let pressID, abortedHotkeyPressIDs.remove(pressID) != nil {
             return
         }
 
@@ -1510,6 +1551,9 @@ extension AppDelegate: NSMenuItemValidation {
         }
         if item.action == #selector(retryFailedDictation) || item.action == #selector(discardFailedDictation) {
             return currentStatusMenuState().canActOnFailedDictation
+        }
+        if item.action == #selector(deliverLastTranscript) {
+            return currentStatusMenuState().canDeliverLastTranscript
         }
         return true
     }

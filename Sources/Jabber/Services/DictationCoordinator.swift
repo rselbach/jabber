@@ -127,6 +127,10 @@ final class DictationCoordinator {
     /// instead of audio that was just recorded.
     private(set) var isRetryingFailedDictation = false
 
+    /// The text most recently delivered to an app, kept in memory only so the
+    /// status menu can paste it again.
+    private(set) var lastTranscript: String?
+
     var onStateChange: ((State) -> Void)?
     var onAudioLevel: ((Float) -> Void)?
     var onPartialTranscription: ((String) -> Void)?
@@ -640,6 +644,7 @@ final class DictationCoordinator {
             let trimmedText = resolvedOutcome.outputText.trimmingCharacters(in: .whitespacesAndNewlines)
             if !trimmedText.isEmpty {
                 typingService.output(trimmedText, targetProcessID: targetProcessID)
+                lastTranscript = trimmedText
             } else if resolvedOutcome.wasPostProcessed {
                 // Post-processor returned empty on success (e.g. "scratch that",
                 // "cancel", "never mind"). This is a valid cancellation: type

@@ -824,6 +824,37 @@ final class DictationCoordinatorTests: XCTestCase {
         XCTAssertEqual(stateChangeCount, 0)
     }
 
+    private func dictate(_ result: Result<String, Error>) async {
+        audioCapture.storedSamples = makeLoudSamples()
+        transcriptionService.transcribeResult = result
+        let idleExpectation = expectationForIdle()
+        XCTAssertTrue(coordinator.start(targetProcessID: 12_345))
+        coordinator.stop()
+        await fulfillment(of: [idleExpectation], timeout: 1.0)
+    }
+
+    func testLastTranscriptRemembersWhatWasDelivered() async {
+        XCTAssertNil(coordinator.lastTranscript)
+
+        replacementEntries = [ReplacementEntry(triggers: ["greendale"], replacement: "Greendale Community College")]
+        await dictate(.success("  welcome to greendale  "))
+        XCTAssertEqual(coordinator.lastTranscript, "welcome to Greendale Community College")
+        XCTAssertEqual(coordinator.lastTranscript, typingService.outputs.last)
+
+        await dictate(.success("señor chang"))
+        XCTAssertEqual(coordinator.lastTranscript, "señor chang", "a newer dictation replaces it")
+
+        await dictate(.failure(NSError(domain: "Greendale", code: 42)))
+        XCTAssertEqual(coordinator.lastTranscript, "señor chang", "a failure keeps the previous one")
+
+        await dictate(.success("   "))
+        XCTAssertEqual(coordinator.lastTranscript, "señor chang", "nothing delivered keeps the previous one")
+
+        transcriptionService.transcribeResult = .success("troy and abed")
+        await retryAndWaitForIdle()
+        XCTAssertEqual(coordinator.lastTranscript, "troy and abed", "a successful retry counts")
+    }
+
     func testDiscardFailedDictationDropsRecording() async {
         XCTAssertFalse(coordinator.discardFailedDictation(), "nothing kept, nothing to discard")
 

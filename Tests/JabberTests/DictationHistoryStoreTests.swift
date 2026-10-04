@@ -30,7 +30,7 @@ final class DictationHistoryStoreTests: XCTestCase {
             timestamp: timestamp
         ))
 
-        let audioURL = store.audioURL(for: entry)
+        let audioURL = try XCTUnwrap(store.audioURL(for: entry))
         let audioData = try Data(contentsOf: audioURL)
         XCTAssertEqual(String(data: Data(audioData.prefix(4)), encoding: .ascii), "RIFF")
         XCTAssertEqual(String(data: Data(audioData[8 ..< 12]), encoding: .ascii), "WAVE")
@@ -67,7 +67,7 @@ final class DictationHistoryStoreTests: XCTestCase {
             language: "en"
         ))
 
-        let audioData = try Data(contentsOf: store.audioURL(for: entry))
+        let audioData = try Data(contentsOf: XCTUnwrap(store.audioURL(for: entry)))
         XCTAssertEqual(audioData.count, 44 + 4 * 2)
         // NaN encodes as silence; infinities clamp to the extremes.
         let pcmBytes = [UInt8](audioData.suffix(8))
@@ -79,18 +79,142 @@ final class DictationHistoryStoreTests: XCTestCase {
         XCTAssertEqual(pcmSample(2), Int16.min)
     }
 
-    func testSaveSessionRequiresOptInSetting() async {
-        let disabledStore = makeStore(isSaveEnabled: { false })
+    func testSaveSessionFollowsPreferences() async {
+        let tests: [String: (preferences: DictationHistoryPreferences, wantSaved: Bool, wantAudio: Bool)] = [
+            "history off": (.init(isEnabled: false, keepsAudio: true, retention: .month), false, false),
+            "transcripts only": (.init(isEnabled: true, keepsAudio: false, retention: .month), true, false),
+            "transcripts and audio": (.init(isEnabled: true, keepsAudio: true, retention: .month), true, true)
+        ]
 
-        await disabledStore.saveSession(session(transcript: "disabled", timestamp: Date(timeIntervalSince1970: 100)))
+        for (name, tc) in tests {
+            let directoryURL = historyDirectoryURL.appendingPathComponent(UUID().uuidString, isDirectory: true)
+            let store = makeStore(directoryURL: directoryURL, preferences: tc.preferences)
+
+            await store.saveSession(session(transcript: "Troy Barnes", timestamp: Date(timeIntervalSince1970: 900)))
+
+            let entries = await store.entries()
+            XCTAssertEqual(entries.count, tc.wantSaved ? 1 : 0, name)
+            XCTAssertEqual(entries.first?.hasAudio ?? false, tc.wantAudio, name)
+            XCTAssertEqual(FileManager.default.fileExists(atPath: directoryURL.path), tc.wantSaved, name)
+        }
+    }
+
+    func testTranscriptOnlySaveWritesNoAudio() async throws {
+        let store = makeStore()
+
+        let entry = try await store.save(
+            session(transcript: "Abed Nadir", timestamp: Date(timeIntervalSince1970: 100)),
+            keepingAudio: false,
+            retention: .forever
+        )
+
+        XCTAssertFalse(entry.hasAudio)
+        XCTAssertNil(store.audioURL(for: entry))
+        XCTAssertEqual(entry.duration, 100.0 / 16_000.0, accuracy: 0.000_001)
+        let files = try FileManager.default.contentsOfDirectory(
+            atPath: historyDirectoryURL.appendingPathComponent(entry.directoryName).path
+        )
+        XCTAssertEqual(files, ["metadata.json"])
+    }
+
+    func testRetentionExpiresEntriesByAge() async throws {
+        let day: TimeInterval = 24 * 60 * 60
+        let now = Date(timeIntervalSince1970: 100 * day)
+        let tests: [String: (retention: HistoryRetention, want: [String])] = [
+            "one week": (.week, ["yesterday"]),
+            "one month": (.month, ["yesterday", "last week"]),
+            "forever": (.forever, ["yesterday", "last week", "last season"])
+        ]
+
+        for (name, tc) in tests {
+            let store = makeStore(
+                directoryURL: historyDirectoryURL.appendingPathComponent(UUID().uuidString, isDirectory: true),
+                now: { now }
+            )
+            for (transcript, age) in [("last season", 40 * day), ("last week", 10 * day), ("yesterday", day)] {
+                _ = try await store.save(session(transcript: transcript, timestamp: now.addingTimeInterval(-age)))
+            }
+
+            try await store.applyRetention(tc.retention)
+
+            let entries = await store.entries()
+            XCTAssertEqual(entries.map(\.transcript), tc.want, name)
+        }
+    }
+
+    func testAudioCountBudgetDropsOldestAudioButKeepsTranscripts() async throws {
+        let store = makeStore(maxAudioEntryCount: 2)
+
+        let oldest = try await store.save(session(transcript: "Pierce", timestamp: Date(timeIntervalSince1970: 100)))
+        _ = try await store.save(session(transcript: "Shirley", timestamp: Date(timeIntervalSince1970: 200)))
+        _ = try await store.save(session(transcript: "Britta", timestamp: Date(timeIntervalSince1970: 300)))
+
+        let entries = await store.entries()
+        XCTAssertEqual(entries.map(\.transcript), ["Britta", "Shirley", "Pierce"])
+        XCTAssertEqual(entries.map(\.hasAudio), [true, true, false])
+        let oldestAudioURL = try XCTUnwrap(store.audioURL(for: oldest))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: oldestAudioURL.path))
+
+        // The dropped audio is recorded on disk, not just in memory.
+        let reloaded = await makeStore().entries()
+        XCTAssertEqual(reloaded.map(\.hasAudio), [true, true, false])
+    }
+
+    func testDeleteRemovesEntryAndItsFiles() async throws {
+        let store = makeStore()
+        let doomed = try await store.save(session(transcript: "Chang", timestamp: Date(timeIntervalSince1970: 100)))
+        _ = try await store.save(session(transcript: "Dean Pelton", timestamp: Date(timeIntervalSince1970: 200)))
+
+        try await store.delete(id: doomed.id)
+
+        let entries = await store.entries()
+        XCTAssertEqual(entries.map(\.transcript), ["Dean Pelton"])
+        XCTAssertFalse(FileManager.default.fileExists(
+            atPath: historyDirectoryURL.appendingPathComponent(doomed.directoryName).path
+        ))
+    }
+
+    func testDeleteAllRemovesEverythingAndSavingStillWorks() async throws {
+        let store = makeStore()
+        _ = try await store.save(session(transcript: "Troy", timestamp: Date(timeIntervalSince1970: 100)))
+        _ = try await store.save(session(transcript: "Abed", timestamp: Date(timeIntervalSince1970: 200)))
+
+        try await store.deleteAll()
+
+        let afterClear = await store.entries()
+        XCTAssertEqual(afterClear, [])
         XCTAssertFalse(FileManager.default.fileExists(atPath: historyDirectoryURL.path))
 
-        let enabledStore = makeStore(isSaveEnabled: { true })
-        await enabledStore.saveSession(session(transcript: "enabled", timestamp: Date(timeIntervalSince1970: 200)))
+        _ = try await store.save(session(transcript: "Annie", timestamp: Date(timeIntervalSince1970: 300)))
+        let afterSave = await store.entries()
+        XCTAssertEqual(afterSave.map(\.transcript), ["Annie"])
+    }
 
-        let entries = await enabledStore.entries()
+    func testSavePostsHistoryChange() async throws {
+        let store = makeStore()
+        let changed = expectation(forNotification: Constants.Notifications.dictationHistoryDidChange, object: nil)
 
-        XCTAssertEqual(entries.map(\.transcript), ["enabled"])
+        _ = try await store.save(session(transcript: "Magnitude", timestamp: Date(timeIntervalSince1970: 100)))
+
+        await fulfillment(of: [changed], timeout: 1)
+    }
+
+    func testSaveRecordsTheDictatedApp() async throws {
+        let store = makeStore()
+
+        _ = try await store.save(DictationHistorySession(
+            samples: [0.25],
+            transcript: "pop pop",
+            modelID: AppMode.parakeetModelId,
+            language: "en",
+            timestamp: Date(timeIntervalSince1970: 100),
+            app: DictatedApp(name: "Greendale Messenger", bundleID: "edu.greendale.messenger")
+        ))
+
+        let reloaded = await makeStore().entries()
+        let loaded = try XCTUnwrap(reloaded.first)
+        XCTAssertEqual(loaded.appName, "Greendale Messenger")
+        XCTAssertEqual(loaded.appBundleID, "edu.greendale.messenger")
     }
 
     func testEntriesAreSortedNewestFirst() async throws {
@@ -120,8 +244,8 @@ final class DictationHistoryStoreTests: XCTestCase {
         ))
     }
 
-    func testRetentionRemovesOldestValidEntriesByByteCount() async throws {
-        let store = makeStore(maxByteCount: 5_000)
+    func testAudioByteBudgetDropsOldestAudioButKeepsTranscripts() async throws {
+        let store = makeStore(maxAudioByteCount: 5_000)
 
         let oldEntry = try await store.save(session(
             samples: Array(repeating: 0.25, count: 10_000),
@@ -141,14 +265,15 @@ final class DictationHistoryStoreTests: XCTestCase {
 
         let entries = await store.entries()
 
-        XCTAssertEqual(entries.map(\.transcript), ["Annie Edison", "Abed Nadir"])
-        XCTAssertFalse(FileManager.default.fileExists(
-            atPath: historyDirectoryURL.appendingPathComponent(oldEntry.directoryName).path
+        XCTAssertEqual(entries.map(\.transcript), ["Annie Edison", "Abed Nadir", "Troy Barnes"])
+        XCTAssertEqual(entries.map(\.hasAudio), [true, true, false])
+        XCTAssertFalse(try FileManager.default.fileExists(
+            atPath: XCTUnwrap(store.audioURL(for: oldEntry)).path
         ))
     }
 
-    func testSaveKeepsReturnedEntryWhenSingleSessionExceedsByteCount() async throws {
-        let store = makeStore(maxByteCount: 1)
+    func testSaveKeepsAudioWhenSingleSessionExceedsAudioBudget() async throws {
+        let store = makeStore(maxAudioByteCount: 1)
 
         let entry = try await store.save(session(
             samples: Array(repeating: 0.25, count: 100),
@@ -159,11 +284,11 @@ final class DictationHistoryStoreTests: XCTestCase {
         let entries = await store.entries()
 
         XCTAssertEqual(entries.map(\.id), [entry.id])
-        XCTAssertTrue(FileManager.default.fileExists(atPath: store.audioURL(for: entry).path))
+        XCTAssertTrue(try FileManager.default.fileExists(atPath: XCTUnwrap(store.audioURL(for: entry)).path))
     }
 
-    func testOversizedSessionCanBeEvictedByNextSave() async throws {
-        let store = makeStore(maxByteCount: 1_200)
+    func testOversizedAudioIsDroppedByNextSave() async throws {
+        let store = makeStore(maxAudioByteCount: 1_200)
 
         let oversizedEntry = try await store.save(session(
             samples: Array(repeating: 0.25, count: 10_000),
@@ -178,11 +303,10 @@ final class DictationHistoryStoreTests: XCTestCase {
 
         let entries = await store.entries()
 
-        XCTAssertEqual(entries.map(\.id), [smallEntry.id])
-        XCTAssertFalse(FileManager.default.fileExists(
-            atPath: historyDirectoryURL.appendingPathComponent(oversizedEntry.directoryName).path
-        ))
-        XCTAssertTrue(FileManager.default.fileExists(atPath: store.audioURL(for: smallEntry).path))
+        XCTAssertEqual(entries.map(\.id), [smallEntry.id, oversizedEntry.id])
+        XCTAssertEqual(entries.map(\.hasAudio), [true, false])
+        XCTAssertFalse(try FileManager.default.fileExists(atPath: XCTUnwrap(store.audioURL(for: oversizedEntry)).path))
+        XCTAssertTrue(try FileManager.default.fileExists(atPath: XCTUnwrap(store.audioURL(for: smallEntry)).path))
     }
 
     func testDecodesLegacyEntryMissingPostProcessingFields() throws {
@@ -209,6 +333,8 @@ final class DictationHistoryStoreTests: XCTestCase {
         let entry = try decoder.decode(DictationHistoryEntry.self, from: Data(legacyJSON.utf8))
 
         XCTAssertEqual(entry.transcript, "cool cool cool")
+        XCTAssertTrue(entry.hasAudio)
+        XCTAssertNil(entry.appName)
         XCTAssertNil(entry.rawTranscript)
         XCTAssertFalse(entry.wasPostProcessed)
         XCTAssertNil(entry.postProcessingErrorDescription)
@@ -306,8 +432,8 @@ final class DictationHistoryStoreTests: XCTestCase {
         try FileManager.default.createDirectory(at: orphanDir, withIntermediateDirectories: true)
         try Data([0xDE, 0xAD, 0xBE, 0xEF]).write(to: orphanDir.appendingPathComponent("audio.wav"))
 
-        // Saving a real session triggers enforceRetentionLimit, which should
-        // sweep the orphan before applying count/byte limits.
+        // Saving a real session loads history, which sweeps the orphan before
+        // applying count/byte limits.
         _ = try await store.save(session(
             transcript: "Troy and Abed in the morning",
             timestamp: Date(timeIntervalSince1970: 100)
@@ -323,7 +449,7 @@ final class DictationHistoryStoreTests: XCTestCase {
         // entry fits within. Before the fix the orphan's bytes counted against
         // the budget and evicted the only valid entry; the sweep must prevent
         // that starvation.
-        let store = makeStore(maxByteCount: 4096)
+        let store = makeStore(maxAudioByteCount: 4096)
 
         let orphanDir = historyDirectoryURL
             .appendingPathComponent("2024-01-01T00-00-00Z-orphan", isDirectory: true)
@@ -369,16 +495,16 @@ final class DictationHistoryStoreTests: XCTestCase {
         let store = makeStore()
 
         // Plant a corrupt entry: valid audio.wav but metadata.json is garbage
-        // JSON. loadEntries() skips it (decode fails) but totalHistoryByteCount
-        // still counts its audio, so without pruning it survives forever.
+        // JSON. loadEntries() skips it (decode fails), so without pruning its
+        // audio would stay on disk forever, unseen.
         let corruptDir = historyDirectoryURL
             .appendingPathComponent("2024-01-01T00-00-00Z-corrupt", isDirectory: true)
         try FileManager.default.createDirectory(at: corruptDir, withIntermediateDirectories: true)
         try Data([0xDE, 0xAD, 0xBE, 0xEF]).write(to: corruptDir.appendingPathComponent("audio.wav"))
         try Data("{ not valid json".utf8).write(to: corruptDir.appendingPathComponent("metadata.json"))
 
-        // Saving a real session triggers enforceRetentionLimit, which should
-        // sweep the corrupt entry before applying count/byte limits.
+        // Saving a real session loads history, which sweeps the corrupt entry
+        // before applying count/byte limits.
         _ = try await store.save(session(
             transcript: "Troy and Abed in the morning",
             timestamp: Date(timeIntervalSince1970: 100)
@@ -392,9 +518,9 @@ final class DictationHistoryStoreTests: XCTestCase {
     func testCorruptMetadataBytesDoNotEvictValidEntries() async throws {
         // Tight byte budget that the corrupt entry alone exceeds, but a single
         // valid entry fits within. Before the fix the corrupt entry's bytes
-        // counted against the budget (loadEntries skipped it but
-        // totalHistoryByteCount did not), evicting the only valid entry.
-        let store = makeStore(maxByteCount: 4096)
+        // counted against the budget (loadEntries skipped it but the byte
+        // count did not), evicting the only valid entry.
+        let store = makeStore(maxAudioByteCount: 4096)
 
         let corruptDir = historyDirectoryURL
             .appendingPathComponent("2024-01-01T00-00-00Z-corrupt", isDirectory: true)
@@ -442,9 +568,8 @@ final class DictationHistoryStoreTests: XCTestCase {
         """
         try Data(maliciousJSON.utf8).write(to: maliciousDir.appendingPathComponent("metadata.json"))
 
-        // Saving a real session triggers enforceRetentionLimit, which reuses
-        // decodeEntry and should sweep the rejected (unsafe-name) entry before
-        // applying count/byte limits.
+        // Saving a real session loads history, which reuses decodeEntry and
+        // sweeps the rejected (unsafe-name) entry before applying limits.
         _ = try await store.save(session(
             transcript: "Troy and Abed in the morning",
             timestamp: Date(timeIntervalSince1970: 100)
@@ -453,6 +578,33 @@ final class DictationHistoryStoreTests: XCTestCase {
         let entries = await store.entries()
         XCTAssertEqual(entries.map(\.transcript), ["Troy and Abed in the morning"])
         XCTAssertFalse(FileManager.default.fileExists(atPath: maliciousDir.path), "malicious entry directory should be pruned")
+    }
+
+    func testLoadEntriesRejectsPathTraversalAudioFilename() async throws {
+        let entryDir = historyDirectoryURL
+            .appendingPathComponent("2024-01-01T00-00-00Z-escape", isDirectory: true)
+        try FileManager.default.createDirectory(at: entryDir, withIntermediateDirectories: true)
+        let json = """
+        {
+            "id": "00000000-0000-0000-0000-000000000003",
+            "timestamp": "2024-01-01T00:00:00Z",
+            "duration": 0.5,
+            "sampleRate": 16000,
+            "modelID": "qwen3",
+            "modelName": "Qwen3-ASR",
+            "language": "en",
+            "transcript": "escape",
+            "directoryName": "2024-01-01T00-00-00Z-escape",
+            "audioFilename": "../../escape.wav",
+            "audioByteCount": 84
+        }
+        """
+        try Data(json.utf8).write(to: entryDir.appendingPathComponent("metadata.json"))
+
+        let entries = await makeStore().entries()
+
+        XCTAssertEqual(entries, [])
+        XCTAssertFalse(FileManager.default.fileExists(atPath: entryDir.path), "entry with an unsafe audio filename should be pruned")
     }
 
     func testAudioURLSanitizesUnsafeDirectoryName() {
@@ -476,7 +628,9 @@ final class DictationHistoryStoreTests: XCTestCase {
             audioByteCount: 84
         )
 
-        let audioURL = store.audioURL(for: malicious)
+        guard let audioURL = store.audioURL(for: malicious) else {
+            return XCTFail("entry names an audio file")
+        }
         let historyPath = historyDirectoryURL.standardizedFileURL.path
         let resolvedPath = audioURL.standardizedFileURL.path
 
@@ -491,15 +645,20 @@ final class DictationHistoryStoreTests: XCTestCase {
     }
 
     private func makeStore(
-        maxEntryCount: Int = 50,
-        maxByteCount: Int64 = 500 * 1024 * 1024,
-        isSaveEnabled: @escaping @MainActor () -> Bool = { true }
+        directoryURL: URL? = nil,
+        maxEntryCount: Int = 1_000,
+        maxAudioEntryCount: Int = 50,
+        maxAudioByteCount: Int64 = 500 * 1024 * 1024,
+        now: @escaping @Sendable () -> Date = { Date(timeIntervalSince1970: 1_000) },
+        preferences: DictationHistoryPreferences = .init(isEnabled: true, keepsAudio: true, retention: .forever)
     ) -> DictationHistoryStore {
         DictationHistoryStore(
-            directoryURL: historyDirectoryURL,
+            directoryURL: directoryURL ?? historyDirectoryURL,
             maxEntryCount: maxEntryCount,
-            maxByteCount: maxByteCount,
-            isSaveEnabled: isSaveEnabled
+            maxAudioEntryCount: maxAudioEntryCount,
+            maxAudioByteCount: maxAudioByteCount,
+            now: now,
+            preferences: { preferences }
         )
     }
 
@@ -515,5 +674,13 @@ final class DictationHistoryStoreTests: XCTestCase {
             language: "auto",
             timestamp: timestamp
         )
+    }
+}
+
+private extension DictationHistoryStore {
+    /// Saves with audio and no expiry, which most tests want.
+    @discardableResult
+    func save(_ session: DictationHistorySession) throws -> DictationHistoryEntry {
+        try save(session, keepingAudio: true, retention: .forever)
     }
 }

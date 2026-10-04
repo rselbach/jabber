@@ -197,17 +197,19 @@ struct HistoryEntryRow: View {
                     .foregroundStyle(.secondary)
                     .lineLimit(2)
 
-                Text("\(entry.modelName) • \(entry.languageDisplayName) • \(entry.durationDisplayText) • \(entry.audioSizeDisplayText)")
+                Text("\(entry.modelName) • \(entry.languageDisplayName) • \(entry.durationDisplayText)\(entry.hasAudio ? " • \(entry.audioSizeDisplayText)" : "")")
                     .font(.caption2)
                     .foregroundStyle(.tertiary)
             }
 
             Spacer()
 
-            Button("Reveal") {
-                onReveal()
+            if entry.hasAudio {
+                Button("Reveal") {
+                    onReveal()
+                }
+                .buttonStyle(.borderless)
             }
-            .buttonStyle(.borderless)
         }
     }
 }

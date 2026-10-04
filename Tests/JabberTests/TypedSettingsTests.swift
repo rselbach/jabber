@@ -225,20 +225,20 @@ final class TypedSettingsTests: XCTestCase {
         XCTAssertFalse(settings[.didShowFirstRunSetup])
         XCTAssertFalse(settings[.onboardingCompleted])
         XCTAssertFalse(settings[.pauseMediaDuringRecording])
-        XCTAssertFalse(settings[.saveHistoryEnabled])
+        XCTAssertFalse(settings[.historyKeepsAudio])
         XCTAssertFalse(settings[.postProcessingEnabled])
         XCTAssertTrue(settings[.soundFeedbackEnabled])
         XCTAssertFalse(settings.isSet(.didShowFirstRunSetup))
         XCTAssertFalse(settings.isSet(.onboardingCompleted))
         XCTAssertFalse(settings.isSet(.pauseMediaDuringRecording))
-        XCTAssertFalse(settings.isSet(.saveHistoryEnabled))
+        XCTAssertFalse(settings.isSet(.historyKeepsAudio))
         XCTAssertFalse(settings.isSet(.postProcessingEnabled))
         XCTAssertFalse(settings.isSet(.soundFeedbackEnabled))
 
         settings[.didShowFirstRunSetup] = true
         settings[.onboardingCompleted] = true
         settings[.pauseMediaDuringRecording] = true
-        settings[.saveHistoryEnabled] = true
+        settings[.historyKeepsAudio] = true
         settings[.postProcessingEnabled] = true
         settings[.soundFeedbackEnabled] = false
 
@@ -247,12 +247,12 @@ final class TypedSettingsTests: XCTestCase {
         XCTAssertTrue(settings[.didShowFirstRunSetup])
         XCTAssertTrue(settings[.onboardingCompleted])
         XCTAssertTrue(settings[.pauseMediaDuringRecording])
-        XCTAssertTrue(settings[.saveHistoryEnabled])
+        XCTAssertTrue(settings[.historyKeepsAudio])
         XCTAssertTrue(settings[.postProcessingEnabled])
         XCTAssertTrue(settings.isSet(.didShowFirstRunSetup))
         XCTAssertTrue(settings.isSet(.onboardingCompleted))
         XCTAssertTrue(settings.isSet(.pauseMediaDuringRecording))
-        XCTAssertTrue(settings.isSet(.saveHistoryEnabled))
+        XCTAssertTrue(settings.isSet(.historyKeepsAudio))
         XCTAssertTrue(settings.isSet(.postProcessingEnabled))
     }
 
@@ -260,12 +260,12 @@ final class TypedSettingsTests: XCTestCase {
         settings[.didShowFirstRunSetup] = true
         settings[.onboardingCompleted] = true
         settings[.pauseMediaDuringRecording] = true
-        settings[.saveHistoryEnabled] = true
+        settings[.historyKeepsAudio] = true
         settings[.postProcessingEnabled] = true
         XCTAssertTrue(settings[.didShowFirstRunSetup])
         XCTAssertTrue(settings[.onboardingCompleted])
         XCTAssertTrue(settings[.pauseMediaDuringRecording])
-        XCTAssertTrue(settings[.saveHistoryEnabled])
+        XCTAssertTrue(settings[.historyKeepsAudio])
         XCTAssertTrue(settings[.postProcessingEnabled])
 
         settings[.soundFeedbackEnabled] = false
@@ -274,7 +274,7 @@ final class TypedSettingsTests: XCTestCase {
         settings.remove(.didShowFirstRunSetup)
         settings.remove(.onboardingCompleted)
         settings.remove(.pauseMediaDuringRecording)
-        settings.remove(.saveHistoryEnabled)
+        settings.remove(.historyKeepsAudio)
         settings.remove(.postProcessingEnabled)
         settings.remove(.soundFeedbackEnabled)
         XCTAssertTrue(settings[.soundFeedbackEnabled])
@@ -282,12 +282,12 @@ final class TypedSettingsTests: XCTestCase {
         XCTAssertFalse(settings[.didShowFirstRunSetup])
         XCTAssertFalse(settings[.onboardingCompleted])
         XCTAssertFalse(settings[.pauseMediaDuringRecording])
-        XCTAssertFalse(settings[.saveHistoryEnabled])
+        XCTAssertFalse(settings[.historyKeepsAudio])
         XCTAssertFalse(settings[.postProcessingEnabled])
         XCTAssertFalse(settings.isSet(.didShowFirstRunSetup))
         XCTAssertFalse(settings.isSet(.onboardingCompleted))
         XCTAssertFalse(settings.isSet(.pauseMediaDuringRecording))
-        XCTAssertFalse(settings.isSet(.saveHistoryEnabled))
+        XCTAssertFalse(settings.isSet(.historyKeepsAudio))
         XCTAssertFalse(settings.isSet(.postProcessingEnabled))
     }
 
@@ -368,6 +368,56 @@ final class TypedSettingsTests: XCTestCase {
 
         XCTAssertEqual(settings.hotkeyActivationMode, .automatic)
         XCTAssertEqual(settings[.hotkeyActivationMode], HotkeyActivationMode.automatic.rawValue)
+    }
+
+    func testHistoryDefaults() {
+        XCTAssertEqual(settings.historyPreferences, DictationHistoryPreferences(
+            isEnabled: true,
+            keepsAudio: false,
+            retention: .month
+        ))
+    }
+
+    func testInvalidStoredHistoryRetentionMigratesToDefault() {
+        userDefaults.set("fortnight", forKey: AppSettingKey.historyRetention)
+
+        XCTAssertEqual(settings[.historyRetention], HistoryRetention.month.rawValue)
+        settings.migrateStoredValues()
+        XCTAssertEqual(userDefaults.string(forKey: AppSettingKey.historyRetention), HistoryRetention.month.rawValue)
+    }
+
+    func testLegacyHistorySettingMigrates() throws {
+        let tests: [String: (
+            legacy: Bool?,
+            storedEnabled: Bool?,
+            wantEnabled: Bool,
+            wantKeepsAudio: Bool
+        )] = [
+            "never touched": (nil, nil, true, false),
+            "turned on keeps audio too": (true, nil, true, true),
+            "turned off keeps history off": (false, nil, false, false),
+            "new setting already chosen wins": (false, true, true, false)
+        ]
+
+        for (name, tc) in tests {
+            let suiteName = "JabberTests.TypedSettings.Legacy.\(UUID().uuidString)"
+            let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
+            defer { defaults.removePersistentDomain(forName: suiteName) }
+            let store = SettingsStore(userDefaults: defaults)
+            if let legacy = tc.legacy {
+                defaults.set(legacy, forKey: AppSettingKey.legacySaveHistoryEnabled)
+            }
+            if let storedEnabled = tc.storedEnabled {
+                store[.historyEnabled] = storedEnabled
+            }
+
+            store.migrateStoredValues()
+            store.migrateStoredValues()
+
+            XCTAssertEqual(store[.historyEnabled], tc.wantEnabled, name)
+            XCTAssertEqual(store[.historyKeepsAudio], tc.wantKeepsAudio, name)
+            XCTAssertNil(defaults.object(forKey: AppSettingKey.legacySaveHistoryEnabled), name)
+        }
     }
 
     func testSettingKeysAreCorrect() {

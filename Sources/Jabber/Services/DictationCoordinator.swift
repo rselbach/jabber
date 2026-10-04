@@ -188,6 +188,7 @@ final class DictationCoordinator {
     private var recordingLimitTask: Task<Void, Never>?
     private let isPostProcessingEnabled: @MainActor () -> Bool
     private let replacementEntriesProvider: @MainActor () -> [ReplacementEntry]
+    private let dictatedAppResolver: @MainActor (pid_t) -> DictatedApp?
     private let logger = Logger(subsystem: "com.rselbach.jabber", category: "DictationCoordinator")
 
     init(
@@ -206,7 +207,8 @@ final class DictationCoordinator {
         streamingPreviewStopTimeout: Duration = .seconds(5),
         maxRecordingDuration: Duration = .seconds(900),
         isPostProcessingEnabled: @escaping @MainActor () -> Bool = { TypedSettings[.postProcessingEnabled] },
-        replacementEntriesProvider: @escaping @MainActor () -> [ReplacementEntry] = { TypedSettings.replacementEntries }
+        replacementEntriesProvider: @escaping @MainActor () -> [ReplacementEntry] = { TypedSettings.replacementEntries },
+        dictatedAppResolver: @escaping @MainActor (pid_t) -> DictatedApp? = { DictatedApp(processID: $0) }
     ) {
         self.audioCapture = audioCapture
         self.transcriptionService = transcriptionService
@@ -220,6 +222,7 @@ final class DictationCoordinator {
         self.maxRecordingDuration = maxRecordingDuration
         self.isPostProcessingEnabled = isPostProcessingEnabled
         self.replacementEntriesProvider = replacementEntriesProvider
+        self.dictatedAppResolver = dictatedAppResolver
 
         self.audioCapture.onAudioLevel = { [weak self] level in
             self?.onAudioLevel?(level)
@@ -626,7 +629,8 @@ final class DictationCoordinator {
                 language: language,
                 rawTranscript: resolvedOutcome.rawTranscript,
                 wasPostProcessed: resolvedOutcome.wasPostProcessed,
-                postProcessingErrorDescription: resolvedOutcome.errorDescription
+                postProcessingErrorDescription: resolvedOutcome.errorDescription,
+                app: targetProcessID.flatMap(dictatedAppResolver)
             ))
             let historyFinishedAt = ContinuousClock.now
 

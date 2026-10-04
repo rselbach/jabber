@@ -20,6 +20,8 @@ enum Constants {
 
         /// Posted when a model download starts/progresses/finishes
         static let modelDownloadStateDidChange = Notification.Name("com.rselbach.jabber.modelDownloadStateDidChange")
+        /// Dictation history gained, lost, or changed entries. Posted on the main actor.
+        static let dictationHistoryDidChange = Notification.Name("com.rselbach.jabber.dictationHistoryDidChange")
 
         /// Posted when an input device connects, disconnects, or becomes the
         /// system default.

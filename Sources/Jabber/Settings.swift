@@ -18,6 +18,7 @@ enum TypedSetting<T>: Sendable {
     case postProcessingProviderKind
     case openRouterModel
     case openCodeZenModel
+    case historyRetention
     case lastModelMigrationNoticeKey
     case declinedModelMigrationNoticeKey
 
@@ -33,6 +34,7 @@ enum TypedSetting<T>: Sendable {
         case .postProcessingProviderKind: return AppSettingKey.postProcessingProviderKind
         case .openRouterModel: return AppSettingKey.openRouterModel
         case .openCodeZenModel: return AppSettingKey.openCodeZenModel
+        case .historyRetention: return AppSettingKey.historyRetention
         case .lastModelMigrationNoticeKey: return AppSettingKey.lastModelMigrationNoticeKey
         case .declinedModelMigrationNoticeKey: return AppSettingKey.declinedModelMigrationNoticeKey
         }
@@ -43,7 +45,8 @@ enum BoolSetting: Sendable {
     case didShowFirstRunSetup
     case onboardingCompleted
     case pauseMediaDuringRecording
-    case saveHistoryEnabled
+    case historyEnabled
+    case historyKeepsAudio
     case postProcessingEnabled
     case soundFeedbackEnabled
 
@@ -55,8 +58,10 @@ enum BoolSetting: Sendable {
             return AppSettingKey.onboardingCompleted
         case .pauseMediaDuringRecording:
             return AppSettingKey.pauseMediaDuringRecording
-        case .saveHistoryEnabled:
-            return AppSettingKey.saveHistoryEnabled
+        case .historyEnabled:
+            return AppSettingKey.historyEnabled
+        case .historyKeepsAudio:
+            return AppSettingKey.historyKeepsAudio
         case .postProcessingEnabled:
             return AppSettingKey.postProcessingEnabled
         case .soundFeedbackEnabled:
@@ -67,9 +72,9 @@ enum BoolSetting: Sendable {
     var `default`: Bool {
         switch self {
         case .didShowFirstRunSetup, .onboardingCompleted, .pauseMediaDuringRecording,
-             .saveHistoryEnabled, .postProcessingEnabled:
+             .historyKeepsAudio, .postProcessingEnabled:
             return false
-        case .soundFeedbackEnabled:
+        case .historyEnabled, .soundFeedbackEnabled:
             return true
         }
     }
@@ -122,6 +127,8 @@ extension TypedSetting where T == String {
             return OpenRouterModelCatalog.defaultModelId
         case .openCodeZenModel:
             return OpenCodeZenModelCatalog.defaultModelId
+        case .historyRetention:
+            return HistoryRetention.defaultValue.rawValue
         case .lastModelMigrationNoticeKey:
             return ""
         case .declinedModelMigrationNoticeKey:
@@ -170,6 +177,8 @@ struct SettingsStore: Sendable {
             return OpenRouterModelCatalog.resolveModelId(rawValue)
         case .openCodeZenModel:
             return OpenCodeZenModelCatalog.resolveModelId(rawValue)
+        case .historyRetention:
+            return HistoryRetention(rawValue: rawValue)?.rawValue ?? setting.default
         case .selectedModel, .selectedLanguage, .inputDeviceUID, .replacementEntries,
              .lastModelMigrationNoticeKey, .declinedModelMigrationNoticeKey:
             return rawValue
@@ -187,13 +196,40 @@ struct SettingsStore: Sendable {
                         .hotkeyActivationMode,
                         .postProcessingProviderKind,
                         .openRouterModel,
-                        .openCodeZenModel] {
+                        .openCodeZenModel,
+                        .historyRetention] {
             let raw = userDefaults.string(forKey: setting.key) ?? setting.default
             let resolved = Self.resolvedValue(for: setting, rawValue: raw)
             if resolved != raw {
                 userDefaults.set(resolved, forKey: setting.key)
             }
         }
+        migrateLegacyHistorySetting()
+    }
+
+    /// The old history toggle saved audio and text together and was off
+    /// unless turned on. An explicit choice carries over: on also keeps
+    /// audio, off keeps history off. Users who never touched it get the new
+    /// defaults.
+    private func migrateLegacyHistorySetting() {
+        guard let wasEnabled = userDefaults.object(forKey: AppSettingKey.legacySaveHistoryEnabled) as? Bool else {
+            return
+        }
+        if !isSet(.historyEnabled) {
+            self[.historyEnabled] = wasEnabled
+        }
+        if wasEnabled, !isSet(.historyKeepsAudio) {
+            self[.historyKeepsAudio] = true
+        }
+        userDefaults.removeObject(forKey: AppSettingKey.legacySaveHistoryEnabled)
+    }
+
+    var historyPreferences: DictationHistoryPreferences {
+        DictationHistoryPreferences(
+            isEnabled: self[.historyEnabled],
+            keepsAudio: self[.historyKeepsAudio],
+            retention: HistoryRetention(rawValue: self[.historyRetention]) ?? .defaultValue
+        )
     }
 
     subscript(setting: BoolSetting) -> Bool {
@@ -321,6 +357,10 @@ enum TypedSettings {
     /// Check if an integer setting has been explicitly set
     static func isSet(_ setting: IntSetting) -> Bool {
         store.isSet(setting)
+    }
+
+    static var historyPreferences: DictationHistoryPreferences {
+        store.historyPreferences
     }
 
     /// Instant-replacement rules applied as a deterministic final pass after

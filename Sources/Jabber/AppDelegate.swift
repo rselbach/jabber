@@ -131,6 +131,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         scheduleUIReadyFallbackIfNeeded()
         scheduleFirstRunSetupPrompt()
         prepareAudioCaptureWhenReady()
+        expireDictationHistory()
+    }
+
+    /// Drops history that expired while Jabber wasn't running.
+    private func expireDictationHistory() {
+        let retention = TypedSettings.historyPreferences.retention
+        Task {
+            do {
+                try await DictationHistoryStore.shared.applyRetention(retention)
+            } catch {
+                logger.error("Failed to expire dictation history: \(error.localizedDescription)")
+            }
+        }
     }
 
     /// Builds the audio engine once the UI has settled so the hotkey path does

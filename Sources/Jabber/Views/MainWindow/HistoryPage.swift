@@ -3,7 +3,7 @@ import SwiftUI
 
 /// Local dictation history: retention toggle and recent sessions.
 struct HistoryPage: View {
-    @AppStorage(AppSettingKey.saveHistoryEnabled) private var saveHistoryEnabled = false
+    @AppStorage(AppSettingKey.historyEnabled) private var historyEnabled = true
 
     @State private var historyEntries: [DictationHistoryEntry] = []
     @State private var errorMessage: String?
@@ -12,9 +12,9 @@ struct HistoryPage: View {
     var body: some View {
         Form {
             Section {
-                Toggle("Save dictation history", isOn: $saveHistoryEnabled)
+                Toggle("Save dictation history", isOn: $historyEnabled)
 
-                Text("When enabled, Jabber saves recent audio and transcripts locally for debugging. Retention is capped at 50 sessions or 500MB.")
+                Text("Jabber keeps your transcripts on this Mac for a month.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
 
@@ -35,7 +35,7 @@ struct HistoryPage: View {
 
             Section {
                 if historyEntries.isEmpty {
-                    Text(saveHistoryEnabled ? "No saved dictations yet." : "History is disabled.")
+                    Text(historyEnabled ? "No saved dictations yet." : "History is disabled.")
                         .foregroundStyle(.secondary)
                 } else {
                     ForEach(historyEntries) { entry in
@@ -80,8 +80,8 @@ struct HistoryPage: View {
 
     private func revealHistoryEntry(_ entry: DictationHistoryEntry) {
         Task { @MainActor in
-            let audioURL = DictationHistoryStore.shared.audioURL(for: entry)
-            guard FileManager.default.fileExists(atPath: audioURL.path) else {
+            guard let audioURL = DictationHistoryStore.shared.audioURL(for: entry),
+                  FileManager.default.fileExists(atPath: audioURL.path) else {
                 errorMessage = "Audio file for this session is missing. It may have been removed by retention cleanup."
                 showError = true
                 return

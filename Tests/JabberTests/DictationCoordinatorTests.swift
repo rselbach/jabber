@@ -11,6 +11,7 @@ final class DictationCoordinatorTests: XCTestCase {
     private var postProcessor: FakePostProcessingProvider!
     private var postProcessingEnabled = false
     private var replacementEntries: [ReplacementEntry] = []
+    private var dictatedApps: [pid_t: DictatedApp] = [:]
     private var coordinator: DictationCoordinator!
 
     override func setUp() async throws {
@@ -23,6 +24,7 @@ final class DictationCoordinatorTests: XCTestCase {
         postProcessor = FakePostProcessingProvider()
         postProcessingEnabled = false
         replacementEntries = []
+        dictatedApps = [:]
         coordinator = DictationCoordinator(
             audioCapture: audioCapture,
             transcriptionService: transcriptionService,
@@ -33,7 +35,8 @@ final class DictationCoordinatorTests: XCTestCase {
             streamingPreviewInterval: .milliseconds(10),
             minimumStreamingPreviewSampleCount: 16_000,
             isPostProcessingEnabled: { [weak self] in self?.postProcessingEnabled ?? false },
-            replacementEntriesProvider: { [weak self] in self?.replacementEntries ?? [] }
+            replacementEntriesProvider: { [weak self] in self?.replacementEntries ?? [] },
+            dictatedAppResolver: { [weak self] processID in self?.dictatedApps[processID] }
         )
     }
 
@@ -165,6 +168,44 @@ final class DictationCoordinatorTests: XCTestCase {
         XCTAssertEqual(dictationHistoryStore.sessions[0].transcript, " troy and abed in the morning ")
         XCTAssertEqual(dictationHistoryStore.sessions[0].modelID, AppMode.parakeetModelId)
         XCTAssertEqual(dictationHistoryStore.sessions[0].language, Constants.defaultLanguage)
+    }
+
+    func testHistoryRecordsTheAppDictatedInto() async {
+        let tests: [String: (targetProcessID: pid_t?, want: DictatedApp?)] = [
+            "known app": (42, DictatedApp(name: "Greendale Messenger", bundleID: "edu.greendale.messenger")),
+            "app gone": (43, nil),
+            "no target": (nil, nil)
+        ]
+        dictatedApps = [42: DictatedApp(name: "Greendale Messenger", bundleID: "edu.greendale.messenger")]
+
+        for (name, tc) in tests {
+            dictationHistoryStore = FakeDictationHistoryStore()
+            let coordinator = DictationCoordinator(
+                audioCapture: audioCapture,
+                transcriptionService: transcriptionService,
+                typingService: typingService,
+                mediaPlaybackService: mediaPlaybackService,
+                dictationHistoryStore: dictationHistoryStore,
+                postProcessingProvider: postProcessor,
+                isPostProcessingEnabled: { false },
+                replacementEntriesProvider: { [] },
+                dictatedAppResolver: { [weak self] processID in self?.dictatedApps[processID] }
+            )
+            audioCapture.storedSamples = makeLoudSamples()
+            transcriptionService.transcribeResult = .success("cool cool cool")
+            let idle = XCTestExpectation(description: "\(name): back to idle")
+            coordinator.onStateChange = { state in
+                if state == .idle {
+                    idle.fulfill()
+                }
+            }
+
+            XCTAssertTrue(coordinator.start(targetProcessID: tc.targetProcessID), name)
+            coordinator.stop()
+            await fulfillment(of: [idle], timeout: 1.0)
+
+            XCTAssertEqual(dictationHistoryStore.sessions.first?.app, tc.want, name)
+        }
     }
 
     func testStopWithSpeechResumesMediaAfterTranscriptionCompletes() async {

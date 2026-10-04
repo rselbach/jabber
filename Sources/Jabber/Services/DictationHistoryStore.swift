@@ -13,6 +13,8 @@ struct DictationHistorySession: Sendable {
     let rawTranscript: String?
     let wasPostProcessed: Bool
     let postProcessingErrorDescription: String?
+    /// The app the transcript went into, when known.
+    let app: DictatedApp?
 
     init(
         samples: [Float],
@@ -22,7 +24,8 @@ struct DictationHistorySession: Sendable {
         timestamp: Date = Date(),
         rawTranscript: String? = nil,
         wasPostProcessed: Bool = false,
-        postProcessingErrorDescription: String? = nil
+        postProcessingErrorDescription: String? = nil,
+        app: DictatedApp? = nil
     ) {
         self.samples = samples
         self.transcript = transcript
@@ -32,6 +35,7 @@ struct DictationHistorySession: Sendable {
         self.rawTranscript = rawTranscript
         self.wasPostProcessed = wasPostProcessed
         self.postProcessingErrorDescription = postProcessingErrorDescription
+        self.app = app
     }
 }
 
@@ -45,7 +49,9 @@ struct DictationHistoryEntry: Codable, Equatable, Identifiable, Sendable {
     let language: String
     let transcript: String
     let directoryName: String
-    let audioFilename: String
+    /// `nil` when the audio was not kept, or was dropped to stay within the
+    /// audio budget.
+    let audioFilename: String?
     let audioByteCount: Int64
     /// Additive fields for Apple Intelligence post-processing metadata.
     /// Optional/defaulting so entries written before this feature existed
@@ -53,6 +59,9 @@ struct DictationHistoryEntry: Codable, Equatable, Identifiable, Sendable {
     let rawTranscript: String?
     let wasPostProcessed: Bool
     let postProcessingErrorDescription: String?
+    /// The app the transcript went into, when known. Additive.
+    let appName: String?
+    let appBundleID: String?
 
     init(
         id: UUID,
@@ -64,11 +73,13 @@ struct DictationHistoryEntry: Codable, Equatable, Identifiable, Sendable {
         language: String,
         transcript: String,
         directoryName: String,
-        audioFilename: String,
+        audioFilename: String?,
         audioByteCount: Int64,
         rawTranscript: String? = nil,
         wasPostProcessed: Bool = false,
-        postProcessingErrorDescription: String? = nil
+        postProcessingErrorDescription: String? = nil,
+        appName: String? = nil,
+        appBundleID: String? = nil
     ) {
         self.id = id
         self.timestamp = timestamp
@@ -84,12 +95,15 @@ struct DictationHistoryEntry: Codable, Equatable, Identifiable, Sendable {
         self.rawTranscript = rawTranscript
         self.wasPostProcessed = wasPostProcessed
         self.postProcessingErrorDescription = postProcessingErrorDescription
+        self.appName = appName
+        self.appBundleID = appBundleID
     }
 
     private enum CodingKeys: String, CodingKey {
         case id, timestamp, duration, sampleRate, modelID, modelName, language
         case transcript, directoryName, audioFilename, audioByteCount
         case rawTranscript, wasPostProcessed, postProcessingErrorDescription
+        case appName, appBundleID
     }
 
     init(from decoder: Decoder) throws {
@@ -103,12 +117,40 @@ struct DictationHistoryEntry: Codable, Equatable, Identifiable, Sendable {
         language = try container.decode(String.self, forKey: .language)
         transcript = try container.decode(String.self, forKey: .transcript)
         directoryName = try container.decode(String.self, forKey: .directoryName)
-        audioFilename = try container.decode(String.self, forKey: .audioFilename)
-        audioByteCount = try container.decode(Int64.self, forKey: .audioByteCount)
         // Additive fields: missing keys (old entries) fall back to defaults.
+        audioFilename = try container.decodeIfPresent(String.self, forKey: .audioFilename)
+        audioByteCount = try container.decodeIfPresent(Int64.self, forKey: .audioByteCount) ?? 0
         rawTranscript = try container.decodeIfPresent(String.self, forKey: .rawTranscript)
         wasPostProcessed = try container.decodeIfPresent(Bool.self, forKey: .wasPostProcessed) ?? false
         postProcessingErrorDescription = try container.decodeIfPresent(String.self, forKey: .postProcessingErrorDescription)
+        appName = try container.decodeIfPresent(String.self, forKey: .appName)
+        appBundleID = try container.decodeIfPresent(String.self, forKey: .appBundleID)
+    }
+
+    var hasAudio: Bool {
+        audioFilename != nil
+    }
+
+    /// This entry once its audio file is gone.
+    func withoutAudio() -> DictationHistoryEntry {
+        DictationHistoryEntry(
+            id: id,
+            timestamp: timestamp,
+            duration: duration,
+            sampleRate: sampleRate,
+            modelID: modelID,
+            modelName: modelName,
+            language: language,
+            transcript: transcript,
+            directoryName: directoryName,
+            audioFilename: nil,
+            audioByteCount: 0,
+            rawTranscript: rawTranscript,
+            wasPostProcessed: wasPostProcessed,
+            postProcessingErrorDescription: postProcessingErrorDescription,
+            appName: appName,
+            appBundleID: appBundleID
+        )
     }
 }
 
@@ -116,34 +158,49 @@ protocol DictationHistoryProtocol: AnyObject, Sendable {
     func saveSession(_ session: DictationHistorySession) async
 }
 
+/// Saved dictations, one directory per entry holding `metadata.json` and,
+/// when audio is kept, `audio.wav`. Transcripts expire with the retention
+/// setting; audio has its own, smaller budget, and dropping audio keeps the
+/// transcript.
 actor DictationHistoryStore: DictationHistoryProtocol {
     static let shared = DictationHistoryStore()
     static let sampleRate = 16_000
-    static let defaultMaxEntryCount = 50
-    static let defaultMaxByteCount: Int64 = 500 * 1024 * 1024
+    static let defaultMaxEntryCount = 1_000
+    static let defaultMaxAudioEntryCount = 50
+    static let defaultMaxAudioByteCount: Int64 = 500 * 1024 * 1024
 
     private static let metadataFilename = "metadata.json"
     private static let audioFilename = "audio.wav"
 
     private let directoryURL: URL
     private let maxEntryCount: Int
-    private let maxByteCount: Int64
+    private let maxAudioEntryCount: Int
+    private let maxAudioByteCount: Int64
     private let fileManager: FileManager
-    private let isSaveEnabled: @MainActor () -> Bool
+    private let now: @Sendable () -> Date
+    private let preferences: @MainActor @Sendable () -> DictationHistoryPreferences
     private let logger = Logger(subsystem: "com.rselbach.jabber", category: "DictationHistoryStore")
+    /// Entries newest first. Loaded from disk on first use, then kept in step
+    /// with every change, so saving never rescans the directory.
+    private var cachedEntries: [DictationHistoryEntry]?
+    private var isDirectoryPrepared = false
 
     init(
         directoryURL: URL = DictationHistoryStore.defaultDirectoryURL,
         maxEntryCount: Int = DictationHistoryStore.defaultMaxEntryCount,
-        maxByteCount: Int64 = DictationHistoryStore.defaultMaxByteCount,
+        maxAudioEntryCount: Int = DictationHistoryStore.defaultMaxAudioEntryCount,
+        maxAudioByteCount: Int64 = DictationHistoryStore.defaultMaxAudioByteCount,
         fileManager: FileManager = .default,
-        isSaveEnabled: @escaping @MainActor () -> Bool = { TypedSettings[.saveHistoryEnabled] }
+        now: @escaping @Sendable () -> Date = { Date() },
+        preferences: @escaping @MainActor @Sendable () -> DictationHistoryPreferences = { TypedSettings.historyPreferences }
     ) {
         self.directoryURL = directoryURL
         self.maxEntryCount = maxEntryCount
-        self.maxByteCount = maxByteCount
+        self.maxAudioEntryCount = maxAudioEntryCount
+        self.maxAudioByteCount = maxAudioByteCount
         self.fileManager = fileManager
-        self.isSaveEnabled = isSaveEnabled
+        self.now = now
+        self.preferences = preferences
     }
 
     nonisolated static var defaultDirectoryURL: URL {
@@ -156,19 +213,24 @@ actor DictationHistoryStore: DictationHistoryProtocol {
     }
 
     func saveSession(_ session: DictationHistorySession) async {
-        let isEnabled = await MainActor.run { isSaveEnabled() }
-        guard isEnabled else { return }
+        let preferences = await MainActor.run { self.preferences() }
+        guard preferences.isEnabled else { return }
 
         do {
-            _ = try save(session)
+            _ = try save(session, keepingAudio: preferences.keepsAudio, retention: preferences.retention)
         } catch {
             logger.error("Failed to save dictation history: \(error.localizedDescription)")
         }
     }
 
     @discardableResult
-    func save(_ session: DictationHistorySession) throws -> DictationHistoryEntry {
-        try fileManager.createDirectory(at: directoryURL, withIntermediateDirectories: true)
+    func save(
+        _ session: DictationHistorySession,
+        keepingAudio: Bool,
+        retention: HistoryRetention
+    ) throws -> DictationHistoryEntry {
+        var entries = try loadedEntries()
+        try prepareDirectory()
 
         let entryID = UUID()
         let entryDirectoryName = Self.entryDirectoryName(timestamp: session.timestamp, id: entryID)
@@ -178,9 +240,14 @@ actor DictationHistoryStore: DictationHistoryProtocol {
         do {
             try fileManager.createDirectory(at: entryDirectoryURL, withIntermediateDirectories: true)
 
-            let audioURL = entryDirectoryURL.appendingPathComponent(Self.audioFilename)
-            let audioData = try Self.wavData(samples: session.samples, sampleRate: Self.sampleRate)
-            try audioData.write(to: audioURL, options: .atomic)
+            var audioFilename: String?
+            var audioByteCount: Int64 = 0
+            if keepingAudio {
+                let audioData = try Self.wavData(samples: session.samples, sampleRate: Self.sampleRate)
+                try audioData.write(to: entryDirectoryURL.appendingPathComponent(Self.audioFilename), options: .atomic)
+                audioFilename = Self.audioFilename
+                audioByteCount = Int64(audioData.count)
+            }
 
             entry = DictationHistoryEntry(
                 id: entryID,
@@ -192,24 +259,20 @@ actor DictationHistoryStore: DictationHistoryProtocol {
                 language: session.language,
                 transcript: session.transcript,
                 directoryName: entryDirectoryName,
-                audioFilename: Self.audioFilename,
-                audioByteCount: Int64(audioData.count),
+                audioFilename: audioFilename,
+                audioByteCount: audioByteCount,
                 rawTranscript: session.rawTranscript,
                 wasPostProcessed: session.wasPostProcessed,
-                postProcessingErrorDescription: session.postProcessingErrorDescription
+                postProcessingErrorDescription: session.postProcessingErrorDescription,
+                appName: session.app?.name,
+                appBundleID: session.app?.bundleID
             )
-
-            let metadataURL = entryDirectoryURL.appendingPathComponent(Self.metadataFilename)
-            let encoder = JSONEncoder()
-            encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
-            encoder.dateEncodingStrategy = .iso8601
-            let metadataData = try encoder.encode(entry)
-            try metadataData.write(to: metadataURL, options: .atomic)
+            try writeMetadata(entry, in: entryDirectoryURL)
         } catch {
             // A failure after the entry directory is created (e.g. the audio or
             // metadata write failing on ENOSPC) would otherwise leave an
-            // orphaned directory that loadEntries() skips but which still
-            // consumes the retention byte budget. Remove it, then rethrow.
+            // orphaned directory that loadEntries() skips. Remove it, then
+            // rethrow.
             do {
                 try fileManager.removeItem(at: entryDirectoryURL)
             } catch {
@@ -218,32 +281,115 @@ actor DictationHistoryStore: DictationHistoryProtocol {
             throw error
         }
 
-        try enforceRetentionLimit(protecting: entry.id)
+        let insertionIndex = entries.firstIndex { $0.timestamp < entry.timestamp } ?? entries.endIndex
+        entries.insert(entry, at: insertionIndex)
+        cachedEntries = entries
+        try enforceRetention(retention, protecting: entry.id)
+        notifyChange()
         return entry
     }
 
+    /// Entries newest first.
     func entries() -> [DictationHistoryEntry] {
         do {
-            return try loadEntries()
+            return try loadedEntries()
         } catch {
             logger.error("Failed to load dictation history: \(error.localizedDescription)")
             return []
         }
     }
 
-    nonisolated func audioURL(for entry: DictationHistoryEntry) -> URL {
+    /// Removes what `retention` no longer covers, such as after the setting
+    /// was shortened or the app sat idle past an entry's expiry.
+    func applyRetention(_ retention: HistoryRetention) throws {
+        if try enforceRetention(retention, protecting: nil) {
+            notifyChange()
+        }
+    }
+
+    func delete(id: UUID) throws {
+        var entries = try loadedEntries()
+        guard let index = entries.firstIndex(where: { $0.id == id }) else { return }
+        try removeEntryDirectory(entries[index])
+        entries.remove(at: index)
+        cachedEntries = entries
+        notifyChange()
+    }
+
+    func deleteAll() throws {
+        if fileManager.fileExists(atPath: directoryURL.path) {
+            try fileManager.removeItem(at: directoryURL)
+        }
+        cachedEntries = []
+        isDirectoryPrepared = false
+        notifyChange()
+    }
+
+    /// The entry's recording, or `nil` when no audio was kept.
+    nonisolated func audioURL(for entry: DictationHistoryEntry) -> URL? {
+        guard let audioFilename = entry.audioFilename else { return nil }
         // Defense-in-depth against path traversal via a tampered metadata.json:
         // primary validation is in decodeEntry (which rejects unsafe names so
         // they never reach callers), but audioURL must never escape the
         // history directory even if a caller hand-constructs an entry.
-        let safeDirectoryName = Self.sanitizedEntryDirectoryName(entry.directoryName)
-        return directoryURL
-            .appendingPathComponent(safeDirectoryName, isDirectory: true)
-            .appendingPathComponent(entry.audioFilename)
+        return entryDirectoryURL(for: entry)
+            .appendingPathComponent(Self.sanitizedPathComponent(audioFilename))
     }
 
     nonisolated func historyDirectoryURL() -> URL {
         directoryURL
+    }
+
+    private nonisolated func entryDirectoryURL(for entry: DictationHistoryEntry) -> URL {
+        directoryURL.appendingPathComponent(Self.sanitizedPathComponent(entry.directoryName), isDirectory: true)
+    }
+
+    private nonisolated func notifyChange() {
+        Task { @MainActor in
+            NotificationCenter.default.post(name: Constants.Notifications.dictationHistoryDidChange, object: nil)
+        }
+    }
+
+    private func loadedEntries() throws -> [DictationHistoryEntry] {
+        if let cachedEntries {
+            return cachedEntries
+        }
+        try pruneOrphanEntryDirectories()
+        let entries = try loadEntries()
+        cachedEntries = entries
+        return entries
+    }
+
+    /// Creates the history directory and keeps it out of backups: it holds
+    /// what the user said, and expiring it here should mean it is gone.
+    private func prepareDirectory() throws {
+        guard !isDirectoryPrepared else { return }
+        try fileManager.createDirectory(at: directoryURL, withIntermediateDirectories: true)
+        var values = URLResourceValues()
+        values.isExcludedFromBackup = true
+        var url = directoryURL
+        do {
+            try url.setResourceValues(values)
+        } catch {
+            logger.error("Failed to exclude dictation history from backups: \(error.localizedDescription)")
+        }
+        isDirectoryPrepared = true
+    }
+
+    private func writeMetadata(_ entry: DictationHistoryEntry, in entryDirectoryURL: URL) throws {
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+        encoder.dateEncodingStrategy = .iso8601
+        try encoder.encode(entry).write(
+            to: entryDirectoryURL.appendingPathComponent(Self.metadataFilename),
+            options: .atomic
+        )
+    }
+
+    private func removeEntryDirectory(_ entry: DictationHistoryEntry) throws {
+        let url = entryDirectoryURL(for: entry)
+        guard fileManager.fileExists(atPath: url.path) else { return }
+        try fileManager.removeItem(at: url)
     }
 
     private func loadEntries() throws -> [DictationHistoryEntry] {
@@ -278,12 +424,13 @@ actor DictationHistoryStore: DictationHistoryProtocol {
         do {
             let metadataData = try Data(contentsOf: metadataURL)
             let entry = try decoder.decode(DictationHistoryEntry.self, from: metadataData)
-            // Reject entries whose persisted directoryName could escape the
-            // history directory (path traversal via a tampered metadata.json).
-            // pruneOrphanEntryDirectories reuses this decode path and will
-            // remove the rejected entry's directory on the next retention pass.
-            guard Self.isSafeEntryDirectoryName(entry.directoryName) else {
-                logger.error("Rejecting dictation history entry at \(metadataURL.path): unsafe directoryName '\(entry.directoryName)'")
+            // Reject entries whose persisted names could escape the history
+            // directory (path traversal via a tampered metadata.json).
+            // pruneOrphanEntryDirectories reuses this decode path and removes
+            // the rejected entry's directory when history first loads.
+            guard Self.isSafePathComponent(entry.directoryName),
+                  entry.audioFilename.map(Self.isSafePathComponent) ?? true else {
+                logger.error("Rejecting dictation history entry at \(metadataURL.path): unsafe directoryName '\(entry.directoryName)' or audioFilename")
                 return nil
             }
             return entry
@@ -293,31 +440,69 @@ actor DictationHistoryStore: DictationHistoryProtocol {
         }
     }
 
-    private func enforceRetentionLimit(protecting protectedEntryID: UUID? = nil) throws {
-        try pruneOrphanEntryDirectories()
+    /// Removes entries past the retention age or the entry cap, then the
+    /// audio of the oldest recordings once the audio budget is spent. The
+    /// entry being saved is never touched, so a single oversized recording
+    /// stays until the next save. Returns whether anything changed.
+    @discardableResult
+    private func enforceRetention(_ retention: HistoryRetention, protecting protectedID: UUID?) throws -> Bool {
+        let entries = try loadedEntries()
+        let cutoff = retention.maxAge.map { now().addingTimeInterval(-$0) }
+        var kept: [DictationHistoryEntry] = []
+        var changed = false
 
-        var entries = try loadEntries().sorted { $0.timestamp > $1.timestamp }
-        var totalByteCount = try totalHistoryByteCount()
-
-        while entries.count > maxEntryCount || totalByteCount > maxByteCount {
-            guard let removalIndex = entries.lastIndex(where: { $0.id != protectedEntryID }) else { break }
-            let entryToRemove = entries.remove(at: removalIndex)
-            let entryURL = directoryURL.appendingPathComponent(entryToRemove.directoryName, isDirectory: true)
-            let removedByteCount = try byteCount(at: entryURL)
-            try fileManager.removeItem(at: entryURL)
-            totalByteCount = max(0, totalByteCount - removedByteCount)
+        for entry in entries {
+            let isExpired = cutoff.map { entry.timestamp < $0 } ?? false
+            let isOverCap = kept.count >= maxEntryCount
+            if entry.id != protectedID, isExpired || isOverCap {
+                try removeEntryDirectory(entry)
+                changed = true
+            } else {
+                kept.append(entry)
+            }
         }
+
+        var audioEntryCount = 0
+        var audioByteCount: Int64 = 0
+        var isAudioBudgetSpent = false
+        for index in kept.indices where kept[index].hasAudio {
+            let entry = kept[index]
+            if entry.id != protectedID {
+                isAudioBudgetSpent = isAudioBudgetSpent
+                    || audioEntryCount >= maxAudioEntryCount
+                    || audioByteCount + entry.audioByteCount > maxAudioByteCount
+                if isAudioBudgetSpent {
+                    kept[index] = try removingAudio(from: entry)
+                    changed = true
+                    continue
+                }
+            }
+            audioEntryCount += 1
+            audioByteCount += entry.audioByteCount
+        }
+
+        cachedEntries = kept
+        return changed
     }
 
-    /// Removes entry directories that are invisible to `loadEntries()` but
-    /// still counted by `totalHistoryByteCount()`, so they cannot consume the
-    /// retention byte budget and starve valid history. Two cases:
+    /// Deletes the entry's audio first, so a failed metadata write can leave
+    /// an entry pointing at missing audio but never audio that outlives its
+    /// budget.
+    private func removingAudio(from entry: DictationHistoryEntry) throws -> DictationHistoryEntry {
+        if let audioURL = audioURL(for: entry), fileManager.fileExists(atPath: audioURL.path) {
+            try fileManager.removeItem(at: audioURL)
+        }
+        let updated = entry.withoutAudio()
+        try writeMetadata(updated, in: entryDirectoryURL(for: entry))
+        return updated
+    }
+
+    /// Removes entry directories that `loadEntries()` cannot read, so they
+    /// do not linger on disk unseen. Runs when history first loads. Two cases:
     /// - `metadata.json` missing (a partial write left an orphan).
-    /// - `metadata.json` present but fails to decode (corrupt). `loadEntries`
-    ///   skips these, so without pruning their audio (potentially large WAVs)
-    ///   would count against the budget forever and the retention loop would
-    ///   delete valid entries trying to satisfy a budget the corrupt dirs keep
-    ///   blown.
+    /// - `metadata.json` present but fails to decode or names an unsafe
+    ///   path. Reuses the same decode path as loadEntries so the two passes
+    ///   agree.
     private func pruneOrphanEntryDirectories() throws {
         guard fileManager.fileExists(atPath: directoryURL.path) else { return }
 
@@ -337,40 +522,10 @@ actor DictationHistoryStore: DictationHistoryProtocol {
                 try fileManager.removeItem(at: entryDirectory)
                 continue
             }
-            // metadata.json present but corrupt — remove so its audio stops
-            // counting toward the byte budget. Reuses the same decode path as
-            // loadEntries so the two passes agree.
             if decodeEntry(at: metadataURL) == nil {
                 try fileManager.removeItem(at: entryDirectory)
             }
         }
-    }
-
-    private func totalHistoryByteCount() throws -> Int64 {
-        guard fileManager.fileExists(atPath: directoryURL.path) else { return 0 }
-        return try byteCount(at: directoryURL)
-    }
-
-    private func byteCount(at url: URL) throws -> Int64 {
-        var isDirectory: ObjCBool = false
-        guard fileManager.fileExists(atPath: url.path, isDirectory: &isDirectory) else { return 0 }
-
-        if !isDirectory.boolValue {
-            let values = try url.resourceValues(forKeys: [.fileSizeKey])
-            return Int64(values.fileSize ?? 0)
-        }
-
-        let files = try fileManager.contentsOfDirectory(
-            at: url,
-            includingPropertiesForKeys: [.fileSizeKey],
-            options: [.skipsHiddenFiles]
-        )
-
-        var total: Int64 = 0
-        for fileURL in files {
-            total += try byteCount(at: fileURL)
-        }
-        return total
     }
 
     private static func entryDirectoryName(timestamp: Date, id: UUID) -> String {
@@ -381,11 +536,11 @@ actor DictationHistoryStore: DictationHistoryProtocol {
         return "\(timestampString)-\(id.uuidString)"
     }
 
-    /// A safe entry directory name contains no path separators and is not a
-    /// path-traversal segment. Legitimate names produced by
-    /// `entryDirectoryName(timestamp:id:)` are a single path component
-    /// (ISO8601 timestamp + UUID) and always satisfy this check.
-    private static func isSafeEntryDirectoryName(_ name: String) -> Bool {
+    /// A safe name contains no path separators and is not a path-traversal
+    /// segment. Legitimate entry directory names produced by
+    /// `entryDirectoryName(timestamp:id:)` (ISO8601 timestamp + UUID) and
+    /// `audio.wav` are single path components and always satisfy this check.
+    private static func isSafePathComponent(_ name: String) -> Bool {
         !name.isEmpty
             && name != "."
             && name != ".."
@@ -394,11 +549,11 @@ actor DictationHistoryStore: DictationHistoryProtocol {
     }
 
     /// Returns `name` if it is safe, otherwise a sentinel that is a valid
-    /// single path component but guaranteed not to match any real entry
-    /// directory, so callers' file-existence checks fail gracefully without
-    /// escaping the history directory.
-    private static func sanitizedEntryDirectoryName(_ name: String) -> String {
-        isSafeEntryDirectoryName(name) ? name : "__invalid_entry__"
+    /// single path component but guaranteed not to match any real file, so
+    /// callers' file-existence checks fail gracefully without escaping the
+    /// history directory.
+    private static func sanitizedPathComponent(_ name: String) -> String {
+        isSafePathComponent(name) ? name : "__invalid_entry__"
     }
 
     private static func modelName(for modelID: String) -> String {

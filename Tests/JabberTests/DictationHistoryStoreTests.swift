@@ -55,6 +55,15 @@ final class DictationHistoryStoreTests: XCTestCase {
         XCTAssertEqual(decodedEntry.duration, 4.0 / 16_000.0, accuracy: 0.000_001)
     }
 
+    func testHistoryDirectoryIsExcludedFromBackups() async throws {
+        let store = makeStore()
+
+        _ = try await store.save(session(transcript: "Inspector Spacetime", timestamp: Date(timeIntervalSince1970: 100)))
+
+        let values = try historyDirectoryURL.resourceValues(forKeys: [.isExcludedFromBackupKey])
+        XCTAssertEqual(values.isExcludedFromBackup, true)
+    }
+
     func testSaveEncodesNonFiniteSamplesWithoutTrapping() async throws {
         let store = makeStore()
 

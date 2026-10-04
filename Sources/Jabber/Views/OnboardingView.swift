@@ -810,6 +810,13 @@ struct OnboardingView: View {
                 .foregroundStyle(.tertiary)
                 .padding(.top, 16)
 
+            if let historyNote {
+                Text(historyNote)
+                    .font(.callout)
+                    .foregroundStyle(.tertiary)
+                    .padding(.top, 4)
+            }
+
             Spacer()
         }
     }
@@ -828,6 +835,16 @@ struct OnboardingView: View {
                     )
             }
         }
+    }
+
+    /// Says up front that transcripts are kept, and for how long.
+    private var historyNote: String? {
+        let preferences = TypedSettings.historyPreferences
+        guard preferences.isEnabled else { return nil }
+        let period = preferences.retention == .forever
+            ? ""
+            : " for \(preferences.retention.displayName.lowercased())"
+        return "Your transcripts stay on this Mac\(period). Manage them in Settings › History."
     }
 
     private var hotkeyKeycapLabels: [String] {

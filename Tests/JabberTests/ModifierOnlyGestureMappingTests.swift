@@ -15,6 +15,7 @@ final class ModifierOnlyGestureMappingTests: XCTestCase {
     func testFlagsChangedMappingTable() {
         let rightOption = UInt32(kVK_RightOption)
         let leftOption = UInt32(kVK_Option)
+        let fn = UInt32(kVK_Function)
         let alternate = CGEventFlags.maskAlternate
 
         struct Case {
@@ -85,6 +86,24 @@ final class ModifierOnlyGestureMappingTests: XCTestCase {
                 name: "sibling event ignored even when active",
                 keyCode: leftOption, flags: alternate,
                 gestureState: .active, shortcutKeyCode: rightOption,
+                expected: nil
+            ),
+            .init(
+                name: "Fn press from idle",
+                keyCode: fn, flags: .maskSecondaryFn,
+                gestureState: .idle, shortcutKeyCode: fn,
+                expected: .modifierDown
+            ),
+            .init(
+                name: "Fn release",
+                keyCode: fn, flags: [],
+                gestureState: .active, shortcutKeyCode: fn,
+                expected: .modifierUp
+            ),
+            .init(
+                name: "Option press ignored when Fn is configured",
+                keyCode: leftOption, flags: [alternate, .maskSecondaryFn],
+                gestureState: .pending, shortcutKeyCode: fn,
                 expected: nil
             ),
         ]

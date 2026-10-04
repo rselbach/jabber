@@ -21,7 +21,7 @@ final class OnboardingCoordinatorTests: XCTestCase {
     }
 
     func testStepOrder() {
-        let want: [OnboardingCoordinator.Step] = [.welcome, .language, .permissions, .modelDownload, .ready]
+        let want: [OnboardingCoordinator.Step] = [.welcome, .language, .permissions, .hotkey, .modelDownload, .ready]
         XCTAssertEqual(OnboardingCoordinator.Step.allCases, want)
     }
 
@@ -73,6 +73,7 @@ final class OnboardingCoordinatorTests: XCTestCase {
             wantCompleteCalls: Int
         )] = [
             "welcome moves to language": (.welcome, .language, 0, 0),
+            "hotkey step moves to model step": (.hotkey, .modelDownload, 0, 0),
             "model step moves to ready": (.modelDownload, .ready, 1, 0),
             "ready completes": (.ready, .ready, 0, 1),
         ]
@@ -108,6 +109,55 @@ final class OnboardingCoordinatorTests: XCTestCase {
         XCTAssertEqual(reachReadyCalls, 2)
     }
 
+    func testGoBackFromModelStepReturnsToHotkeyStep() throws {
+        let coordinator = try makeCoordinatorWithBuiltInModel(at: .modelDownload)
+
+        coordinator.goBack()
+
+        XCTAssertEqual(coordinator.step, .hotkey)
+    }
+
+    func testSelectHotkeySavesAndAnnouncesIt() throws {
+        let settings = try makeSettings()
+        let coordinator = OnboardingCoordinator(settings: settings, step: .hotkey)
+        let fn = HotkeyPreset.fn.shortcut
+        let announced = expectation(
+            forNotification: Constants.Notifications.hotkeyShortcutDidChange,
+            object: nil
+        ) { notification in
+            notification.object as? HotkeyShortcut == fn
+        }
+
+        coordinator.selectHotkey(fn)
+
+        wait(for: [announced], timeout: 1)
+        XCTAssertEqual(coordinator.hotkeyShortcut, fn)
+        XCTAssertEqual(settings.hotkeyShortcut, fn)
+    }
+
+    func testHotkeyStepNeedsTypingAccessForLoneModifiers() throws {
+        // The coordinator has not refreshed permissions yet, so it treats
+        // Accessibility as not granted.
+        let coordinator = try OnboardingCoordinator(settings: makeSettings(), step: .hotkey)
+        XCTAssertFalse(coordinator.isAccessibilityTrusted)
+
+        let tests: [String: (shortcut: HotkeyShortcut, wantCanContinue: Bool, wantHint: String?)] = [
+            "Option Space": (HotkeyPreset.optionSpace.shortcut, true, nil),
+            "Right Option": (
+                HotkeyPreset.rightOption.shortcut,
+                false,
+                "Right Option needs Typing Access — pick another hotkey"
+            ),
+            "Fn": (HotkeyPreset.fn.shortcut, false, "Fn needs Typing Access — pick another hotkey")
+        ]
+
+        for (name, tc) in tests {
+            coordinator.selectHotkey(tc.shortcut)
+            XCTAssertEqual(coordinator.canContinue, tc.wantCanContinue, name)
+            XCTAssertEqual(coordinator.continueHint, tc.wantHint, name)
+        }
+    }
+
     func testCancelledDownloadDoesNotLeaveErrorMessage() {
         let modelId = coordinator.recommendedModelIdForSelectedLanguage()
 
@@ -133,19 +183,23 @@ final class OnboardingCoordinatorTests: XCTestCase {
         XCTAssertNil(coordinator.downloadErrorMessage)
     }
 
-    /// Parks a coordinator on `step` with built-in Apple Speech selected, so
-    /// the model step can continue without a download. The ModelManager uses
-    /// its own defaults suite and an empty cache directory.
-    private func makeCoordinatorWithBuiltInModel(
-        at step: OnboardingCoordinator.Step
-    ) throws -> OnboardingCoordinator {
+    /// A settings store backed by its own defaults suite.
+    private func makeSettings() throws -> SettingsStore {
         let suiteName = "JabberTests.OnboardingCoordinator.\(UUID().uuidString)"
         let userDefaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
         addTeardownBlock {
             UserDefaults.standard.removePersistentDomain(forName: suiteName)
         }
+        return SettingsStore(userDefaults: userDefaults)
+    }
 
-        let settings = SettingsStore(userDefaults: userDefaults)
+    /// Parks a coordinator on `step` with built-in Apple Speech selected, so
+    /// the model step can continue without a download. The ModelManager and
+    /// hotkey use their own defaults suite and an empty cache directory.
+    private func makeCoordinatorWithBuiltInModel(
+        at step: OnboardingCoordinator.Step
+    ) throws -> OnboardingCoordinator {
+        let settings = try makeSettings()
         // Start on a different model so selectModel goes through the
         // isolated ModelManager instead of falling back to TypedSettings.
         settings[.selectedModel] = AppMode.nemotronModelId
@@ -156,7 +210,7 @@ final class OnboardingCoordinatorTests: XCTestCase {
                 .appendingPathComponent(UUID().uuidString, isDirectory: true)
         )
 
-        let coordinator = OnboardingCoordinator(modelManager: modelManager, step: step)
+        let coordinator = OnboardingCoordinator(modelManager: modelManager, settings: settings, step: step)
         coordinator.selectModel(AppMode.appleSpeechModelId)
         XCTAssertEqual(settings[.selectedModel], AppMode.appleSpeechModelId)
         return coordinator

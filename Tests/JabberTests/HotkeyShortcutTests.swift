@@ -43,6 +43,10 @@ final class HotkeyShortcutTests: XCTestCase {
             "plain key": (
                 HotkeyShortcut(keyCode: UInt32(kVK_ANSI_A), modifiers: 0),
                 ["A"]
+            ),
+            "Fn on its own": (
+                HotkeyShortcut(keyCode: UInt32(kVK_Function), modifiers: 0),
+                ["Fn"]
             )
         ]
 
@@ -85,6 +89,41 @@ final class HotkeyShortcutTests: XCTestCase {
         )
     }
 
+    func testHeldModifierFlagsIncludeFn() {
+        let tests: [String: (flags: NSEvent.ModifierFlags, want: UInt32)] = [
+            "nothing held": ([], 0),
+            "Fn alone": ([.function], HotkeyShortcut.fnModifierFlag),
+            "Option alone": ([.option], UInt32(optionKey)),
+            "Fn with Option": ([.function, .option], HotkeyShortcut.fnModifierFlag | UInt32(optionKey))
+        ]
+
+        for (name, tc) in tests {
+            XCTAssertEqual(HotkeyShortcut.heldModifierFlags(from: tc.flags), tc.want, name)
+        }
+    }
+
+    func testCombosNeverRecordFn() {
+        // Arrow key-downs carry the function flag without Fn being held, so
+        // a combo like ⌥← must not pick up Fn.
+        XCTAssertEqual(HotkeyShortcut.carbonModifiers(from: [.function, .option]), UInt32(optionKey))
+    }
+
+    func testOnlyLoneModifiersNeedAccessibility() {
+        let tests: [String: (shortcut: HotkeyShortcut, want: Bool)] = [
+            "Option Space": (.defaultShortcut, false),
+            "Right Option": (HotkeyShortcut(keyCode: UInt32(kVK_RightOption), modifiers: 0), true),
+            "Fn": (HotkeyShortcut(keyCode: UInt32(kVK_Function), modifiers: 0), true),
+            "Control Option D": (
+                HotkeyShortcut(keyCode: UInt32(kVK_ANSI_D), modifiers: UInt32(controlKey | optionKey)),
+                false
+            )
+        ]
+
+        for (name, tc) in tests {
+            XCTAssertEqual(tc.shortcut.needsAccessibility, tc.want, name)
+        }
+    }
+
     func testModifierOnlyShortcutIsAllowedAndDetected() {
         let rightOption = HotkeyShortcut(
             keyCode: UInt32(kVK_RightOption),
@@ -101,7 +140,8 @@ final class HotkeyShortcutTests: XCTestCase {
             UInt32(kVK_Command), UInt32(kVK_RightCommand),
             UInt32(kVK_Shift), UInt32(kVK_RightShift),
             UInt32(kVK_Option), UInt32(kVK_RightOption),
-            UInt32(kVK_Control), UInt32(kVK_RightControl)
+            UInt32(kVK_Control), UInt32(kVK_RightControl),
+            UInt32(kVK_Function)
         ]
 
         for code in codes {
@@ -128,6 +168,7 @@ final class HotkeyShortcutTests: XCTestCase {
         XCTAssertEqual(HotkeyShortcut.carbonModifier(forKeyCode: UInt32(kVK_RightCommand)), UInt32(cmdKey))
         XCTAssertEqual(HotkeyShortcut.carbonModifier(forKeyCode: UInt32(kVK_RightShift)), UInt32(shiftKey))
         XCTAssertEqual(HotkeyShortcut.carbonModifier(forKeyCode: UInt32(kVK_RightControl)), UInt32(controlKey))
+        XCTAssertEqual(HotkeyShortcut.carbonModifier(forKeyCode: UInt32(kVK_Function)), HotkeyShortcut.fnModifierFlag)
         XCTAssertNil(HotkeyShortcut.carbonModifier(forKeyCode: UInt32(kVK_Space)))
     }
 
@@ -143,6 +184,7 @@ final class HotkeyShortcutTests: XCTestCase {
         XCTAssertEqual(HotkeyShortcut.cgEventFlag(forKeyCode: UInt32(kVK_RightShift)), .maskShift)
         XCTAssertEqual(HotkeyShortcut.cgEventFlag(forKeyCode: UInt32(kVK_Control)), .maskControl)
         XCTAssertEqual(HotkeyShortcut.cgEventFlag(forKeyCode: UInt32(kVK_RightControl)), .maskControl)
+        XCTAssertEqual(HotkeyShortcut.cgEventFlag(forKeyCode: UInt32(kVK_Function)), .maskSecondaryFn)
         XCTAssertNil(HotkeyShortcut.cgEventFlag(forKeyCode: UInt32(kVK_Space)))
     }
 

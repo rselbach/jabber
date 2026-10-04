@@ -25,6 +25,26 @@ final class HotkeyRecorderReducerTests: XCTestCase {
         XCTAssertEqual(r.flagsChanged(keyCode: UInt32(kVK_Option), heldModifiers: 0), .commitModifierOnly(keyCode: UInt32(kVK_Option)))
     }
 
+    func testSoloFnPressThenReleaseCommitsFn() {
+        var r = HotkeyRecorderReducer()
+        let fn = UInt32(kVK_Function)
+
+        XCTAssertEqual(r.flagsChanged(keyCode: fn, heldModifiers: HotkeyShortcut.fnModifierFlag), .wait)
+        XCTAssertEqual(r.pendingModifierKeyCode, fn)
+        XCTAssertEqual(r.flagsChanged(keyCode: fn, heldModifiers: 0), .commitModifierOnly(keyCode: fn))
+    }
+
+    func testFnHeldWithOptionDoesNotCommitFn() {
+        var r = HotkeyRecorderReducer()
+        let fn = UInt32(kVK_Function)
+        let fnAndOption = HotkeyShortcut.fnModifierFlag | UInt32(optionKey)
+
+        XCTAssertEqual(r.flagsChanged(keyCode: fn, heldModifiers: HotkeyShortcut.fnModifierFlag), .wait)
+        XCTAssertEqual(r.flagsChanged(keyCode: UInt32(kVK_Option), heldModifiers: fnAndOption), .wait)
+        // Fn released while Option is still held: not a lone Fn press.
+        XCTAssertEqual(r.flagsChanged(keyCode: fn, heldModifiers: UInt32(optionKey)), .wait)
+    }
+
     // MARK: - The regression: modifier + key must record the combo
 
     func testLeftOptionThenSpaceRecordsOptionSpaceCombo() {

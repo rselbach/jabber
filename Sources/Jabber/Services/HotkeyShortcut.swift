@@ -10,7 +10,7 @@ struct HotkeyShortcut: Equatable, Sendable {
         var errorDescription: String? {
             switch self {
             case .missingRequiredModifier:
-                return "Shortcut must include Command, Control, or Option — or use a lone modifier like Right Option."
+                return "Shortcut must include Command, Control, or Option — or use a lone modifier like Right Option or Fn."
             case .escapeKey:
                 return "Escape is reserved for cancelling shortcut recording."
             }
@@ -48,8 +48,15 @@ struct HotkeyShortcut: Equatable, Sendable {
         UInt32(kVK_Command), UInt32(kVK_RightCommand),
         UInt32(kVK_Shift), UInt32(kVK_RightShift),
         UInt32(kVK_Option), UInt32(kVK_RightOption),
-        UInt32(kVK_Control), UInt32(kVK_RightControl)
+        UInt32(kVK_Control), UInt32(kVK_RightControl),
+        UInt32(kVK_Function)
     ]
+
+    /// Stands in for Fn (the 🌐 Globe key) in held-modifier flags. Carbon has
+    /// no hotkey modifier for Fn, so it is never part of a registered combo;
+    /// the recorder uses it only to tell a lone Fn press from Fn held together
+    /// with other modifiers. Bit 17 sits above Carbon's modifier bits (8–15).
+    static let fnModifierFlag: UInt32 = 1 << 17
 
     /// `true` when the shortcut is a single modifier key pressed on its own
     /// (e.g. Right Option), with no additional modifiers.
@@ -57,8 +64,15 @@ struct HotkeyShortcut: Equatable, Sendable {
         modifiers == 0 && Self.modifierOnlyKeyCodes.contains(keyCode)
     }
 
-    /// Maps a modifier key code to its Carbon modifier flag, or `nil` when the
-    /// code is not a standalone modifier key.
+    /// Lone modifier keys are read with an event tap, which needs
+    /// Accessibility permission; Carbon hotkeys work without it.
+    var needsAccessibility: Bool {
+        isModifierOnly
+    }
+
+    /// Maps a modifier key code to its modifier flag (Carbon's, or
+    /// `fnModifierFlag` for Fn), or `nil` when the code is not a standalone
+    /// modifier key.
     static func carbonModifier(forKeyCode keyCode: UInt32) -> UInt32? {
         switch keyCode {
         case UInt32(kVK_Command), UInt32(kVK_RightCommand):
@@ -69,6 +83,8 @@ struct HotkeyShortcut: Equatable, Sendable {
             return UInt32(optionKey)
         case UInt32(kVK_Control), UInt32(kVK_RightControl):
             return UInt32(controlKey)
+        case UInt32(kVK_Function):
+            return fnModifierFlag
         default:
             return nil
         }
@@ -92,6 +108,8 @@ struct HotkeyShortcut: Equatable, Sendable {
             return .maskAlternate
         case UInt32(kVK_Control), UInt32(kVK_RightControl):
             return .maskControl
+        case UInt32(kVK_Function):
+            return .maskSecondaryFn
         default:
             return nil
         }
@@ -143,6 +161,17 @@ struct HotkeyShortcut: Equatable, Sendable {
             modifiers |= UInt32(cmdKey)
         }
 
+        return modifiers
+    }
+
+    /// The modifier keys physically held according to a flags-changed event,
+    /// including Fn as `fnModifierFlag`. Not for key-downs: arrow, F-key, and
+    /// navigation key-downs carry the function flag without Fn being held.
+    static func heldModifierFlags(from flags: NSEvent.ModifierFlags) -> UInt32 {
+        var modifiers = carbonModifiers(from: flags)
+        if flags.intersection(.deviceIndependentFlagsMask).contains(.function) {
+            modifiers |= fnModifierFlag
+        }
         return modifiers
     }
 
@@ -239,6 +268,7 @@ struct HotkeyShortcut: Equatable, Sendable {
         UInt32(kVK_RightShift): "Right Shift",
         UInt32(kVK_RightOption): "Right Option",
         UInt32(kVK_RightControl): "Right Control",
+        UInt32(kVK_Function): "Fn",
         UInt32(kVK_F1): "F1",
         UInt32(kVK_F2): "F2",
         UInt32(kVK_F3): "F3",

@@ -46,7 +46,7 @@ struct HotkeyRecorderView: View {
 
     private var helpText: String {
         if isRecording {
-            return "Press a key with Command, Control, or Option. A lone modifier like Right Option also works. Escape cancels."
+            return "Press a key with Command, Control, or Option. A lone modifier like Right Option or Fn also works. Escape cancels."
         }
         return "Current shortcut: \(shortcut.displayString)"
     }
@@ -91,7 +91,7 @@ struct HotkeyRecorderView: View {
         case .flagsChanged:
             let outcome = recorder.flagsChanged(
                 keyCode: UInt32(event.keyCode),
-                heldModifiers: HotkeyShortcut.carbonModifiers(from: event.modifierFlags)
+                heldModifiers: HotkeyShortcut.heldModifierFlags(from: event.modifierFlags)
             )
             return apply(outcome)
         case .keyDown:
@@ -197,7 +197,8 @@ struct HotkeyRecorderReducer: Sendable, Equatable {
     /// Process a flags-changed event.
     /// - Parameters:
     ///   - keyCode: Physical key code of the modifier that changed.
-    ///   - heldModifiers: Carbon modifier flags currently held (aggregate).
+    ///   - heldModifiers: Modifier flags currently held (aggregate), from
+    ///     `HotkeyShortcut.heldModifierFlags(from:)` so Fn is included.
     mutating func flagsChanged(keyCode: UInt32, heldModifiers: UInt32) -> Outcome {
         guard HotkeyShortcut.modifierOnlyKeyCodes.contains(keyCode),
               let modifierFlag = HotkeyShortcut.carbonModifier(forKeyCode: keyCode) else {

@@ -38,6 +38,31 @@ struct KeycapsView: View {
     }
 }
 
+/// Warns that pressing Fn (🌐) also triggers a macOS action, with a way to
+/// the setting that turns it off.
+struct GlobeKeyWarning: View {
+    let message: String
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Label {
+                Text(message)
+                    .fixedSize(horizontal: false, vertical: true)
+            } icon: {
+                Image(systemName: "exclamationmark.triangle.fill")
+                    .foregroundStyle(.orange)
+            }
+            .font(.callout)
+
+            Spacer(minLength: 0)
+
+            Button("Open Keyboard Settings") {
+                GlobeKeyAction.openKeyboardSettings()
+            }
+        }
+    }
+}
+
 struct ModelRow: View {
     let model: ModelManager.Model
     let isSelected: Bool

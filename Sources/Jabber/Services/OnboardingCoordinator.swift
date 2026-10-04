@@ -9,6 +9,7 @@ final class OnboardingCoordinator {
         case welcome
         case language
         case permissions
+        case hotkey
         case modelDownload
         case ready
 
@@ -20,6 +21,8 @@ final class OnboardingCoordinator {
                 return "Language"
             case .permissions:
                 return "Permissions"
+            case .hotkey:
+                return "Hotkey"
             case .modelDownload:
                 return "Speech Model"
             case .ready:
@@ -36,22 +39,28 @@ final class OnboardingCoordinator {
     private(set) var downloadErrorMessage: String?
     private(set) var onboardingSelectedLanguage: String
     private(set) var selectedModelId: String
+    private(set) var hotkeyShortcut: HotkeyShortcut
+    private(set) var globeKeyAction: GlobeKeyAction = .unknown
 
     private let permissionService: PermissionService
     private let modelManager: ModelManager
+    private let settings: SettingsStore
     private let logger = Logger(subsystem: "com.rselbach.jabber", category: "OnboardingCoordinator")
     private var permissionPollingTask: Task<Void, Never>?
 
     init(
         permissionService: PermissionService = .shared,
         modelManager: ModelManager = .shared,
+        settings: SettingsStore = .standard,
         step: Step = .welcome
     ) {
         self.permissionService = permissionService
         self.modelManager = modelManager
+        self.settings = settings
         self.step = step
         onboardingSelectedLanguage = TypedSettings[.selectedLanguage]
         selectedModelId = TypedSettings[.selectedModel]
+        hotkeyShortcut = settings.hotkeyShortcut
     }
 
     var canContinue: Bool {
@@ -63,6 +72,8 @@ final class OnboardingCoordinator {
         case .permissions:
             return microphoneStatus == .authorized
                 && (isAccessibilityTrusted || didSkipAccessibility)
+        case .hotkey:
+            return !hotkeyShortcut.needsAccessibility || isAccessibilityTrusted
         case .modelDownload:
             return isSelectedModelReady
         }
@@ -87,6 +98,8 @@ final class OnboardingCoordinator {
                 return "Microphone access is required for dictation"
             }
             return "Enable Accessibility or choose clipboard output"
+        case .hotkey:
+            return "\(hotkeyShortcut.displayString) needs Typing Access — pick another hotkey"
         case .modelDownload:
             if let model = selectedModel, model.isDownloading {
                 return "Downloading \(model.name) — \(Int(model.downloadProgress * 100))%"
@@ -135,6 +148,17 @@ final class OnboardingCoordinator {
         }
     }
 
+    /// Saves `shortcut` and asks the app to register it in place of the old
+    /// one, the same way the Hotkey settings page does.
+    func selectHotkey(_ shortcut: HotkeyShortcut) {
+        hotkeyShortcut = shortcut
+        settings.hotkeyShortcut = shortcut
+        NotificationCenter.default.post(
+            name: Constants.Notifications.hotkeyShortcutDidChange,
+            object: shortcut
+        )
+    }
+
     func recommendedModelIdForSelectedLanguage() -> String {
         LanguageModelCatalog.recommendedModelId(for: onboardingSelectedLanguage)
     }
@@ -167,6 +191,8 @@ final class OnboardingCoordinator {
             startRecommendedModelDownloadIfNeeded()
             move(to: .permissions)
         case .permissions:
+            move(to: .hotkey)
+        case .hotkey:
             move(to: .modelDownload)
         case .modelDownload:
             move(to: .ready)
@@ -244,6 +270,8 @@ final class OnboardingCoordinator {
     private func refreshState() {
         microphoneStatus = permissionService.microphoneAuthorizationStatus()
         isAccessibilityTrusted = permissionService.refreshAccessibilityPermissionStatus()
+        hotkeyShortcut = settings.hotkeyShortcut
+        globeKeyAction = GlobeKeyAction.current()
         modelManager.refreshModels()
     }
 

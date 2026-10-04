@@ -7,8 +7,6 @@ struct OnboardingView: View {
     let onComplete: () -> Void
     let onAppearAction: () -> Void
 
-    @AppStorage(AppSettingKey.hotkeyKeyCode) private var hotkeyKeyCode = Int(HotkeyShortcut.defaultShortcut.keyCode)
-    @AppStorage(AppSettingKey.hotkeyModifiers) private var hotkeyModifiers = Int(HotkeyShortcut.defaultShortcut.modifiers)
     @State private var modelManager = ModelManager.shared
     @State private var showAllLanguages = false
     @State private var showOtherModels = false
@@ -105,6 +103,8 @@ struct OnboardingView: View {
             languageStep
         case .permissions:
             permissionsStep
+        case .hotkey:
+            hotkeyStep
         case .modelDownload:
             modelDownloadStep
         case .ready:
@@ -485,6 +485,104 @@ struct OnboardingView: View {
         .animation(.spring(duration: 0.3), value: isGranted)
     }
 
+    // MARK: - Hotkey
+
+    private var hotkeyStep: some View {
+        VStack(spacing: 16) {
+            stepHeader(
+                title: "Pick your dictation hotkey",
+                subtitle: "\(TypedSettings.hotkeyActivationMode.description) Change it anytime in Settings."
+            )
+
+            ScrollView {
+                VStack(spacing: 8) {
+                    ForEach(HotkeyPreset.allCases) { preset in
+                        hotkeyPresetCard(preset)
+                    }
+                    customHotkeyCard
+                }
+                .frame(maxWidth: 580)
+                .padding(.bottom, 8)
+            }
+        }
+        .padding(.top, 8)
+    }
+
+    private func hotkeyPresetCard(_ preset: HotkeyPreset) -> some View {
+        let isSelected = coordinator.hotkeyShortcut == preset.shortcut
+        let isAvailable = !preset.shortcut.needsAccessibility || coordinator.isAccessibilityTrusted
+        return hotkeyCard(isSelected: isSelected) {
+            Button {
+                coordinator.selectHotkey(preset.shortcut)
+            } label: {
+                hotkeyChoice(isSelected: isSelected) {
+                    KeycapsView(labels: preset.shortcut.keycapLabels)
+                    Text(isAvailable ? preset.detail : "Needs Typing Access. Go Back to turn it on.")
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .disabled(!isAvailable)
+            .opacity(isAvailable ? 1 : 0.5)
+            .accessibilityAddTraits(isSelected ? .isSelected : [])
+
+            // Outside the choice button so its own button stays clickable.
+            if preset == .fn, isSelected, let warning = coordinator.globeKeyAction.fnHotkeyWarning {
+                GlobeKeyWarning(message: warning)
+                    .padding(.leading, 34)
+            }
+        }
+    }
+
+    private var customHotkeyCard: some View {
+        let isSelected = HotkeyPreset(shortcut: coordinator.hotkeyShortcut) == nil
+        return hotkeyCard(isSelected: isSelected) {
+            hotkeyChoice(isSelected: isSelected) {
+                if isSelected {
+                    KeycapsView(labels: coordinator.hotkeyShortcut.keycapLabels)
+                } else {
+                    Text("Another shortcut")
+                        .font(.body.weight(.medium))
+                }
+                HotkeyRecorderView(
+                    shortcut: coordinator.hotkeyShortcut,
+                    onShortcutChange: coordinator.selectHotkey
+                )
+            }
+        }
+    }
+
+    private func hotkeyChoice(isSelected: Bool, @ViewBuilder content: () -> some View) -> some View {
+        HStack(alignment: .top, spacing: 12) {
+            Image(systemName: isSelected ? "checkmark.circle.fill" : "circle")
+                .font(.title3)
+                .foregroundStyle(isSelected ? Color.accentColor : Color.secondary)
+                .accessibilityHidden(true)
+
+            VStack(alignment: .leading, spacing: 4) {
+                content()
+            }
+
+            Spacer(minLength: 0)
+        }
+    }
+
+    private func hotkeyCard(isSelected: Bool, @ViewBuilder content: () -> some View) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            content()
+        }
+        .padding(12)
+        .background(isSelected ? Color.accentColor.opacity(0.12) : Color.primary.opacity(0.05))
+        .clipShape(RoundedRectangle(cornerRadius: CornerRadius.large))
+        .overlay(
+            RoundedRectangle(cornerRadius: CornerRadius.large)
+                .strokeBorder(isSelected ? Color.accentColor : Color.clear, lineWidth: 1.5)
+        )
+    }
+
     // MARK: - Speech model
 
     private var modelDownloadStep: some View {
@@ -733,10 +831,7 @@ struct OnboardingView: View {
     }
 
     private var hotkeyKeycapLabels: [String] {
-        HotkeyShortcut(
-            keyCode: UInt32(clamping: hotkeyKeyCode),
-            modifiers: UInt32(clamping: hotkeyModifiers)
-        ).keycapLabels
+        coordinator.hotkeyShortcut.keycapLabels
     }
 
     private var tryItField: some View {

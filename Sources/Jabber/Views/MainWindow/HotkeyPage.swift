@@ -5,6 +5,7 @@ struct HotkeyPage: View {
     @AppStorage(AppSettingKey.hotkeyKeyCode) private var hotkeyKeyCode = Int(HotkeyShortcut.defaultShortcut.keyCode)
     @AppStorage(AppSettingKey.hotkeyModifiers) private var hotkeyModifiers = Int(HotkeyShortcut.defaultShortcut.modifiers)
     @AppStorage(AppSettingKey.hotkeyActivationMode) private var hotkeyActivationMode = HotkeyActivationMode.defaultMode.rawValue
+    @State private var globeKeyAction = GlobeKeyAction.unknown
 
     var body: some View {
         Form {
@@ -13,6 +14,10 @@ struct HotkeyPage: View {
                     Text("Press to talk")
                     Spacer()
                     KeycapsView(labels: hotkeyShortcut.keycapLabels)
+                }
+
+                if hotkeyShortcut == HotkeyPreset.fn.shortcut, let warning = globeKeyAction.fnHotkeyWarning {
+                    GlobeKeyWarning(message: warning)
                 }
 
                 HotkeyRecorderView(
@@ -28,7 +33,7 @@ struct HotkeyPage: View {
             } header: {
                 Text("Shortcut")
             } footer: {
-                Text("Shortcuts must include Command, Control, or Option — or use a single modifier key like Right Option on its own — so Jabber does not steal every innocent keystroke like a gremlin.")
+                Text("Shortcuts must include Command, Control, or Option — or use a single modifier key like Right Option or Fn on its own — so Jabber does not steal every innocent keystroke like a gremlin.")
             }
 
             Section {
@@ -51,6 +56,11 @@ struct HotkeyPage: View {
         .formStyle(.grouped)
         .onAppear {
             hotkeyActivationMode = selectedHotkeyActivationMode.rawValue
+            globeKeyAction = GlobeKeyAction.current()
+        }
+        // Picks up a change made in Keyboard settings once the user is back.
+        .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
+            globeKeyAction = GlobeKeyAction.current()
         }
     }
 

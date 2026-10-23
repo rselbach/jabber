@@ -31,7 +31,7 @@ struct PostProcessingPage: View {
                         CloudProviderAPIKeyField(provider: .openRouter)
                             .id(PostProcessingProviderKind.openRouter)
 
-                        Picker("Model", selection: $openRouterModel) {
+                        Picker("Model", selection: openRouterModelSelection) {
                             ForEach(OpenRouterModelCatalog.models) { model in
                                 Text(model.displayName).tag(model.id)
                             }
@@ -44,7 +44,7 @@ struct PostProcessingPage: View {
                         CloudProviderAPIKeyField(provider: .openCodeZen)
                             .id(PostProcessingProviderKind.openCodeZen)
 
-                        Picker("Model", selection: $openCodeZenModel) {
+                        Picker("Model", selection: openCodeZenModelSelection) {
                             ForEach(OpenCodeZenModelCatalog.models) { model in
                                 Text(model.displayName).tag(model.id)
                             }
@@ -98,6 +98,23 @@ struct PostProcessingPage: View {
 
     private var selectedPostProcessingProviderKind: PostProcessingProviderKind {
         PostProcessingProviderKind(rawValue: postProcessingProviderKindRaw) ?? .defaultValue
+    }
+
+    /// Picker selections resolve to a catalog entry so a stored slug that an
+    /// app update removed shows the model Jabber would actually use instead of
+    /// leaving the row blank.
+    private var openRouterModelSelection: Binding<String> {
+        Binding(
+            get: { OpenRouterModelCatalog.resolveModelId(openRouterModel) },
+            set: { openRouterModel = $0 }
+        )
+    }
+
+    private var openCodeZenModelSelection: Binding<String> {
+        Binding(
+            get: { OpenCodeZenModelCatalog.resolveModelId(openCodeZenModel) },
+            set: { openCodeZenModel = $0 }
+        )
     }
 
     private var testConfiguration: String {

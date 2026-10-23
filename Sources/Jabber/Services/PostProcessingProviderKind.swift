@@ -49,14 +49,16 @@ enum OpenRouterModelCatalog {
     }
 
     /// The three curated v1 models, in display order. The default is first.
+    /// Every slug is a `~vendor/<tier>-latest` alias, so the catalog keeps
+    /// pointing at the current small/fast model without a code change.
     static let models: [Model] = [
-        .init(id: "~openai/gpt-mini-latest", displayName: "GPT Mini (latest)"),
+        .init(id: "~openai/gpt-luna-latest", displayName: "GPT Luna (latest)"),
         .init(id: "~anthropic/claude-haiku-latest", displayName: "Claude Haiku (latest)"),
-        .init(id: "google/gemini-3.1-flash-lite", displayName: "Gemini Flash Lite")
+        .init(id: "~google/gemini-flash-latest", displayName: "Gemini Flash (latest)")
     ]
 
     /// Default model slug. Also the default for the `openRouterModel` setting.
-    static let defaultModelId = "~openai/gpt-mini-latest"
+    static let defaultModelId = "~openai/gpt-luna-latest"
 
     /// The default model entry.
     static var defaultModel: Model {
@@ -85,6 +87,8 @@ enum OpenRouterModelCatalog {
 /// so they must not be offered by this client. Free models are intentionally
 /// excluded because Zen marks them as temporary and may use submitted data for
 /// model improvement; dictated transcripts can contain sensitive information.
+/// Zen has no version aliases, so these slugs need refreshing when a vendor
+/// ships a successor or Zen deprecates one.
 enum OpenCodeZenModelCatalog {
     struct Model: Identifiable, Sendable, Equatable {
         let id: String
@@ -92,12 +96,12 @@ enum OpenCodeZenModelCatalog {
     }
 
     static let models: [Model] = [
-        .init(id: "deepseek-v4-flash", displayName: "DeepSeek V4 Flash"),
+        .init(id: "deepseek-v4.1-flash", displayName: "DeepSeek V4.1 Flash"),
         .init(id: "minimax-m3", displayName: "MiniMax M3"),
-        .init(id: "glm-5.2", displayName: "GLM 5.2")
+        .init(id: "glm-5.3", displayName: "GLM 5.3")
     ]
 
-    static let defaultModelId = "deepseek-v4-flash"
+    static let defaultModelId = "deepseek-v4.1-flash"
 
     static var defaultModel: Model {
         models.first { $0.id == defaultModelId } ?? models[0]

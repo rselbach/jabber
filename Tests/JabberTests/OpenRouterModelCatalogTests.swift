@@ -26,9 +26,18 @@ final class OpenRouterModelCatalogTests: XCTestCase {
 
     func testCuratedSlugsAndDisplayNames() {
         let byId = Dictionary(uniqueKeysWithValues: OpenRouterModelCatalog.models.map { ($0.id, $0.displayName) })
-        XCTAssertEqual(byId["~openai/gpt-mini-latest"], "GPT Mini (latest)")
+        XCTAssertEqual(byId["~openai/gpt-luna-latest"], "GPT Luna (latest)")
         XCTAssertEqual(byId["~anthropic/claude-haiku-latest"], "Claude Haiku (latest)")
-        XCTAssertEqual(byId["google/gemini-3.1-flash-lite"], "Gemini Flash Lite")
+        XCTAssertEqual(byId["~google/gemini-flash-latest"], "Gemini Flash (latest)")
+    }
+
+    func testEverySlugIsALatestAlias() {
+        // Aliases keep the catalog current without a code change; a pinned slug
+        // would silently rot whenever the vendor ships a successor.
+        for model in OpenRouterModelCatalog.models {
+            XCTAssertTrue(model.id.hasPrefix("~"), "\(model.id) should be a ~ alias")
+            XCTAssertTrue(model.id.hasSuffix("-latest"), "\(model.id) should be a -latest alias")
+        }
     }
 
     func testModelForUnknownIdReturnsNil() {
@@ -67,9 +76,9 @@ final class OpenCodeZenModelCatalogTests: XCTestCase {
 
     func testCuratedModels() {
         let byId = Dictionary(uniqueKeysWithValues: OpenCodeZenModelCatalog.models.map { ($0.id, $0.displayName) })
-        XCTAssertEqual(byId["deepseek-v4-flash"], "DeepSeek V4 Flash")
+        XCTAssertEqual(byId["deepseek-v4.1-flash"], "DeepSeek V4.1 Flash")
         XCTAssertEqual(byId["minimax-m3"], "MiniMax M3")
-        XCTAssertEqual(byId["glm-5.2"], "GLM 5.2")
+        XCTAssertEqual(byId["glm-5.3"], "GLM 5.3")
     }
 
     func testResolution() {

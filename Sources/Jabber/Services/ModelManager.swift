@@ -1,5 +1,6 @@
 import Foundation
 import AudioCommon
+import FluidAudio
 import os
 
 struct ModelDownloadState: Equatable {
@@ -90,6 +91,7 @@ final class ModelManager {
     ) {
         self.settings = settings
         self.cacheBaseURL = cacheBaseURL
+        consolidateLegacyDownloads()
         migrateSelectedModelIfNeeded()
         refreshModels()
     }
@@ -470,10 +472,17 @@ final class ModelManager {
     private func modelFolderCandidates(for modelId: String) -> [URL] {
         guard let def = AppMode.modelDefinition(for: modelId) else { return [] }
 
-        return [
-            cacheFolder(for: def.huggingFaceModelId),
-            oldCacheFolder(for: def.huggingFaceModelId)
-        ]
+        switch def.source {
+        case let .fluidAudio(repo):
+            return [fluidAudioFolder(for: repo)]
+        case let .huggingFace(huggingFaceModelId):
+            return [
+                cacheFolder(for: huggingFaceModelId),
+                oldCacheFolder(for: huggingFaceModelId)
+            ]
+        case .system:
+            return []
+        }
     }
 
     /// Resolve the on-disk download folder for a model. Centralized so the
@@ -482,19 +491,27 @@ final class ModelManager {
         guard let def = AppMode.modelDefinition(for: modelId) else {
             throw ModelError.modelNotFound(modelId: modelId)
         }
-        return try HuggingFaceDownloader.getCacheDirectory(
-            for: def.huggingFaceModelId,
-            basePath: cacheBase()
-        )
+        switch def.source {
+        case let .fluidAudio(repo):
+            return fluidAudioFolder(for: repo)
+        case let .huggingFace(huggingFaceModelId):
+            return try HuggingFaceDownloader.getCacheDirectory(
+                for: huggingFaceModelId,
+                basePath: cacheBase()
+            )
+        case .system:
+            throw ModelError.modelNotFound(modelId: modelId)
+        }
     }
 
     /// Remove a partially-downloaded model folder left behind by a failed
     /// download (partial config.json, half-written .mlmodelc, stale index).
     ///
-    /// HuggingFace keeps its `.incomplete` resume data INSIDE this folder
-    /// (at `<folder>/.cache/huggingface/download/*.incomplete`), so deleting
-    /// it also discards resume state. Call this only on genuine failures,
-    /// never on user cancellation — see `performDownload`.
+    /// Both downloaders keep resume data INSIDE this folder (FluidAudio's
+    /// `.partial` files, HuggingFace's
+    /// `<folder>/.cache/huggingface/download/*.incomplete`), so deleting it
+    /// also discards resume state. Call this only on genuine failures, never
+    /// on user cancellation — see `performDownload`.
     ///
     /// Logs cleanup and any removal error; never swallows failures silently.
     func removeFailedDownloadFolder(for modelId: String) {
@@ -536,19 +553,26 @@ final class ModelManager {
         }
 
         let downloadFolder = try downloadFolder(for: modelId)
+        let reportProgress = downloadProgressHandler(modelId: modelId, modelName: modelName)
 
-        switch def.family {
-        case .parakeetTDT:
+        switch def.source {
+        case let .fluidAudio(repo):
+            // ModelHub fetches FluidAudio's own required files for the repo;
+            // naming the layout too keeps the download and the completeness
+            // check from drifting apart.
             let layout = ModelInstallationValidator.parakeetLayout(for: def.id)
-            try await HuggingFaceDownloader.downloadFiles(
-                modelId: def.huggingFaceModelId,
-                to: downloadFolder,
-                files: layout.files + layout.directories.map { "\($0)/**" },
-                progressHandler: downloadProgressHandler(modelId: modelId, modelName: modelName)
+            let downloadShare = Self.fluidAudioDownloadShare
+            try await ModelHub.download(
+                repo,
+                to: fluidAudioModelsDirectory(),
+                additionalModelNames: Set(layout.requiredAssets),
+                progressHandler: { progress in
+                    reportProgress(progress.fractionCompleted / downloadShare)
+                }
             )
-        case .nemotronASR:
+        case let .huggingFace(huggingFaceModelId):
             try await HuggingFaceDownloader.downloadWeights(
-                modelId: def.huggingFaceModelId,
+                modelId: huggingFaceModelId,
                 to: downloadFolder,
                 additionalFiles: [
                     "encoder.mlmodelc/**",
@@ -556,9 +580,9 @@ final class ModelManager {
                     "joint.mlmodelc/**",
                     "vocab.json"
                 ],
-                progressHandler: downloadProgressHandler(modelId: modelId, modelName: modelName)
+                progressHandler: reportProgress
             )
-        case .appleSpeech:
+        case .system:
             throw ModelError.modelNotFound(modelId: modelId)
         }
 
@@ -591,6 +615,55 @@ final class ModelManager {
                     progress: progress,
                     status: "Downloading model..."
                 )
+            }
+        }
+    }
+
+    /// `ModelHub.download` reports the download half of a FluidAudio model
+    /// load: its progress ends at 0.5, leaving the rest to CoreML compilation,
+    /// which a download alone never reaches.
+    private static let fluidAudioDownloadShare = 0.5
+
+    /// FluidAudio keeps each repository in a folder it names under one
+    /// directory, and loads models from there. Earlier releases already left
+    /// FluidAudio's copies here, so existing installs are found as they are.
+    private func fluidAudioModelsDirectory() -> URL {
+        cacheBase()
+            .appendingPathComponent("models", isDirectory: true)
+            .appendingPathComponent("FluidInference", isDirectory: true)
+    }
+
+    private func fluidAudioFolder(for repo: Repo) -> URL {
+        fluidAudioModelsDirectory().appendingPathComponent(repo.folderName, isDirectory: true)
+    }
+
+    /// Jabber 2.6.1 and earlier downloaded each FluidAudio model into a folder named
+    /// for its Hugging Face repository, and FluidAudio then downloaded it again
+    /// into its own folder on first load. Keeps one copy, in FluidAudio's
+    /// folder: the old download moves there when it is the only complete copy
+    /// and is removed otherwise.
+    private func consolidateLegacyDownloads() {
+        let fm = FileManager.default
+        for def in modelDefinitions {
+            guard case let .fluidAudio(repo) = def.source else { continue }
+            let legacy = fluidAudioModelsDirectory().appendingPathComponent(repo.name, isDirectory: true)
+            let current = fluidAudioFolder(for: repo)
+            guard legacy != current, fm.fileExists(atPath: legacy.path) else { continue }
+
+            do {
+                let currentIsComplete = ModelInstallationValidator.validate(folder: current, for: def).isComplete
+                if !currentIsComplete, ModelInstallationValidator.validate(folder: legacy, for: def).isComplete {
+                    if fm.fileExists(atPath: current.path) {
+                        try fm.removeItem(at: current)
+                    }
+                    try fm.moveItem(at: legacy, to: current)
+                    logger.info("Moved \(def.id) download from \(legacy.path) to \(current.path)")
+                } else {
+                    try fm.removeItem(at: legacy)
+                    logger.info("Removed duplicate \(def.id) download at \(legacy.path)")
+                }
+            } catch {
+                logger.error("Failed to consolidate \(def.id) downloads at \(legacy.path): \(error.localizedDescription)")
             }
         }
     }

@@ -1,3 +1,4 @@
+import FluidAudio
 import Foundation
 
 enum AppMode {
@@ -33,10 +34,21 @@ enum AppMode {
         case appleSpeech
     }
 
+    /// Where a model's files come from.
+    enum ModelSource {
+        /// Downloaded and loaded by FluidAudio, which keeps each repository in
+        /// a folder it names.
+        case fluidAudio(Repo)
+        /// Downloaded by speech-swift from this Hugging Face repository.
+        case huggingFace(String)
+        /// Ships with macOS.
+        case system
+    }
+
     struct ModelDefinition: Identifiable {
         let id: String
         let family: ModelFamily
-        let huggingFaceModelId: String
+        let source: ModelSource
         let name: String
         let description: String
         let sizeHint: String
@@ -44,74 +56,75 @@ enum AppMode {
         let license: String
         let licenseUrl: String
         let attribution: String
-        let isBuiltIn: Bool
+
+        var isBuiltIn: Bool {
+            if case .system = source {
+                return true
+            }
+            return false
+        }
     }
 
     static let modelDefinitions: [ModelDefinition] = [
         .init(
             id: parakeetModelId,
             family: .parakeetTDT,
-            huggingFaceModelId: "FluidInference/parakeet-tdt-0.6b-v2-coreml",
+            source: .fluidAudio(.parakeetV2),
             name: "Parakeet TDT v2",
             description: "NVIDIA Parakeet TDT v2 — fast, accurate English transcription",
             sizeHint: "~443MB",
             supportedLanguageCodes: ["en"],
             license: "CC BY 4.0",
             licenseUrl: "https://creativecommons.org/licenses/by/4.0/",
-            attribution: "Parakeet TDT 0.6B v2 by NVIDIA; CoreML conversion by FluidInference",
-            isBuiltIn: false
+            attribution: "Parakeet TDT 0.6B v2 by NVIDIA; CoreML conversion by FluidInference"
         ),
         .init(
             id: parakeetMultilingualModelId,
             family: .parakeetTDT,
-            huggingFaceModelId: "FluidInference/parakeet-tdt-0.6b-v3-coreml",
+            source: .fluidAudio(.parakeetV3),
             name: "Parakeet TDT v3",
             description: "NVIDIA Parakeet TDT v3 — 25 European languages at v2's speed",
             sizeHint: "~461MB",
             supportedLanguageCodes: parakeetMultilingualLanguageCodes,
             license: "CC BY 4.0",
             licenseUrl: "https://creativecommons.org/licenses/by/4.0/",
-            attribution: "Parakeet TDT 0.6B v3 by NVIDIA; CoreML conversion by FluidInference",
-            isBuiltIn: false
+            attribution: "Parakeet TDT 0.6B v3 by NVIDIA; CoreML conversion by FluidInference"
         ),
         .init(
             id: parakeetJapaneseModelId,
             family: .parakeetTDT,
-            huggingFaceModelId: "FluidInference/parakeet-0.6b-ja-coreml",
+            source: .fluidAudio(.parakeetJa),
             name: "Parakeet Japanese",
             description: "NVIDIA Parakeet 0.6B tuned for Japanese",
             sizeHint: "~606MB",
             supportedLanguageCodes: ["ja"],
             license: "CC BY 4.0",
             licenseUrl: "https://creativecommons.org/licenses/by/4.0/",
-            attribution: "Parakeet 0.6B Japanese by NVIDIA; CoreML conversion by FluidInference",
-            isBuiltIn: false
+            attribution: "Parakeet 0.6B Japanese by NVIDIA; CoreML conversion by FluidInference"
         ),
         .init(
             id: nemotronModelId,
             family: .nemotronASR,
-            huggingFaceModelId: "aufklarer/Nemotron-Speech-Streaming-0.6B-CoreML-INT8",
+            source: .huggingFace("aufklarer/Nemotron-Speech-Streaming-0.6B-CoreML-INT8"),
             name: "Nemotron",
             description: "NVIDIA Nemotron — English-only, native punctuation & capitalization",
             sizeHint: "~600MB",
             supportedLanguageCodes: ["en"],
             license: "OpenMDW-1.1",
             licenseUrl: "https://www.openmodeldefinition.org/",
-            attribution: "Nemotron Speech Streaming by NVIDIA",
-            isBuiltIn: false
+            attribution: "Nemotron Speech Streaming by NVIDIA"
         ),
         .init(
             id: appleSpeechModelId,
             family: .appleSpeech,
-            huggingFaceModelId: "",
+            source: .system,
             name: "Apple Speech",
             description: "Built-in macOS speech recognition — no download required",
             sizeHint: "Built-in",
             supportedLanguageCodes: appleSpeechLanguageCodes,
             license: "Apple System",
             licenseUrl: "https://www.apple.com/legal/sla/",
-            attribution: "Apple Speech Framework (macOS 26+)",
-            isBuiltIn: true
+            attribution: "Apple Speech Framework (macOS 26+)"
         )
     ]
 

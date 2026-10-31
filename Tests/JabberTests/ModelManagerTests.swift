@@ -1,5 +1,4 @@
 import XCTest
-import AudioCommon
 @testable import Jabber
 
 @MainActor
@@ -64,10 +63,7 @@ final class ModelManagerTests: XCTestCase {
     }
 
     func testRefreshModelsUsesInjectedCacheDirectory() throws {
-        let modelFolder = cacheBaseURL
-            .appendingPathComponent("models", isDirectory: true)
-            .appendingPathComponent("FluidInference", isDirectory: true)
-            .appendingPathComponent("parakeet-tdt-0.6b-v2-coreml", isDirectory: true)
+        let modelFolder = fluidAudioFolder("parakeet-tdt-0.6b-v2")
         try createCompleteParakeetModelFolder(at: modelFolder)
 
         modelManager.refreshModels()
@@ -78,35 +74,55 @@ final class ModelManagerTests: XCTestCase {
         XCTAssertTrue(parakeetModel.isDownloaded)
     }
 
-    func testDeleteModelRemovesNewAndLegacyCacheFolders() throws {
-        let newModelFolder = cacheBaseURL
-            .appendingPathComponent("models", isDirectory: true)
-            .appendingPathComponent("FluidInference", isDirectory: true)
-            .appendingPathComponent("parakeet-tdt-0.6b-v2-coreml", isDirectory: true)
-        try createCompleteParakeetModelFolder(at: newModelFolder)
-
-        let legacyModelFolder = cacheBaseURL
-            .appendingPathComponent(
-                HuggingFaceDownloader.sanitizedCacheKey(for: "FluidInference/parakeet-tdt-0.6b-v2-coreml"),
-                isDirectory: true
-            )
-        try createCompleteParakeetModelFolder(at: legacyModelFolder)
+    func testDeleteModelRemovesItsFolder() throws {
+        let modelFolder = fluidAudioFolder("parakeet-tdt-0.6b-v2")
+        try createCompleteParakeetModelFolder(at: modelFolder)
+        modelManager.refreshModels()
 
         try modelManager.deleteModel(AppMode.parakeetModelId)
 
-        XCTAssertFalse(
-            FileManager.default.fileExists(atPath: newModelFolder.path),
-            "New cache layout folder should be removed"
-        )
-        XCTAssertFalse(
-            FileManager.default.fileExists(atPath: legacyModelFolder.path),
-            "Legacy cache layout folder should be removed"
-        )
-
+        XCTAssertFalse(FileManager.default.fileExists(atPath: modelFolder.path))
         let parakeetModel = try XCTUnwrap(
             modelManager.models.first { $0.id == AppMode.parakeetModelId }
         )
         XCTAssertFalse(parakeetModel.isDownloaded)
+    }
+
+    func testLegacyDownloadsAreConsolidatedIntoFluidAudiosFolder() throws {
+        let legacy = fluidAudioFolder("parakeet-tdt-0.6b-v2-coreml")
+        let current = fluidAudioFolder("parakeet-tdt-0.6b-v2")
+        let incomplete = { (url: URL) in
+            try FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
+            try Data("partial".utf8).write(to: url.appendingPathComponent("parakeet_vocab.json"))
+        }
+        let cases: [String: (legacy: (URL) throws -> Void, current: ((URL) throws -> Void)?, wantCurrentComplete: Bool)] = [
+            "the only complete copy moves into place": (
+                { try self.createCompleteParakeetModelFolder(at: $0) }, nil, true
+            ),
+            "a complete copy replaces a partial one": (
+                { try self.createCompleteParakeetModelFolder(at: $0) }, incomplete, true
+            ),
+            "a duplicate of a complete copy is removed": (
+                { try self.createCompleteParakeetModelFolder(at: $0) },
+                { try self.createCompleteParakeetModelFolder(at: $0) },
+                true
+            ),
+            "a partial copy is removed": (incomplete, nil, false)
+        ]
+
+        for (name, tc) in cases {
+            for folder in [legacy, current] where FileManager.default.fileExists(atPath: folder.path) {
+                try FileManager.default.removeItem(at: folder)
+            }
+            try tc.legacy(legacy)
+            try tc.current?(current)
+
+            let manager = ModelManager(settings: settings, cacheBaseURL: cacheBaseURL)
+
+            XCTAssertFalse(FileManager.default.fileExists(atPath: legacy.path), name)
+            let parakeet = try XCTUnwrap(manager.models.first { $0.id == AppMode.parakeetModelId }, name)
+            XCTAssertEqual(parakeet.isDownloaded, tc.wantCurrentComplete, name)
+        }
     }
 
     func testMigrateLegacyUnavailableModelIds() {
@@ -267,17 +283,14 @@ final class ModelManagerTests: XCTestCase {
     // MARK: - Failed-download folder cleanup
 
     // The live download path can't be simulated without injecting a downloader
-    // seam (HuggingFaceDownloader is a concrete type from AudioCommon and its
-    // snapshot() does real network I/O with 20s+ retries). That would be
-    // invasive refactoring, explicitly out of scope. Instead these tests pin
-    // down the new destructive helper's path resolution + safety guards, which
-    // is where regressions (e.g. deleting the parent models dir) would bite.
+    // seam (ModelHub and HuggingFaceDownloader do real network I/O with
+    // retries). That would be invasive refactoring, explicitly out of scope.
+    // Instead these tests pin down the destructive helper's path resolution +
+    // safety guards, which is where regressions (e.g. deleting the parent
+    // models dir) would bite.
 
     func testRemoveFailedDownloadFolderDeletesOnlyTargetModel() throws {
-        let target = cacheBaseURL
-            .appendingPathComponent("models", isDirectory: true)
-            .appendingPathComponent("FluidInference", isDirectory: true)
-            .appendingPathComponent("parakeet-tdt-0.6b-v2-coreml", isDirectory: true)
+        let target = fluidAudioFolder("parakeet-tdt-0.6b-v2")
         try FileManager.default.createDirectory(at: target, withIntermediateDirectories: true)
         try Data("partial".utf8).write(to: target.appendingPathComponent("config.json"))
 
@@ -317,10 +330,7 @@ final class ModelManagerTests: XCTestCase {
     }
 
     func testEnsureModelDownloadedReturnsExistingFolder() async throws {
-        let modelFolder = cacheBaseURL
-            .appendingPathComponent("models", isDirectory: true)
-            .appendingPathComponent("FluidInference", isDirectory: true)
-            .appendingPathComponent("parakeet-tdt-0.6b-v2-coreml", isDirectory: true)
+        let modelFolder = fluidAudioFolder("parakeet-tdt-0.6b-v2")
         try createCompleteParakeetModelFolder(at: modelFolder)
 
         let result = try await modelManager.ensureModelDownloaded(AppMode.parakeetModelId)
@@ -358,10 +368,7 @@ final class ModelManagerTests: XCTestCase {
         XCTAssertEqual(settings[.selectedModel], AppMode.nemotronModelId)
         XCTAssertEqual(modelManager.pendingSelectionModelId, AppMode.parakeetModelId, "still waiting")
 
-        try createCompleteParakeetModelFolder(at: cacheBaseURL
-            .appendingPathComponent("models", isDirectory: true)
-            .appendingPathComponent("FluidInference", isDirectory: true)
-            .appendingPathComponent("parakeet-tdt-0.6b-v2-coreml", isDirectory: true))
+        try createCompleteParakeetModelFolder(at: fluidAudioFolder("parakeet-tdt-0.6b-v2"))
         modelManager.refreshModels()
 
         XCTAssertTrue(modelManager.applyPendingSelection())
@@ -487,6 +494,13 @@ final class ModelManagerTests: XCTestCase {
         let models = modelManager.models
         let uniqueIds = Set(models.map { $0.id })
         XCTAssertEqual(uniqueIds.count, models.count, "All model IDs should be unique")
+    }
+
+    private func fluidAudioFolder(_ name: String) -> URL {
+        cacheBaseURL
+            .appendingPathComponent("models", isDirectory: true)
+            .appendingPathComponent("FluidInference", isDirectory: true)
+            .appendingPathComponent(name, isDirectory: true)
     }
 
     private func createCompleteParakeetModelFolder(

@@ -62,6 +62,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var lastPostProcessingFailureNotice = CFAbsoluteTime(0)
     private var didPromptAccessibility = false
     private static let automaticHotkeyHoldThreshold: TimeInterval = 0.4
+    /// Recording continues this long after a hotkey stop. Hex measured the
+    /// last word lost on 3 in 10 real clips released 100 ms early, and on none
+    /// released on time.
+    private static let hotkeyReleaseTail: Duration = .milliseconds(200)
 
     // Hotkey press tracking: a press that awaits microphone permission can
     // have its key released before `start()` runs, leaving a "stuck" recording.
@@ -968,7 +972,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func stopOrAbortDictationFromHotkey() {
         if dictationCoordinator.isRecording {
-            dictationCoordinator.stop()
+            dictationCoordinator.stop(tail: Self.hotkeyReleaseTail)
         } else if let pendingID = pendingHotkeyStartID {
             // Release arrived before recording began (e.g. during the permission
             // await). Mark the in-flight press aborted so it does not start

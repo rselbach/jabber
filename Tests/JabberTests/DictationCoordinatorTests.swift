@@ -174,6 +174,71 @@ final class DictationCoordinatorTests: XCTestCase {
         XCTAssertEqual(typingService.targetProcessIDs, [nil])
     }
 
+    func testStopWithTailKeepsRecordingThroughTheTail() async {
+        audioCapture.storedSamples = makeLoudSamples()
+        transcriptionService.transcribeResult = .success("hello world")
+        let idleExpectation = XCTestExpectation(description: "coordinator returns to idle")
+        coordinator.onStateChange = { state in
+            if state == .idle {
+                idleExpectation.fulfill()
+            }
+        }
+
+        XCTAssertTrue(coordinator.start())
+        coordinator.stop(tail: .milliseconds(50))
+        XCTAssertTrue(coordinator.isTranscribing)
+        XCTAssertFalse(audioCapture.didStop)
+        // The last word, still arriving after the key came up.
+        audioCapture.storedSamples += makeLoudSamples(count: 800)
+
+        await fulfillment(of: [idleExpectation], timeout: 1.0)
+        XCTAssertTrue(audioCapture.didStop)
+        XCTAssertEqual(dictationHistoryStore.sessions.first?.samples.count, 16_800)
+        XCTAssertEqual(typingService.outputs, ["hello world"])
+    }
+
+    func testStopWithTailJudgesSpeechOnAudioBeforeTheTail() async {
+        // A stop cue picked up during the tail is loud but is not speech.
+        audioCapture.storedSamples = Array(repeating: 0.001, count: 16_000)
+        let idleExpectation = XCTestExpectation(description: "coordinator returns to idle")
+        coordinator.onStateChange = { state in
+            if state == .idle {
+                idleExpectation.fulfill()
+            }
+        }
+        var noSpeechCount = 0
+        coordinator.onNoSpeechDetected = { noSpeechCount += 1 }
+
+        XCTAssertTrue(coordinator.start())
+        coordinator.stop(tail: .milliseconds(50))
+        audioCapture.storedSamples += makeLoudSamples(count: 3_200)
+
+        await fulfillment(of: [idleExpectation], timeout: 1.0)
+        XCTAssertEqual(noSpeechCount, 1)
+        XCTAssertTrue(typingService.outputs.isEmpty)
+        XCTAssertTrue(dictationHistoryStore.sessions.isEmpty)
+        XCTAssertTrue(coordinator.canStart)
+        XCTAssertFalse(coordinator.isPreventingIdleSleep)
+    }
+
+    func testCancelDuringTailDiscardsTheSession() async throws {
+        audioCapture.storedSamples = makeLoudSamples()
+        transcriptionService.transcribeResult = .success("hello world")
+
+        XCTAssertTrue(coordinator.start())
+        coordinator.stop(tail: .milliseconds(50))
+        coordinator.cancel()
+        XCTAssertTrue(coordinator.isIdle)
+        XCTAssertTrue(audioCapture.didStop)
+
+        try await Task.sleep(for: .milliseconds(150))
+        XCTAssertTrue(coordinator.isIdle)
+        XCTAssertTrue(coordinator.canStart)
+        XCTAssertTrue(typingService.outputs.isEmpty)
+        XCTAssertTrue(dictationHistoryStore.sessions.isEmpty)
+        XCTAssertEqual(mediaPlaybackService.resumeCallCount, 1)
+    }
+
     func testStopWithSpeechSavesDictationHistoryAfterTranscriptionCompletes() async {
         audioCapture.storedSamples = makeLoudSamples()
         transcriptionService.currentModelID = AppMode.parakeetModelId

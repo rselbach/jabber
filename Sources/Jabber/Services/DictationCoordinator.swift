@@ -280,47 +280,111 @@ final class DictationCoordinator {
     }
 
     /// Stops recording and, if speech was detected, begins transcription.
-    func stop() {
+    ///
+    /// A nonzero `tail` keeps the microphone open that much longer, because
+    /// people let go of the hotkey while still finishing the last word. The
+    /// session reports `.transcribing` at once so the stop cue and overlay
+    /// don't lag, and speech is judged on the audio from before the tail, so
+    /// a stop cue picked up by the microphone can't pass for speech.
+    /// `cancel()` during the tail drops the session as usual.
+    func stop(tail: Duration = .zero) {
         guard case .recording = state, let sessionID = currentSessionID else { return }
 
         let stopStartedAt = ContinuousClock.now
         recordingLimitTask?.cancel()
         recordingLimitTask = nil
-        audioCapture.stopCapture()
-
-        let samples = audioCapture.currentSamples()
-        let captureFinishedAt = ContinuousClock.now
         let pendingStreamingTask = stopStreamingPreview()
-        let speechAssessment = AudioSpeechDetector.assess(samples: samples)
 
-        guard speechAssessment.shouldTranscribe else {
-            if speechAssessment.shouldShowNoSpeechWarning {
-                onNoSpeechDetected?()
+        guard tail > .zero else {
+            audioCapture.stopCapture()
+            let samples = audioCapture.currentSamples()
+            let captureFinishedAt = ContinuousClock.now
+            guard assessSpeech(in: samples[...]) else {
+                finish(sessionID: sessionID)
+                return
             }
-            finish(sessionID: sessionID)
+            guard beginTranscribing(sessionID: sessionID) else { return }
+            transcriptionTask = Task { [weak self] in
+                await self?.transcribeAfterStreamingPreview(
+                    pendingStreamingTask,
+                    samples: samples,
+                    sessionID: sessionID,
+                    stopStartedAt: stopStartedAt,
+                    captureFinishedAt: captureFinishedAt
+                )
+            }
             return
         }
 
-        guard activity.start(sessionID) else {
-            logger.error("Could not mark transcription activity active for session \(sessionID.uuidString, privacy: .public)")
-            finish(sessionID: sessionID)
-            return
-        }
-
-        state = .transcribing(sessionID: sessionID)
-        onStateChange?(.transcribing(sessionID: sessionID))
-
+        let releasedSampleCount = audioCapture.sampleCount()
+        guard beginTranscribing(sessionID: sessionID) else { return }
         transcriptionTask = Task { [weak self] in
-            if let pendingStreamingTask {
-                await self?.waitForStreamingPreviewToStop(pendingStreamingTask)
+            do {
+                try await Task.sleep(for: tail)
+            } catch {
+                // cancel() owns the session once it cancels the tail.
+                return
             }
-            await self?.transcribeAndOutput(
+            guard let self, currentSessionID == sessionID else { return }
+
+            audioCapture.stopCapture()
+            let samples = audioCapture.currentSamples()
+            let captureFinishedAt = ContinuousClock.now
+            guard assessSpeech(in: samples.prefix(releasedSampleCount)) else {
+                _ = activity.complete(sessionID)
+                finish(sessionID: sessionID)
+                return
+            }
+            await transcribeAfterStreamingPreview(
+                pendingStreamingTask,
                 samples: samples,
                 sessionID: sessionID,
                 stopStartedAt: stopStartedAt,
                 captureFinishedAt: captureFinishedAt
             )
         }
+    }
+
+    /// Whether `samples` hold speech worth transcribing. Warns when the
+    /// recording was long enough to count but too quiet.
+    private func assessSpeech(in samples: ArraySlice<Float>) -> Bool {
+        let assessment = AudioSpeechDetector.assess(samples: Array(samples))
+        if assessment.shouldShowNoSpeechWarning {
+            onNoSpeechDetected?()
+        }
+        return assessment.shouldTranscribe
+    }
+
+    /// Claims the activity slot and announces `.transcribing`. Returns
+    /// `false`, with the session finished, when the slot is taken.
+    private func beginTranscribing(sessionID: UUID) -> Bool {
+        guard activity.start(sessionID) else {
+            logger.error("Could not mark transcription activity active for session \(sessionID.uuidString, privacy: .public)")
+            finish(sessionID: sessionID)
+            return false
+        }
+
+        state = .transcribing(sessionID: sessionID)
+        onStateChange?(.transcribing(sessionID: sessionID))
+        return true
+    }
+
+    private func transcribeAfterStreamingPreview(
+        _ pendingStreamingTask: Task<Void, Never>?,
+        samples: [Float],
+        sessionID: UUID,
+        stopStartedAt: ContinuousClock.Instant,
+        captureFinishedAt: ContinuousClock.Instant
+    ) async {
+        if let pendingStreamingTask {
+            await waitForStreamingPreviewToStop(pendingStreamingTask)
+        }
+        await transcribeAndOutput(
+            samples: samples,
+            sessionID: sessionID,
+            stopStartedAt: stopStartedAt,
+            captureFinishedAt: captureFinishedAt
+        )
     }
 
     /// Transcribes the kept failed dictation again through the normal

@@ -49,6 +49,30 @@ final class AudioSpeechDetectorTests: XCTestCase {
         XCTAssertGreaterThanOrEqual(assessment.activeDuration, 0.08)
     }
 
+    func testBriefQuietSpeechInLongSilenceIsAccepted() {
+        // A second of quiet speech inside a 30 s recording averages below
+        // 0.003 RMS over the whole clip.
+        let silence = Array(repeating: Float(0), count: 29 * 8_000)
+        let speech = makeSineWave(amplitude: 0.02, sampleCount: 16_000)
+        let samples = silence + speech + silence
+
+        let assessment = AudioSpeechDetector.assess(samples: samples)
+
+        XCTAssertLessThan(assessment.rms, 0.003)
+        XCTAssertTrue(assessment.shouldTranscribe)
+        XCTAssertNil(assessment.rejectionReason)
+    }
+
+    func testLoneClickInSilenceIsRejected() {
+        var samples = Array(repeating: Float(0), count: 16_000)
+        samples[8_000] = 0.5
+
+        let assessment = AudioSpeechDetector.assess(samples: samples)
+
+        XCTAssertFalse(assessment.shouldTranscribe)
+        XCTAssertTrue(assessment.shouldShowNoSpeechWarning)
+    }
+
     private func makeSineWave(amplitude: Float, sampleCount: Int) -> [Float] {
         let frequency = 220.0
         let sampleRate = 16_000.0

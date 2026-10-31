@@ -35,7 +35,7 @@ struct ReplacementsPage: View {
             } header: {
                 Text("Instant Replacement")
             } footer: {
-                Text("Runs after transcription and post-processing, right before Jabber types. Matching ignores case and only hits whole words. Separate several phrases with commas. A rule does nothing until both fields are filled in.")
+                Text("Runs after transcription and post-processing, right before Jabber types. Matching ignores case and only hits whole words. Separate several phrases with commas. Leave With empty to delete the phrase, such as \"um\" or \"you know\".")
             }
         }
         .formStyle(.grouped)
@@ -182,7 +182,8 @@ enum ReplacementEntryEditing {
     /// The rows worth storing, in order and unmodified. Blank rows (an
     /// abandoned Add Rule) are dropped. Partial rows are kept so a half-written
     /// rule survives closing the window; `ReplacementWordsResolver` ignores a
-    /// rule until it has both a trigger and a replacement.
+    /// rule until it has a trigger, and deletes the trigger when the
+    /// replacement is empty.
     static func entriesToPersist(_ entries: [ReplacementEntry]) -> [ReplacementEntry] {
         entries.filter { entry in
             !isBlank(entry.replacement) || entry.triggers.contains { !isBlank($0) }

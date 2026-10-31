@@ -86,16 +86,48 @@ final class ReplacementWordsResolverTests: XCTestCase {
         )
     }
 
-    func testEmptyTriggersAndReplacementsAreIgnored() {
+    func testEmptyTriggersAreIgnored() {
         let entries = [
             ReplacementEntry(triggers: ["", "  "], replacement: "ShouldNotApply"),
-            ReplacementEntry(triggers: ["troy"], replacement: ""),
             ReplacementEntry(triggers: ["abed"], replacement: "Abed")
         ]
         XCTAssertEqual(
             ReplacementWordsResolver.resolve(transcript: "troy and abed", entries: entries),
             "troy and Abed"
         )
+    }
+
+    func testEmptyReplacementDeletesPhraseAndTidiesUp() {
+        let entries = [
+            ReplacementEntry(triggers: ["um", "uh"], replacement: ""),
+            ReplacementEntry(triggers: ["you know"], replacement: " "),
+            ReplacementEntry(triggers: ["abed"], replacement: "Abed")
+        ]
+        let tests: [String: (transcript: String, want: String)] = [
+            "between words": ("I um think so.", "I think so."),
+            "between commas": ("I, um, think so.", "I, think so."),
+            "consecutive fillers": ("I, um, uh, think so.", "I, think so."),
+            "sentence start passes capital on": ("Um, the build passed.", "The build passed."),
+            "consecutive at sentence start": ("Um, uh, the build passed.", "The build passed."),
+            "lowercase sentence start stays lowercase": ("um, the build passed.", "the build passed."),
+            "before final period": ("I think so um.", "I think so."),
+            "after comma before period": ("I think so, um.", "I think so."),
+            "at the very end": ("I think so, um", "I think so"),
+            "whole transcript": ("Um.", ""),
+            "after a sentence": ("Hello. Um.", "Hello."),
+            "between sentences": ("Hello. Um. The build passed.", "Hello. The build passed."),
+            "before a newline": ("Hello um\nWorld", "Hello\nWorld"),
+            "capital passes to a replacement": ("Um, abed is here.", "Abed is here."),
+            "whitespace-only replacement deletes": ("Troy, you know, is here.", "Troy, is here."),
+            "inside a word is untouched": ("Gumball umbrella.", "Gumball umbrella.")
+        ]
+        for (name, tc) in tests {
+            XCTAssertEqual(
+                ReplacementWordsResolver.resolve(transcript: tc.transcript, entries: entries),
+                tc.want,
+                name
+            )
+        }
     }
 
     func testDuplicateTriggersCollapseToFirstReplacement() {

@@ -76,6 +76,10 @@ enum ReplacementWordsResolver {
     ///   substrings of larger words ("TroyBarnes").
     /// - Multi-word triggers are supported.
     /// - Replacement output is literal, exactly as typed.
+    /// - An empty replacement deletes the phrase and tidies what it leaves
+    ///   behind: the doubled space, a dangling comma, and the capital of a
+    ///   sentence it used to start ("Um, the build passed." becomes "The
+    ///   build passed.").
     ///
     /// The transcript is scanned left-to-right in a single pass. At each
     /// position the longest matching trigger wins. Matched spans are emitted
@@ -87,31 +91,110 @@ enum ReplacementWordsResolver {
 
         var output = String()
         output.reserveCapacity(transcript.count)
+        var capitalizeNext = false
         var scanIndex = transcript.startIndex
         let endIndex = transcript.endIndex
 
         while scanIndex < endIndex {
-            if let matchEnd = longestMatch(in: transcript, at: scanIndex, rules: rules) {
-                output += matchEnd.replacement
-                scanIndex = matchEnd.rangeUpperBound
-            } else {
-                output.append(transcript[scanIndex])
+            guard let match = longestMatch(in: transcript, at: scanIndex, rules: rules) else {
+                append(String(transcript[scanIndex]), to: &output, capitalizeNext: &capitalizeNext)
                 scanIndex = transcript.index(after: scanIndex)
+                continue
             }
+            guard match.replacement.isEmpty else {
+                append(match.replacement, to: &output, capitalizeNext: &capitalizeNext)
+                scanIndex = match.rangeUpperBound
+                continue
+            }
+            scanIndex = delete(
+                transcript[scanIndex ..< match.rangeUpperBound],
+                from: transcript,
+                output: &output,
+                capitalizeNext: &capitalizeNext
+            )
         }
         return output
     }
 
+    private static let horizontalWhitespace: Set<Character> = [" ", "\t"]
+    private static let clausePunctuation: Set<Character> = [".", "!", "?", ",", ";", ":"]
+    private static let sentenceEndings: Set<Character> = [".", "!", "?", "\n"]
+
+    /// Drops a matched phrase and returns where scanning resumes. At the start
+    /// of a sentence the phrase's trailing punctuation goes with it and its
+    /// capital passes to the next word. Mid-sentence it takes the space or
+    /// comma that would otherwise be left doubled or dangling.
+    private static func delete(
+        _ phrase: Substring,
+        from transcript: String,
+        output: inout String,
+        capitalizeNext: inout Bool
+    ) -> String.Index {
+        let afterPhrase = phrase.endIndex
+        let afterSpaces = transcript[afterPhrase...].firstIndex { !horizontalWhitespace.contains($0) } ?? transcript.endIndex
+        let endsLine = afterSpaces == transcript.endIndex || transcript[afterSpaces] == "\n"
+
+        if isAtSentenceStart(output) {
+            if phrase.first(where: \.isLetter)?.isUppercase == true {
+                capitalizeNext = true
+            }
+            let afterPunctuation = transcript[afterPhrase...].firstIndex { !clausePunctuation.contains($0) } ?? transcript.endIndex
+            let resume = transcript[afterPunctuation...].firstIndex { !horizontalWhitespace.contains($0) } ?? transcript.endIndex
+            if resume == transcript.endIndex || transcript[resume] == "\n" {
+                trimTrailingHorizontalWhitespace(&output)
+            }
+            return resume
+        }
+
+        let isFollowedByPunctuation = afterPhrase < transcript.endIndex && clausePunctuation.contains(transcript[afterPhrase])
+        if isFollowedByPunctuation || endsLine {
+            trimTrailingHorizontalWhitespace(&output)
+            if output.last == "," {
+                output.removeLast()
+            }
+            return endsLine ? afterSpaces : afterPhrase
+        }
+        if let last = output.last, horizontalWhitespace.contains(last) {
+            return afterSpaces
+        }
+        return afterPhrase
+    }
+
+    /// Appends `segment`, upper-casing its first letter when a deleted phrase
+    /// handed its sentence-start capital on.
+    private static func append(_ segment: String, to output: inout String, capitalizeNext: inout Bool) {
+        guard capitalizeNext,
+              let index = segment.firstIndex(where: { !$0.isWhitespace }) else {
+            output += segment
+            return
+        }
+        capitalizeNext = false
+        output += segment[..<index]
+        let character = segment[index]
+        output += character.isLowercase && isAtSentenceStart(output) ? character.uppercased() : String(character)
+        output += segment[segment.index(after: index)...]
+    }
+
+    private static func isAtSentenceStart(_ output: String) -> Bool {
+        guard let last = output.last(where: { !horizontalWhitespace.contains($0) }) else { return true }
+        return sentenceEndings.contains(last)
+    }
+
+    private static func trimTrailingHorizontalWhitespace(_ output: inout String) {
+        while let last = output.last, horizontalWhitespace.contains(last) {
+            output.removeLast()
+        }
+    }
+
     /// Builds the normalized rule list from entries. Triggers are trimmed and
-    /// lowercased; empty triggers and entries with an empty replacement are
-    /// dropped. Duplicate triggers (case-insensitive) collapse to the first
+    /// lowercased; empty triggers are dropped, and an empty replacement makes
+    /// a deletion rule. Duplicate triggers (case-insensitive) collapse to the first
     /// occurrence, preserving entry order so order/conflicts are predictable.
     private static func buildRules(from entries: [ReplacementEntry]) -> [Rule] {
         var rules: [Rule] = []
         var seen = Set<String>()
         for entry in entries {
             let replacement = entry.replacement.trimmingCharacters(in: .whitespacesAndNewlines)
-            guard !replacement.isEmpty else { continue }
             for trigger in entry.triggers {
                 let normalized = trigger.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
                 guard !normalized.isEmpty, seen.insert(normalized).inserted else { continue }

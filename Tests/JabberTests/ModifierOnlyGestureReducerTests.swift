@@ -45,14 +45,16 @@ final class ModifierOnlyGestureReducerTests: XCTestCase {
         XCTAssertFalse(g.otherKeyPressedDuringModifier)
     }
 
-    func testOtherKeyAfterStartIsIgnoredButKeyUpStillStops() {
+    func testOtherKeyAfterStartDiscardsOnceButKeyUpStillStops() {
         var g = ModifierOnlyGestureReducer()
 
         XCTAssertEqual(g.handle(.modifierDown), .scheduleStart)
         XCTAssertEqual(g.handle(.debounceElapsed), .fireDown)
         XCTAssertEqual(g.state, .active)
 
-        // Another key while recording is active neither re-fires nor cancels.
+        // A combo typed after the start discards the recording once, then
+        // further keys are ignored.
+        XCTAssertEqual(g.handle(.otherKeyDown), .fireDiscard)
         XCTAssertEqual(g.handle(.otherKeyDown), .none)
         XCTAssertEqual(g.state, .active)
 

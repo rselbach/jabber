@@ -17,6 +17,9 @@ final class ModifierOnlyGestureMappingTests: XCTestCase {
         let leftOption = UInt32(kVK_Option)
         let fn = UInt32(kVK_Function)
         let alternate = CGEventFlags.maskAlternate
+        let leftOptionDevice = CGEventFlags(rawValue: 0x0020)
+        let rightOptionDevice = CGEventFlags(rawValue: 0x0040)
+        let leftCommandDevice = CGEventFlags(rawValue: 0x0008)
 
         struct Case {
             let name: String
@@ -83,10 +86,40 @@ final class ModifierOnlyGestureMappingTests: XCTestCase {
                 expected: nil
             ),
             .init(
-                name: "sibling event ignored even when active",
-                keyCode: leftOption, flags: alternate,
+                name: "sibling release while active ignored",
+                keyCode: leftOption, flags: [alternate, rightOptionDevice],
                 gestureState: .active, shortcutKeyCode: rightOption,
                 expected: nil
+            ),
+            .init(
+                name: "sibling press while active is a chord",
+                keyCode: leftOption, flags: [alternate, leftOptionDevice, rightOptionDevice],
+                gestureState: .active, shortcutKeyCode: rightOption,
+                expected: .otherKeyDown
+            ),
+            .init(
+                name: "other modifier press while pending is a chord",
+                keyCode: UInt32(kVK_Command), flags: [alternate, .maskCommand, leftCommandDevice, rightOptionDevice],
+                gestureState: .pending, shortcutKeyCode: rightOption,
+                expected: .otherKeyDown
+            ),
+            .init(
+                name: "other modifier release while active ignored",
+                keyCode: UInt32(kVK_Command), flags: [alternate, rightOptionDevice],
+                gestureState: .active, shortcutKeyCode: rightOption,
+                expected: nil
+            ),
+            .init(
+                name: "other modifier press without device bit ignored",
+                keyCode: UInt32(kVK_Command), flags: [alternate, .maskCommand],
+                gestureState: .active, shortcutKeyCode: rightOption,
+                expected: nil
+            ),
+            .init(
+                name: "Fn press while Right Option active is a chord",
+                keyCode: fn, flags: [alternate, .maskSecondaryFn, rightOptionDevice],
+                gestureState: .active, shortcutKeyCode: rightOption,
+                expected: .otherKeyDown
             ),
             .init(
                 name: "Fn press from idle",

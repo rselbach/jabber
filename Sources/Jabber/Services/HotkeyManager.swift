@@ -49,6 +49,9 @@ final class HotkeyManager: @unchecked Sendable {
 
     var onKeyDown: (@MainActor () -> Void)?
     var onKeyUp: (@MainActor () -> Void)?
+    /// Another key joined a held lone-modifier shortcut after it fired, so the
+    /// press was a combo rather than a dictation.
+    var onDiscard: (@MainActor () -> Void)?
     /// Escape was pressed while the cancel key was registered.
     var onCancelKey: (@MainActor () -> Void)?
     var onRegistrationFailure: (@MainActor (OSStatus) -> Void)? {
@@ -504,11 +507,12 @@ final class HotkeyManager: @unchecked Sendable {
         case .keyDown:
             // Modifier keys surface as flagsChanged, not keyDown; any other
             // key-down while the modifier is held means the user is typing a
-            // combo (e.g. Option+E), so we cancel the pending start.
+            // combo (e.g. Option+E), so we cancel the pending start, or
+            // discard the recording if it already started.
             guard !HotkeyShortcut.modifierOnlyKeyCodes.contains(keyCode) else {
                 return Unmanaged.passUnretained(event)
             }
-            logger.debug("Event tap keyDown keyCode=\(keyCode) (combo typing; cancelling pending modifier-only start)")
+            logger.debug("Event tap keyDown keyCode=\(keyCode) (combo typing; cancelling modifier-only gesture)")
             feed(.otherKeyDown)
 
         default:
@@ -579,6 +583,9 @@ final class HotkeyManager: @unchecked Sendable {
         case .fireUp:
             logger.info("Modifier-only gesture fired: onKeyUp")
             Self.deliverToMain { self.onKeyUp?() }
+        case .fireDiscard:
+            logger.info("Modifier-only gesture fired: onDiscard")
+            Self.deliverToMain { self.onDiscard?() }
         case .scheduleStart, .cancelStart, .none:
             break
         }
@@ -692,9 +699,13 @@ private extension OSType {
 /// - If the modifier is released while pending, the start is cancelled
 ///   (`cancelStart`, or `.none` if another key already cancelled it); nothing
 ///   fires.
-/// - Once active, a non-modifier key press is ignored (no re-fire); releasing
-///   the modifier still asks the caller to fire `onKeyUp` (`fireUp`) so the
-///   existing activation modes (hold / automatic push-to-talk) keep working.
+/// - Once active, the first other key press asks the caller to discard the
+///   recording (`fireDiscard`): the user was typing a combo, not dictating,
+///   and only held the modifier a little long. Releasing the modifier still
+///   asks the caller to fire `onKeyUp` (`fireUp`) so the existing activation
+///   modes (hold / automatic push-to-talk) keep working.
+/// - Another modifier pressed while the configured one is held counts as an
+///   other key, so a lone-modifier shortcut never fires inside a chord.
 struct ModifierOnlyGestureReducer: Sendable, Equatable {
     enum State: Sendable, Equatable {
         case idle
@@ -708,6 +719,7 @@ struct ModifierOnlyGestureReducer: Sendable, Equatable {
         case cancelStart
         case fireDown
         case fireUp
+        case fireDiscard
     }
 
     enum Input: Sendable, Equatable {
@@ -778,9 +790,11 @@ struct ModifierOnlyGestureReducer: Sendable, Equatable {
                 otherKeyPressedDuringModifier = true
                 return .cancelStart
             case .active:
-                // Already recording: ignore (no re-fire).
+                // Recording started, but the user is typing a combo: discard
+                // it once, then ignore further keys (no re-fire).
+                let isFirstOtherKey = !otherKeyPressedDuringModifier
                 otherKeyPressedDuringModifier = true
-                return .none
+                return isFirstOtherKey ? .fireDiscard : .none
             case .idle:
                 return .none
             }
@@ -831,17 +845,23 @@ struct ModifierOnlyGestureReducer: Sendable, Equatable {
     ///   sibling keeps the family flag high → `.modifierUp`.
     /// - Family flag cleared → the configured key (and any sibling) is up →
     ///   `.modifierUp`.
-    /// - Event for any key code other than the configured one (e.g. a sibling
-    ///   modifier) → `nil` (ignored).
+    /// - Press of another modifier (a sibling included) while the configured
+    ///   key is tracked down → `.otherKeyDown`, so the gesture treats the
+    ///   chord like combo typing. A press is told from a release by the
+    ///   event's per-side device bit, since the family flag stays high while
+    ///   a sibling is held.
+    /// - Any other event for another key code → `nil` (ignored).
     static func input(
         forFlagsChanged keyCode: UInt32,
         flags: CGEventFlags,
         shortcutKeyCode: UInt32,
         gestureState: State
     ) -> Input? {
-        // Only the configured physical key drives the gesture; sibling-modifier
-        // events (e.g. Left Option when Right Option is configured) are ignored.
-        guard keyCode == shortcutKeyCode, let familyFlag = HotkeyShortcut.cgEventFlag(forKeyCode: keyCode) else {
+        guard keyCode == shortcutKeyCode else {
+            guard gestureState != .idle, isPress(ofModifier: keyCode, flags: flags) else { return nil }
+            return .otherKeyDown
+        }
+        guard let familyFlag = HotkeyShortcut.cgEventFlag(forKeyCode: keyCode) else {
             return nil
         }
 
@@ -856,6 +876,33 @@ struct ModifierOnlyGestureReducer: Sendable, Equatable {
         // already tracked down: a key cannot press twice, so the latter is the
         // configured-side release with a sibling still holding the family flag.
         return .modifierUp
+    }
+
+    /// Per-side device bits CoreGraphics sets in `CGEventFlags` alongside
+    /// the family flag (IOKit's `NX_DEVICE*KEYMASK`).
+    private static func deviceFlagMask(forKeyCode keyCode: UInt32) -> UInt64? {
+        switch keyCode {
+        case UInt32(kVK_Control): return 0x0001
+        case UInt32(kVK_Shift): return 0x0002
+        case UInt32(kVK_RightShift): return 0x0004
+        case UInt32(kVK_Command): return 0x0008
+        case UInt32(kVK_RightCommand): return 0x0010
+        case UInt32(kVK_Option): return 0x0020
+        case UInt32(kVK_RightOption): return 0x0040
+        case UInt32(kVK_RightControl): return 0x2000
+        default: return nil
+        }
+    }
+
+    /// Whether a `flagsChanged` for modifier `keyCode` is its press. Fn has
+    /// no sides, so its family flag decides. Events without the device bit
+    /// read as releases, which leaves the gesture alone.
+    private static func isPress(ofModifier keyCode: UInt32, flags: CGEventFlags) -> Bool {
+        if let mask = deviceFlagMask(forKeyCode: keyCode) {
+            return flags.rawValue & mask != 0
+        }
+        guard keyCode == UInt32(kVK_Function) else { return false }
+        return flags.contains(.maskSecondaryFn)
     }
 }
 

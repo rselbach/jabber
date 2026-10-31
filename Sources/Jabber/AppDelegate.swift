@@ -638,6 +638,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             self?.handleHotkeyUpEvent()
         }
 
+        hotkeyManager.onDiscard = { [weak self] in
+            self?.discardDictationFromHotkeyCombo()
+        }
+
         hotkeyManager.onCancelKey = { [weak self] in
             self?.cancelDictationFromUser()
         }
@@ -982,6 +986,30 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         guard !dictationCoordinator.isIdle else { return }
         logger.notice("Dictation cancelled by the user")
         dictationCoordinator.cancel()
+    }
+
+    /// Another key joined the held lone-modifier shortcut: the user was
+    /// typing a combo, so a recording this press started is dropped. A
+    /// recording latched hands-free by an earlier press keeps going.
+    private func discardDictationFromHotkeyCombo() {
+        let startedByThisPress: Bool
+        switch activeHotkeyPressMode {
+        case .hold:
+            startedByThisPress = true
+        case .automatic:
+            startedByThisPress = automaticHotkeyPressStartedRecording
+            automaticHotkeyPressStartedRecording = false
+        case .toggle, nil:
+            startedByThisPress = false
+        }
+        guard startedByThisPress else { return }
+
+        if dictationCoordinator.isRecording {
+            logger.notice("Discarded a dictation: another key joined the held shortcut")
+            dictationCoordinator.cancel()
+        } else if let pendingID = pendingHotkeyStartID {
+            abortedHotkeyPressIDs.insert(pendingID)
+        }
     }
 
     private func stopOrAbortDictationFromHotkey() {

@@ -83,6 +83,8 @@ final class OpenRouterPostProcessorTests: XCTestCase {
         XCTAssertEqual(json["model"] as? String, "~anthropic/claude-haiku-latest")
         XCTAssertEqual(json["stream"] as? Bool, false)
         XCTAssertEqual(json["temperature"] as? Int, 0)
+        XCTAssertEqual((json["reasoning"] as? [String: Any])?["effort"] as? String, "none")
+        XCTAssertEqual((json["provider"] as? [String: Any])?["sort"] as? String, "latency")
 
         let messages = try XCTUnwrap(json["messages"] as? [[String: Any]])
         XCTAssertEqual(messages.count, 2)
@@ -321,6 +323,9 @@ final class OpenCodeZenPostProcessorTests: XCTestCase {
         XCTAssertEqual(json["model"] as? String, "minimax-m3")
         XCTAssertEqual(json["stream"] as? Bool, false)
         XCTAssertEqual(json["temperature"] as? Int, 0)
+        XCTAssertNil(json["reasoning_effort"], "MiniMax M3 has no documented effort field on Zen")
+        XCTAssertNil(json["reasoning"], "the reasoning object is OpenRouter's, not Zen's")
+        XCTAssertNil(json["provider"], "provider routing is OpenRouter's, not Zen's")
 
         let messages = try XCTUnwrap(json["messages"] as? [[String: Any]])
         XCTAssertEqual(messages.count, 2)
@@ -345,6 +350,23 @@ final class OpenCodeZenPostProcessorTests: XCTestCase {
         let body = try XCTUnwrap(captured.requests.first?.httpBody)
         let json = try XCTUnwrap(try JSONSerialization.jsonObject(with: body) as? [String: Any])
         XCTAssertEqual(json["model"] as? String, OpenCodeZenModelCatalog.defaultModelId)
+    }
+
+    func testSendsTheModelsReasoningEffort() async throws {
+        let captured = RequestCapture()
+        let provider = OpenCodeZenPostProcessor(
+            apiKey: testKey,
+            modelId: "mistral-large-4",
+            transport: captured.transportReturning(
+                body: #"{"choices":[{"message":{"content":"ok"}}]}"#
+            )
+        )
+
+        _ = try await provider.process("six seasons and a movie")
+
+        let body = try XCTUnwrap(captured.requests.first?.httpBody)
+        let json = try XCTUnwrap(try JSONSerialization.jsonObject(with: body) as? [String: Any])
+        XCTAssertEqual(json["reasoning_effort"] as? String, "none")
     }
 
     func testMissingKeyUsesZenSpecificError() async {

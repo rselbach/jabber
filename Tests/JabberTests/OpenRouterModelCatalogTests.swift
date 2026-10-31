@@ -28,16 +28,22 @@ final class OpenRouterModelCatalogTests: XCTestCase {
         let byId = Dictionary(uniqueKeysWithValues: OpenRouterModelCatalog.models.map { ($0.id, $0.displayName) })
         XCTAssertEqual(byId["~openai/gpt-luna-latest"], "GPT Luna (latest)")
         XCTAssertEqual(byId["~anthropic/claude-haiku-latest"], "Claude Haiku (latest)")
-        XCTAssertEqual(byId["~google/gemini-flash-latest"], "Gemini Flash (latest)")
+        XCTAssertEqual(byId["google/gemini-3.1-flash-lite"], "Gemini Flash Lite")
     }
 
-    func testEverySlugIsALatestAlias() {
-        // Aliases keep the catalog current without a code change; a pinned slug
-        // would silently rot whenever the vendor ships a successor.
+    func testEveryModelTurnsReasoningOff() {
+        // All three accept effort "none" per OpenRouter's model metadata, and
+        // cleanup gains nothing from waiting on a model to think.
         for model in OpenRouterModelCatalog.models {
-            XCTAssertTrue(model.id.hasPrefix("~"), "\(model.id) should be a ~ alias")
-            XCTAssertTrue(model.id.hasSuffix("-latest"), "\(model.id) should be a -latest alias")
+            XCTAssertEqual(model.reasoningEffort, .off, "\(model.id) should not reason")
         }
+    }
+
+    func testReplacedSlugResolvesToItsReplacement() {
+        XCTAssertEqual(
+            OpenRouterModelCatalog.resolveModelId("~google/gemini-flash-latest"),
+            "google/gemini-3.1-flash-lite"
+        )
     }
 
     func testModelForUnknownIdReturnsNil() {
@@ -78,12 +84,22 @@ final class OpenCodeZenModelCatalogTests: XCTestCase {
         let byId = Dictionary(uniqueKeysWithValues: OpenCodeZenModelCatalog.models.map { ($0.id, $0.displayName) })
         XCTAssertEqual(byId["deepseek-v4.1-flash"], "DeepSeek V4.1 Flash")
         XCTAssertEqual(byId["minimax-m3"], "MiniMax M3")
-        XCTAssertEqual(byId["glm-5.3"], "GLM 5.3")
+        XCTAssertEqual(byId["mistral-large-4"], "Mistral Large 4")
+    }
+
+    func testReasoningEffortsMatchZenMetadata() throws {
+        // DeepSeek's lowest documented effort is low, Mistral accepts none,
+        // and MiniMax documents only a toggle with no request field.
+        XCTAssertEqual(OpenCodeZenModelCatalog.model(forId: "deepseek-v4.1-flash")?.reasoningEffort, .low)
+        XCTAssertEqual(OpenCodeZenModelCatalog.model(forId: "mistral-large-4")?.reasoningEffort, .off)
+        let minimax = try XCTUnwrap(OpenCodeZenModelCatalog.model(forId: "minimax-m3"))
+        XCTAssertNil(minimax.reasoningEffort)
     }
 
     func testResolution() {
         XCTAssertEqual(OpenCodeZenModelCatalog.resolveModelId(nil), OpenCodeZenModelCatalog.defaultModelId)
         XCTAssertEqual(OpenCodeZenModelCatalog.resolveModelId("gpt-5.4-mini"), OpenCodeZenModelCatalog.defaultModelId)
+        XCTAssertEqual(OpenCodeZenModelCatalog.resolveModelId("glm-5.3"), OpenCodeZenModelCatalog.defaultModelId)
         XCTAssertEqual(OpenCodeZenModelCatalog.resolveModelId("minimax-m3"), "minimax-m3")
     }
 }

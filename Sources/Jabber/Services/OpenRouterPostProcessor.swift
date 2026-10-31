@@ -80,7 +80,8 @@ private enum OpenAICompatiblePostProcessingError: Error {
 
 /// Shared non-streaming Chat Completions request/response implementation used
 /// by OpenRouter and OpenCode Zen. Provider wrappers own credential checks,
-/// model allowlists, attribution headers, and user-facing error names.
+/// model allowlists, attribution headers, gateway-specific body fields such as
+/// reasoning controls, and user-facing error names.
 private struct OpenAICompatiblePostProcessingClient: Sendable {
     private static let maxHttpFailureMessageLength = 200
 
@@ -88,6 +89,8 @@ private struct OpenAICompatiblePostProcessingClient: Sendable {
     let apiKey: String
     let modelId: String
     let additionalHeaders: [String: String]
+    /// Top-level JSON fields merged into the request body.
+    let additionalBodyFields: [String: any Sendable]
     let requestTimeout: TimeInterval
     let transport: @Sendable (URLRequest) async throws -> (Data, URLResponse)
 
@@ -100,7 +103,7 @@ private struct OpenAICompatiblePostProcessingClient: Sendable {
             request.setValue(value, forHTTPHeaderField: field)
         }
 
-        let body: [String: Any] = [
+        var body: [String: Any] = [
             "model": modelId,
             "messages": [
                 ["role": "system", "content": AppleIntelligencePostProcessor.instructions],
@@ -109,6 +112,7 @@ private struct OpenAICompatiblePostProcessingClient: Sendable {
             "stream": false,
             "temperature": 0
         ]
+        body.merge(additionalBodyFields) { _, additional in additional }
         request.httpBody = try JSONSerialization.data(withJSONObject: body)
 
         let data: Data
@@ -187,7 +191,9 @@ private struct OpenAICompatiblePostProcessingClient: Sendable {
 ///     {"role":"user","content":"<raw transcript>"}
 ///   ],
 ///   "stream": false,
-///   "temperature": 0
+///   "temperature": 0,
+///   "reasoning": {"effort": "<catalog effort>"},
+///   "provider": {"sort": "latency"}
 /// }
 /// ```
 /// Response: `choices[0].message.content` is returned verbatim. An empty/whitespace
@@ -214,7 +220,7 @@ struct OpenRouterPostProcessor: PostProcessingProvider {
     }()
 
     let apiKey: String
-    let modelId: String
+    let model: OpenRouterModelCatalog.Model
     let transport: @Sendable (URLRequest) async throws -> (Data, URLResponse)
 
     /// - Parameters:
@@ -230,7 +236,7 @@ struct OpenRouterPostProcessor: PostProcessingProvider {
         }
     ) {
         self.apiKey = apiKey
-        self.modelId = OpenRouterModelCatalog.resolveModelId(modelId)
+        model = OpenRouterModelCatalog.resolveModel(modelId)
         self.transport = transport
     }
 
@@ -251,10 +257,17 @@ struct OpenRouterPostProcessor: PostProcessingProvider {
             return try await OpenAICompatiblePostProcessingClient(
                 endpoint: Self.endpoint,
                 apiKey: apiKey,
-                modelId: modelId,
+                modelId: model.id,
                 additionalHeaders: [
                     "X-Title": "Jabber",
                     "HTTP-Referer": "https://rselbach.github.io/jabber/"
+                ],
+                additionalBodyFields: [
+                    "reasoning": ["effort": model.reasoningEffort.rawValue],
+                    // Someone is waiting to see their dictation, so take the
+                    // provider answering fastest over OpenRouter's
+                    // price-weighted default.
+                    "provider": ["sort": "latency"]
                 ],
                 requestTimeout: Self.requestTimeout,
                 transport: transport
@@ -281,10 +294,11 @@ private extension OpenRouterPostProcessingError {
 }
 
 /// OpenCode Zen-backed transcript refinement using Zen's OpenAI-compatible
-/// Chat Completions endpoint. The model catalog only includes IDs documented
-/// for this endpoint; other Zen model families use incompatible protocols.
+/// Chat Completions endpoint. The model catalog only includes models whose
+/// native API is this endpoint. Zen is now branded OpenCode Console; this is
+/// its documented pay-as-you-go base URL.
 struct OpenCodeZenPostProcessor: PostProcessingProvider {
-    static let endpoint = URL(string: "https://opencode.ai/zen/v1/chat/completions")!
+    static let endpoint = URL(string: "https://opencode.ai/inference/openai/v1/chat/completions")!
     static let requestTimeout: TimeInterval = 60
 
     private static let defaultSession: URLSession = {
@@ -295,7 +309,7 @@ struct OpenCodeZenPostProcessor: PostProcessingProvider {
     }()
 
     let apiKey: String
-    let modelId: String
+    let model: OpenCodeZenModelCatalog.Model
     let transport: @Sendable (URLRequest) async throws -> (Data, URLResponse)
 
     init(
@@ -306,7 +320,7 @@ struct OpenCodeZenPostProcessor: PostProcessingProvider {
         }
     ) {
         self.apiKey = apiKey
-        self.modelId = OpenCodeZenModelCatalog.resolveModelId(modelId)
+        model = OpenCodeZenModelCatalog.resolveModel(modelId)
         self.transport = transport
     }
 
@@ -327,8 +341,9 @@ struct OpenCodeZenPostProcessor: PostProcessingProvider {
             return try await OpenAICompatiblePostProcessingClient(
                 endpoint: Self.endpoint,
                 apiKey: apiKey,
-                modelId: modelId,
+                modelId: model.id,
                 additionalHeaders: [:],
+                additionalBodyFields: model.reasoningEffort.map { ["reasoning_effort": $0.rawValue] } ?? [:],
                 requestTimeout: Self.requestTimeout,
                 transport: transport
             ).process(transcript)

@@ -105,6 +105,14 @@ final class TypedSettingsTests: XCTestCase {
         XCTAssertEqual(userDefaults.string(forKey: AppSettingKey.openRouterModel), OpenRouterModelCatalog.defaultModelId)
     }
 
+    func testReplacedStoredOpenRouterModelMigratesToItsReplacement() {
+        userDefaults.set("~google/gemini-flash-latest", forKey: AppSettingKey.openRouterModel)
+
+        settings.migrateStoredValues()
+
+        XCTAssertEqual(userDefaults.string(forKey: AppSettingKey.openRouterModel), "google/gemini-3.1-flash-lite")
+    }
+
     func testOpenCodeZenModelDefaultsAndPersistence() {
         XCTAssertEqual(settings[.openCodeZenModel], OpenCodeZenModelCatalog.defaultModelId)
         XCTAssertFalse(settings.isSet(.openCodeZenModel))

@@ -3,6 +3,9 @@ import Foundation
 enum AppSettingKey {
     static let selectedModel = "selectedModel"
     static let selectedLanguage = "selectedLanguage"
+    /// Comma-separated language codes behind the status menu's Language
+    /// submenu, most recent first.
+    static let recentLanguages = "recentLanguages"
     static let inputDeviceUID = "inputDeviceUID"
     static let outputMode = "outputMode"
     static let hotkeyKeyCode = "hotkeyKeyCode"

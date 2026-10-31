@@ -19,6 +19,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var retryModelLoadItem: NSMenuItem?
     /// Shown only while macOS withholds a permission dictation needs.
     private var fixPermissionsItem: NSMenuItem?
+    /// Recent languages; rebuilt on every menu open.
+    private var languageItem: NSMenuItem?
     private var currentAppState: AppState = .ready
     /// Download or load progress shown in the icon and menu header, when known.
     private var currentProgress: Double?
@@ -455,6 +457,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         retryModelLoadItem = retryLoadItem
         let fixItem = NSMenuItem(title: "Fix Permissions…", action: #selector(openSettings), keyEquivalent: "")
         fixPermissionsItem = fixItem
+        let languageItem = NSMenuItem(title: "Language", action: nil, keyEquivalent: "")
+        languageItem.submenu = NSMenu()
+        self.languageItem = languageItem
         let openItem = NSMenuItem(title: "Open Jabber", action: #selector(openJabber), keyEquivalent: "")
         let settingsItem = NSMenuItem(title: "Settings…", action: #selector(openSettings), keyEquivalent: ",")
         let updatesItem = NSMenuItem(title: "Check for Updates…", action: #selector(checkForUpdates), keyEquivalent: "")
@@ -467,10 +472,66 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // statusHeaderItem has no action either, so autoenablesItems keeps it disabled.
 
         menu.items = [statusHeaderItem, fixItem, toggleItem, lastItem, recentItem, retryItem, discardItem, retryLoadItem,
+                      .separator(), languageItem,
                       .separator(), openItem, settingsItem, .separator(), updatesItem, .separator(), quitItem]
         menu.delegate = self
         applyStatusMenuState(currentStatusMenuState())
+        refreshLanguageMenu()
         return menu
+    }
+
+    /// Lists the recent languages, remembering the current one so a language
+    /// picked in Settings shows up too.
+    private func refreshLanguageMenu() {
+        let current = TypedSettings[.selectedLanguage]
+        let recents = LanguageMenu.recentLanguages(adding: current, to: TypedSettings[.recentLanguages])
+        TypedSettings[.recentLanguages] = LanguageMenu.encode(recents)
+
+        var items = LanguageMenu.items(recentLanguages: recents, current: current).map { item in
+            let menuItem = NSMenuItem(title: item.title, action: #selector(selectLanguage(_:)), keyEquivalent: "")
+            menuItem.target = self
+            menuItem.representedObject = item.code
+            menuItem.state = item.isSelected ? .on : .off
+            return menuItem
+        }
+        let otherItem = NSMenuItem(title: "Other Language…", action: #selector(openSpeechSettings), keyEquivalent: "")
+        otherItem.target = self
+        items.append(.separator())
+        items.append(otherItem)
+        languageItem?.submenu?.items = items
+        languageItem?.subtitle = LanguageMenu.displayName(for: current)
+    }
+
+    /// Switches language, and the model too when the current one can't
+    /// transcribe it. Without a downloaded model for the language, Speech
+    /// settings opens on it so the user can download one.
+    @objc private func selectLanguage(_ sender: NSMenuItem) {
+        guard let code = sender.representedObject as? String, dictationCoordinator.isIdle else { return }
+        TypedSettings[.selectedLanguage] = code
+        TypedSettings[.recentLanguages] = LanguageMenu.encode(
+            LanguageMenu.recentLanguages(adding: code, to: TypedSettings[.recentLanguages])
+        )
+
+        let modelManager = ModelManager.shared
+        guard let modelId = LanguageMenu.modelId(
+            for: code,
+            currentModelId: modelManager.selectedModelId(),
+            downloadedModelIds: Set(modelManager.downloadedModels.map(\.id))
+        ) else {
+            openSpeechSettings()
+            return
+        }
+        // A no-op when the current model already covers the language.
+        _ = modelManager.selectModel(modelId)
+    }
+
+    @objc private func openSpeechSettings() {
+        showMainWindow(initialSection: .speech)
+        // Selects Speech when the window is already open; see openSettings.
+        NotificationCenter.default.post(
+            name: Constants.Notifications.mainWindowSectionDidRequest,
+            object: MainWindowView.Section.speech
+        )
     }
 
     private func currentStatusMenuState() -> StatusMenuState {
@@ -1743,6 +1804,7 @@ extension AppDelegate: NSMenuDelegate {
     func menuWillOpen(_ menu: NSMenu) {
         refreshStatusIcon()
         applyStatusMenuState(currentStatusMenuState())
+        refreshLanguageMenu()
     }
 }
 
@@ -1764,6 +1826,10 @@ extension AppDelegate: NSMenuItemValidation {
         }
         if item.action == #selector(deliverRecentTranscript(_:)) {
             return currentStatusMenuState().canDeliverRecentTranscripts
+        }
+        if item.action == #selector(selectLanguage(_:)) {
+            // Switching mid-session would change the model under it.
+            return dictationCoordinator.isIdle
         }
         return true
     }

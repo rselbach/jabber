@@ -30,7 +30,7 @@ final class ParakeetASRProvider: TranscriptionProvider, @unchecked Sendable {
     nonisolated static func modelVersion(for modelId: String) -> AsrModelVersion {
         switch modelId {
         case AppMode.parakeetMultilingualModelId:
-            return .v3
+            return .ultra
         case AppMode.parakeetJapaneseModelId:
             return .tdtJa
         default:
@@ -39,7 +39,7 @@ final class ParakeetASRProvider: TranscriptionProvider, @unchecked Sendable {
     }
 
     /// Maps a Jabber language code onto FluidAudio's hint, which drives
-    /// script-aware token filtering on v3 — it suppresses Cyrillic candidates
+    /// script-aware token filtering on Ultra — it suppresses Cyrillic candidates
     /// while transcribing Polish, and Latin ones while transcribing Russian.
     /// Nil for auto-detect, for languages the model does not know, and for v2,
     /// which ignores the hint entirely.

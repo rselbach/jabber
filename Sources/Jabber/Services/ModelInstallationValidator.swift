@@ -56,7 +56,7 @@ enum ModelInstallationValidator {
         ]
     )
 
-    /// v3 ships its own joint graph, which computes the top-K outputs the
+    /// Ultra keeps v3's joint graph, which computes the top-K outputs the
     /// language hint filters on. The rest of the layout matches v2.
     static let parakeetMultilingualLayout = FolderLayout(
         files: ["parakeet_vocab.json"],

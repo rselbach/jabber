@@ -152,6 +152,32 @@ final class ModelManagerTests: XCTestCase {
         }
     }
 
+    func testMigrateRemovedParakeetV3ToUltra() {
+        settings[.selectedModel] = "parakeet-tdt-v3"
+        let migration = modelManager.migrateSelectedModelIfNeeded()
+        XCTAssertEqual(migration?.to, AppMode.parakeetMultilingualModelId)
+        XCTAssertEqual(settings[.selectedModel], "parakeet-tdt-v3", "Ultra still needs a download")
+    }
+
+    func testDownloadsOfRemovedModelsAreDeletedAtLaunch() throws {
+        let removed = ["parakeet-tdt-0.6b-v3", "parakeet-tdt-0.6b-v3-coreml"].map(fluidAudioFolder)
+        for folder in removed {
+            try createCompleteParakeetModelFolder(
+                at: folder,
+                layout: ModelInstallationValidator.parakeetMultilingualLayout
+            )
+        }
+        let kept = fluidAudioFolder("parakeet-tdt-0.6b-v2")
+        try createCompleteParakeetModelFolder(at: kept)
+
+        _ = ModelManager(settings: settings, cacheBaseURL: cacheBaseURL)
+
+        for folder in removed {
+            XCTAssertFalse(FileManager.default.fileExists(atPath: folder.path), folder.lastPathComponent)
+        }
+        XCTAssertTrue(FileManager.default.fileExists(atPath: kept.path))
+    }
+
     func testMigrateExperimentalQwenModelIds() {
         settings[.selectedModel] = "qwen3-asr-0.6b-mlx-4bit"
         XCTAssertNotNil(modelManager.migrateSelectedModelIfNeeded())

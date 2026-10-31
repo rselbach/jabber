@@ -34,7 +34,7 @@ enum LanguageModelCatalog {
     static func routes(for languageCode: String) -> [Route] {
         if languageCode == "auto" {
             // Apple Speech leads because it covers the most languages Jabber
-            // offers; Parakeet v3 needs the language named to pick a script.
+            // offers; Parakeet Ultra needs the language named to pick a script.
             return [
                 .init(modelId: AppMode.appleSpeechModelId, isRecommended: true),
                 .init(modelId: AppMode.parakeetMultilingualModelId, isRecommended: false),
@@ -44,7 +44,7 @@ enum LanguageModelCatalog {
         }
 
         if languageCode == "en" {
-            // v2 is English-only and more accurate on it than multilingual v3.
+            // v2 is English-only and more accurate on it than multilingual Ultra.
             return [
                 .init(modelId: AppMode.parakeetModelId, isRecommended: true),
                 .init(modelId: AppMode.parakeetMultilingualModelId, isRecommended: false),

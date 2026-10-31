@@ -76,7 +76,7 @@ final class ModelInstallationValidatorTests: XCTestCase {
         try createCoreMLBundle(named: "Preprocessor.mlmodelc")
         try createCoreMLBundle(named: "Encoder.mlmodelc")
         try createCoreMLBundle(named: "Decoder.mlmodelc")
-        // The v2 joint graph, which v3 cannot use.
+        // The v2 joint graph, which Ultra cannot use.
         try createCoreMLBundle(named: "JointDecision.mlmodelc")
 
         let layout = ModelInstallationValidator.parakeetLayout(for: AppMode.parakeetMultilingualModelId)

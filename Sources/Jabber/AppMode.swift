@@ -3,14 +3,15 @@ import Foundation
 
 enum AppMode {
     static let parakeetModelId = "parakeet-tdt-v2"
-    static let parakeetMultilingualModelId = "parakeet-tdt-v3"
+    static let parakeetMultilingualModelId = "parakeet-ultra"
     static let parakeetJapaneseModelId = "parakeet-ja"
     static let nemotronModelId = "nemotron"
     static let appleSpeechModelId = "apple-speech"
 
-    /// Languages Parakeet TDT v3 transcribes, from NVIDIA's model card. The
-    /// wider set is deliberate: it also names languages Jabber does not offer
-    /// yet, so adding one to `Constants.languages` routes to v3 for free.
+    /// Languages Parakeet Ultra transcribes: those of NVIDIA's Parakeet TDT v3,
+    /// which it was post-trained from. The wider set is deliberate: it also
+    /// names languages Jabber does not offer yet, so adding one to
+    /// `Constants.languages` routes to Ultra for free.
     static let parakeetMultilingualLanguageCodes: Set<String> = [
         "be", "bg", "bs", "cs", "da", "de", "el", "en", "es", "et", "fi", "fr",
         "hr", "hu", "it", "lt", "lv", "mt", "nl", "pl", "pt", "ro", "ru", "sk",
@@ -81,14 +82,14 @@ enum AppMode {
         .init(
             id: parakeetMultilingualModelId,
             family: .parakeetTDT,
-            source: .fluidAudio(.parakeetV3),
-            name: "Parakeet TDT v3",
-            description: "NVIDIA Parakeet TDT v3 — 25 European languages at v2's speed",
-            sizeHint: "~461MB",
+            source: .fluidAudio(.parakeetUltra),
+            name: "Parakeet Ultra",
+            description: "Moondream's retrained Parakeet v3 — 25 European languages, fewer errors at the same speed",
+            sizeHint: "~617MB",
             supportedLanguageCodes: parakeetMultilingualLanguageCodes,
             license: "CC BY 4.0",
             licenseUrl: "https://creativecommons.org/licenses/by/4.0/",
-            attribution: "Parakeet TDT 0.6B v3 by NVIDIA; CoreML conversion by FluidInference"
+            attribution: "Parakeet Ultra by Moondream, post-trained from NVIDIA Parakeet TDT 0.6B v3; CoreML conversion by FluidInference"
         ),
         .init(
             id: parakeetJapaneseModelId,

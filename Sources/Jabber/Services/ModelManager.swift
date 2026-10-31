@@ -38,7 +38,8 @@ final class ModelManager {
         "qwen3-asr-0.6b-mlx-4bit": AppMode.parakeetModelId,
         "qwen3-asr-0.6b-mlx-8bit": AppMode.parakeetModelId,
         "qwen3-asr-1.7b-mlx-4bit": AppMode.parakeetModelId,
-        "qwen3-asr-1.7b-mlx-8bit": AppMode.parakeetModelId
+        "qwen3-asr-1.7b-mlx-8bit": AppMode.parakeetModelId,
+        "parakeet-tdt-v3": AppMode.parakeetMultilingualModelId
     ]
 
     struct Model: Identifiable {
@@ -92,6 +93,7 @@ final class ModelManager {
         self.settings = settings
         self.cacheBaseURL = cacheBaseURL
         consolidateLegacyDownloads()
+        removeDownloadsOfRemovedModels()
         migrateSelectedModelIfNeeded()
         refreshModels()
     }
@@ -664,6 +666,27 @@ final class ModelManager {
                 }
             } catch {
                 logger.error("Failed to consolidate \(def.id) downloads at \(legacy.path): \(error.localizedDescription)")
+            }
+        }
+    }
+
+    /// Download folders of models an update removed, relative to the cache
+    /// base. Nothing can load them any more.
+    private static let removedModelFolders = [
+        "models/FluidInference/parakeet-tdt-0.6b-v3",
+        "models/FluidInference/parakeet-tdt-0.6b-v3-coreml"
+    ]
+
+    private func removeDownloadsOfRemovedModels() {
+        let fm = FileManager.default
+        for path in Self.removedModelFolders {
+            let folder = cacheBase().appendingPathComponent(path, isDirectory: true)
+            guard fm.fileExists(atPath: folder.path) else { continue }
+            do {
+                try fm.removeItem(at: folder)
+                logger.info("Removed download of a removed model at \(folder.path)")
+            } catch {
+                logger.error("Failed to remove download of a removed model at \(folder.path): \(error.localizedDescription)")
             }
         }
     }

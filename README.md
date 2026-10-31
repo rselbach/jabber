@@ -42,7 +42,7 @@ For a release build with signing:
 Model options are available in Jabber's main window (menu bar → **Open Jabber**, or **Cmd-,** while Jabber is active):
 
 - **Parakeet TDT v2** (~443MB) — fast, accurate English transcription on the Neural Engine
-- **Parakeet TDT v3** (~461MB) — the same speed for 25 European languages
+- **Parakeet Ultra** (~617MB) — Moondream's retrained Parakeet v3 for 25 European languages, more accurate at the same speed
 - **Parakeet Japanese** (~606MB) — Parakeet 0.6B tuned for Japanese
 - **Nemotron** (~600MB) — NVIDIA Nemotron Speech Streaming, English-only with native punctuation & capitalization
 - **Apple Speech** — built-in macOS 26 speech recognition, recommended for languages the Parakeet models don't cover
@@ -94,7 +94,7 @@ Jabber uses the following open-source models and libraries:
 | Model | Creator | License | Link |
 |-------|---------|---------|------|
 | Parakeet TDT 0.6B v2 | NVIDIA | [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/) | [huggingface.co/nvidia/parakeet-tdt-0.6b-v2](https://huggingface.co/nvidia/parakeet-tdt-0.6b-v2) |
-| Parakeet TDT 0.6B v3 | NVIDIA | [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/) | [huggingface.co/nvidia/parakeet-tdt-0.6b-v3](https://huggingface.co/nvidia/parakeet-tdt-0.6b-v3) |
+| Parakeet Ultra | Moondream, from NVIDIA's Parakeet TDT 0.6B v3 | [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/) | [huggingface.co/moondream/parakeet-ultra](https://huggingface.co/moondream/parakeet-ultra) |
 | Parakeet TDT-CTC 0.6B Japanese | NVIDIA | [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/) | [huggingface.co/nvidia/parakeet-tdt_ctc-0.6b-ja](https://huggingface.co/nvidia/parakeet-tdt_ctc-0.6b-ja) |
 | Nemotron Speech Streaming | NVIDIA | [OpenMDW-1.1](https://www.openmodeldefinition.org/) | [huggingface.co/nvidia/nemotron-speech-streaming-en-0.6b](https://huggingface.co/nvidia/nemotron-speech-streaming-en-0.6b) |
 | Apple Speech | Apple | [Apple SLA](https://www.apple.com/legal/sla/) | Built-in macOS 26 Speech framework |

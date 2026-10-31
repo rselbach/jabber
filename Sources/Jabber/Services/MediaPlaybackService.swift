@@ -178,7 +178,7 @@ final class MediaPlaybackService: MediaPlaybackProtocol {
         } catch is CancellationError {
             return false
         } catch {
-            logger.error("Failed while waiting to verify media pause: \(error.localizedDescription)")
+            logger.error("Failed while waiting to verify media pause: \(error.localizedDescription, privacy: .public)")
             return false
         }
     }

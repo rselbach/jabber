@@ -147,7 +147,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             do {
                 try await history.applyRetention(retention)
             } catch {
-                logger.error("Failed to expire dictation history: \(error.localizedDescription)")
+                logger.error("Failed to expire dictation history: \(error.localizedDescription, privacy: .public)")
             }
         }
     }
@@ -290,7 +290,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         } catch is CancellationError {
             return
         } catch {
-            logger.error("Failed to load model: \(error.localizedDescription)")
+            logger.error("Failed to load model: \(error.localizedDescription, privacy: .public)")
             modelState = .error(error.localizedDescription)
             syncNonDictationUI()
             showModelLoadError(error)
@@ -319,7 +319,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         case .notReady, .loading, .ready:
             syncNonDictationUI()
         case .error(let message):
-            logger.error("Model error: \(message)")
+            logger.error("Model error: \(message, privacy: .public)")
             syncNonDictationUI()
         }
     }
@@ -677,7 +677,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         dictationCoordinator.onTranscriptionError = { [weak self] error in
             guard let self else { return }
-            self.logger.error("Transcription failed: \(error.localizedDescription)")
+            self.logger.error("Transcription failed: \(error.localizedDescription, privacy: .public)")
             NotificationService.shared.showError(
                 title: "Transcription Failed",
                 message: "Jabber kept the recording. Choose Retry Failed Dictation from the menu bar icon to try again. Error: \(error.localizedDescription)",
@@ -691,7 +691,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         dictationCoordinator.onPostProcessingError = { [weak self] error in
             guard let self else { return }
-            self.logger.error("Post-processing failed: \(error.localizedDescription)")
+            self.logger.error("Post-processing failed: \(error.localizedDescription, privacy: .public)")
             self.showPostProcessingFailureNotice(error)
         }
 
@@ -778,7 +778,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 } catch is CancellationError {
                     return
                 } catch {
-                    self?.logger.error("Hotkey retry polling failed: \(error.localizedDescription)")
+                    self?.logger.error("Hotkey retry polling failed: \(error.localizedDescription, privacy: .public)")
                     return
                 }
 
@@ -977,7 +977,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             } catch is CancellationError {
                 return
             } catch {
-                self?.logger.error("Failed while waiting to show first-run setup: \(error.localizedDescription)")
+                self?.logger.error("Failed while waiting to show first-run setup: \(error.localizedDescription, privacy: .public)")
                 return
             }
 
@@ -1139,7 +1139,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             } catch is CancellationError {
                 return
             } catch {
-                self?.logger.error("Failed while waiting to present model migration: \(error.localizedDescription)")
+                self?.logger.error("Failed while waiting to present model migration: \(error.localizedDescription, privacy: .public)")
                 return
             }
             self?.presentModelMigrationNotice(notice)
@@ -1362,7 +1362,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func showAudioCaptureError(_ error: Error) {
-        logger.error("Audio capture error: \(error.localizedDescription)")
+        logger.error("Audio capture error: \(error.localizedDescription, privacy: .public)")
 
         if let captureError = error as? AudioCaptureError {
             switch captureError {

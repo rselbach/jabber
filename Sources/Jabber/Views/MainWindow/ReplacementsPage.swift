@@ -81,7 +81,7 @@ struct ReplacementsPage: View {
             } catch is CancellationError {
                 return
             } catch {
-                Self.logger.error("Replacement rules debounce failed: \(error.localizedDescription)")
+                Self.logger.error("Replacement rules debounce failed: \(error.localizedDescription, privacy: .public)")
                 return
             }
             guard !Task.isCancelled else { return }

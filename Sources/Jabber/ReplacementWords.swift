@@ -31,7 +31,7 @@ enum ReplacementEntriesCodec {
             let data = try JSONEncoder().encode(entries)
             return String(data: data, encoding: .utf8) ?? ""
         } catch {
-            logger.error("Failed to encode replacement entries: \(error.localizedDescription)")
+            logger.error("Failed to encode replacement entries: \(error.localizedDescription, privacy: .public)")
             return ""
         }
     }
@@ -46,7 +46,7 @@ enum ReplacementEntriesCodec {
         do {
             return try JSONDecoder().decode([ReplacementEntry].self, from: data)
         } catch {
-            logger.error("Failed to decode replacement entries, ignoring: \(error.localizedDescription)")
+            logger.error("Failed to decode replacement entries, ignoring: \(error.localizedDescription, privacy: .public)")
             return []
         }
     }

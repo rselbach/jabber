@@ -451,7 +451,7 @@ struct RoutedPostProcessor: PostProcessingProvider {
         do {
             return try OpenRouterKeychain.readKey() ?? ""
         } catch {
-            logger.error("OpenRouter API key read failed: \(error.localizedDescription)")
+            logger.error("OpenRouter API key read failed: \(error.localizedDescription, privacy: .public)")
             return ""
         }
     }
@@ -460,7 +460,7 @@ struct RoutedPostProcessor: PostProcessingProvider {
         do {
             return try OpenCodeZenKeychain.readKey() ?? ""
         } catch {
-            logger.error("OpenCode Zen API key read failed: \(error.localizedDescription)")
+            logger.error("OpenCode Zen API key read failed: \(error.localizedDescription, privacy: .public)")
             return ""
         }
     }

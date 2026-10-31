@@ -420,7 +420,7 @@ final class HotkeyManager: @unchecked Sendable {
         dispatchGesture(gestureAction)
 
         if let tap = reenableTap {
-            logger.warning("CGEventTap disabled by system (\(String(describing: type))); re-enabling (\(reenableCount) recent disable(s)). If this repeats, Accessibility permission is likely missing.")
+            logger.warning("CGEventTap disabled by system (\(String(describing: type), privacy: .public)); re-enabling (\(reenableCount) recent disable(s)). If this repeats, Accessibility permission is likely missing.")
             CGEvent.tapEnable(tap: tap, enable: true)
         } else if teardownTap != nil {
             if let tap = teardownTap {
@@ -432,7 +432,7 @@ final class HotkeyManager: @unchecked Sendable {
                 CFRunLoopRemoveSource(CFRunLoopGetMain(), source, .commonModes)
             }
             teardownDebounce?.cancel()
-            logger.error("CGEventTap repeatedly disabled by system (\(String(describing: type))); giving up re-enable after \(EventTapReenablePolicy.maxReenables) rapid disables. Accessibility permission was likely revoked.")
+            logger.error("CGEventTap repeatedly disabled by system (\(String(describing: type), privacy: .public)); giving up re-enable after \(EventTapReenablePolicy.maxReenables) rapid disables. Accessibility permission was likely revoked.")
             dispatchRegistrationFailure(OSStatus(eventNotHandledErr))
         }
         // `eventTapDead` already latched: the tap is gone, nothing left to do.
@@ -498,7 +498,7 @@ final class HotkeyManager: @unchecked Sendable {
             ) else {
                 return Unmanaged.passUnretained(event)
             }
-            logger.debug("Event tap flagsChanged keyCode=\(keyCode) gestureState=\(String(describing: gestureState)) input=\(String(describing: gestureInput))")
+            logger.debug("Event tap flagsChanged keyCode=\(keyCode) gestureState=\(String(describing: gestureState), privacy: .public) input=\(String(describing: gestureInput), privacy: .public)")
             feed(gestureInput)
 
         case .keyDown:

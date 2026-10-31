@@ -219,7 +219,7 @@ actor DictationHistoryStore: DictationHistoryProtocol {
         do {
             _ = try save(session, keepingAudio: preferences.keepsAudio, retention: preferences.retention)
         } catch {
-            logger.error("Failed to save dictation history: \(error.localizedDescription)")
+            logger.error("Failed to save dictation history: \(error.localizedDescription, privacy: .public)")
         }
     }
 
@@ -276,7 +276,7 @@ actor DictationHistoryStore: DictationHistoryProtocol {
             do {
                 try fileManager.removeItem(at: entryDirectoryURL)
             } catch {
-                logger.error("Failed to clean up partial dictation history entry at \(entryDirectoryURL.path): \(error.localizedDescription)")
+                logger.error("Failed to clean up partial dictation history entry at \(entryDirectoryURL.path, privacy: .public): \(error.localizedDescription, privacy: .public)")
             }
             throw error
         }
@@ -294,7 +294,7 @@ actor DictationHistoryStore: DictationHistoryProtocol {
         do {
             return try loadedEntries()
         } catch {
-            logger.error("Failed to load dictation history: \(error.localizedDescription)")
+            logger.error("Failed to load dictation history: \(error.localizedDescription, privacy: .public)")
             return []
         }
     }
@@ -371,7 +371,7 @@ actor DictationHistoryStore: DictationHistoryProtocol {
         do {
             try url.setResourceValues(values)
         } catch {
-            logger.error("Failed to exclude dictation history from backups: \(error.localizedDescription)")
+            logger.error("Failed to exclude dictation history from backups: \(error.localizedDescription, privacy: .public)")
         }
         isDirectoryPrepared = true
     }
@@ -430,12 +430,12 @@ actor DictationHistoryStore: DictationHistoryProtocol {
             // the rejected entry's directory when history first loads.
             guard Self.isSafePathComponent(entry.directoryName),
                   entry.audioFilename.map(Self.isSafePathComponent) ?? true else {
-                logger.error("Rejecting dictation history entry at \(metadataURL.path): unsafe directoryName '\(entry.directoryName)' or audioFilename")
+                logger.error("Rejecting dictation history entry at \(metadataURL.path, privacy: .public): unsafe directoryName '\(entry.directoryName, privacy: .public)' or audioFilename")
                 return nil
             }
             return entry
         } catch {
-            logger.error("Failed to read dictation history metadata at \(metadataURL.path): \(error.localizedDescription)")
+            logger.error("Failed to read dictation history metadata at \(metadataURL.path, privacy: .public): \(error.localizedDescription, privacy: .public)")
             return nil
         }
     }

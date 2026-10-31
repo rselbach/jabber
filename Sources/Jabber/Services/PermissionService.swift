@@ -100,11 +100,11 @@ final class PermissionService {
         for urlString in [targeted, fallback] {
             guard let url = URL(string: urlString) else { continue }
             if NSWorkspace.shared.open(url) {
-                logger.info("Opened privacy settings for \(section.rawValue)")
+                logger.info("Opened privacy settings for \(section.rawValue, privacy: .public)")
                 return
             }
         }
 
-        logger.error("Failed to open privacy settings for \(section.rawValue)")
+        logger.error("Failed to open privacy settings for \(section.rawValue, privacy: .public)")
     }
 }

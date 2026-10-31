@@ -141,10 +141,10 @@ final class ModelManager {
     private func applyMigration(from: String, to: String) -> Migration {
         let shouldPersist = !replacementNeedsDownload(to)
         if shouldPersist {
-            logger.info("Migrating selected model from '\(from)' to available replacement '\(to)'")
+            logger.info("Migrating selected model from '\(from, privacy: .public)' to available replacement '\(to, privacy: .public)'")
             settings[.selectedModel] = to
         } else {
-            logger.info("Selected model '\(from)' maps to replacement '\(to)'")
+            logger.info("Selected model '\(from, privacy: .public)' maps to replacement '\(to, privacy: .public)'")
         }
         let migration = Migration(from: from, to: to)
         lastMigration = migration
@@ -212,7 +212,7 @@ final class ModelManager {
     @discardableResult
     func startDownload(_ modelId: String) -> Bool {
         guard models.contains(where: { $0.id == modelId }) else {
-            logger.warning("Attempted to start download for non-existent model: \(modelId)")
+            logger.warning("Attempted to start download for non-existent model: \(modelId, privacy: .public)")
             return false
         }
 
@@ -258,7 +258,7 @@ final class ModelManager {
     @discardableResult
     func downloadModel(_ modelId: String) async throws -> URL {
         guard models.contains(where: { $0.id == modelId }) else {
-            logger.warning("Attempted to download non-existent model: \(modelId)")
+            logger.warning("Attempted to download non-existent model: \(modelId, privacy: .public)")
             throw ModelError.modelNotFound(modelId: modelId)
         }
 
@@ -292,7 +292,7 @@ final class ModelManager {
                 _ = try await task.value
             } catch is CancellationError {
             } catch {
-                self?.logger.error("Model download failed for \(modelId): \(error.localizedDescription)")
+                self?.logger.error("Model download failed for \(modelId, privacy: .public): \(error.localizedDescription, privacy: .public)")
             }
             self?.clearActiveDownload(modelId: modelId, downloadID: downloadID)
         }
@@ -428,7 +428,7 @@ final class ModelManager {
             do {
                 try fm.removeItem(at: modelPath)
             } catch {
-                logger.error("Failed to delete model folder for \(modelId) at \(modelPath.path): \(error.localizedDescription)")
+                logger.error("Failed to delete model folder for \(modelId, privacy: .public) at \(modelPath.path, privacy: .public): \(error.localizedDescription, privacy: .public)")
                 removalError = removalError ?? error
             }
         }
@@ -472,7 +472,7 @@ final class ModelManager {
             if validation.isComplete {
                 return folder
             }
-            logger.warning("Ignoring incomplete model folder at \(folder.path): \(validation.failureDescription)")
+            logger.warning("Ignoring incomplete model folder at \(folder.path, privacy: .public): \(validation.failureDescription, privacy: .public)")
         }
 
         return nil
@@ -516,7 +516,7 @@ final class ModelManager {
         do {
             folder = try downloadFolder(for: modelId)
         } catch {
-            logger.error("Could not resolve download folder for failed cleanup of \(modelId): \(error.localizedDescription)")
+            logger.error("Could not resolve download folder for failed cleanup of \(modelId, privacy: .public): \(error.localizedDescription, privacy: .public)")
             return
         }
 
@@ -532,15 +532,15 @@ final class ModelManager {
               folderPath.hasPrefix(cacheBasePath + "/"),
               folder.lastPathComponent != "models"
         else {
-            logger.error("Refusing to delete unsafe path during cleanup of \(modelId): \(folderPath)")
+            logger.error("Refusing to delete unsafe path during cleanup of \(modelId, privacy: .public): \(folderPath, privacy: .public)")
             return
         }
 
         do {
             try fm.removeItem(at: folder)
-            logger.info("Removed partial download folder for \(modelId) at \(folder.path)")
+            logger.info("Removed partial download folder for \(modelId, privacy: .public) at \(folder.path, privacy: .public)")
         } catch {
-            logger.error("Failed to remove partial download folder for \(modelId) at \(folder.path): \(error.localizedDescription)")
+            logger.error("Failed to remove partial download folder for \(modelId, privacy: .public) at \(folder.path, privacy: .public): \(error.localizedDescription, privacy: .public)")
         }
     }
 
@@ -638,13 +638,13 @@ final class ModelManager {
                         try fm.removeItem(at: current)
                     }
                     try fm.moveItem(at: legacy, to: current)
-                    logger.info("Moved \(def.id) download from \(legacy.path) to \(current.path)")
+                    logger.info("Moved \(def.id, privacy: .public) download from \(legacy.path, privacy: .public) to \(current.path, privacy: .public)")
                 } else {
                     try fm.removeItem(at: legacy)
-                    logger.info("Removed duplicate \(def.id) download at \(legacy.path)")
+                    logger.info("Removed duplicate \(def.id, privacy: .public) download at \(legacy.path, privacy: .public)")
                 }
             } catch {
-                logger.error("Failed to consolidate \(def.id) downloads at \(legacy.path): \(error.localizedDescription)")
+                logger.error("Failed to consolidate \(def.id, privacy: .public) downloads at \(legacy.path, privacy: .public): \(error.localizedDescription, privacy: .public)")
             }
         }
     }
@@ -665,9 +665,9 @@ final class ModelManager {
             guard fm.fileExists(atPath: folder.path) else { continue }
             do {
                 try fm.removeItem(at: folder)
-                logger.info("Removed download of a removed model at \(folder.path)")
+                logger.info("Removed download of a removed model at \(folder.path, privacy: .public)")
             } catch {
-                logger.error("Failed to remove download of a removed model at \(folder.path): \(error.localizedDescription)")
+                logger.error("Failed to remove download of a removed model at \(folder.path, privacy: .public): \(error.localizedDescription, privacy: .public)")
             }
         }
     }

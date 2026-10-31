@@ -55,7 +55,7 @@ final class NotificationService: NSObject {
 
         center.requestAuthorization(options: [.alert, .sound]) { granted, error in
             if let error {
-                logger.error("Failed to request notification authorization: \(error.localizedDescription)")
+                logger.error("Failed to request notification authorization: \(error.localizedDescription, privacy: .public)")
             }
             if !granted {
                 logger.info("Notification permission not granted, will use on-screen notices")
@@ -151,16 +151,16 @@ final class NotificationService: NSObject {
         do {
             try await center.add(request)
         } catch {
-            logger.error("Failed to show notification: \(error.localizedDescription)")
+            logger.error("Failed to show notification: \(error.localizedDescription, privacy: .public)")
         }
     }
 
     private func presentNotice(title: String, message: String) {
         guard let noticePresenter else {
-            logger.error("No on-screen notice presenter, dropping message: \(title)")
+            logger.error("No on-screen notice presenter, dropping message: \(title, privacy: .public)")
             return
         }
-        logger.info("Showing on-screen notice: \(title)")
+        logger.info("Showing on-screen notice: \(title, privacy: .public)")
         noticePresenter(title, message)
     }
 

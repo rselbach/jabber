@@ -38,7 +38,7 @@ enum GlobeKeyAction: Equatable {
     /// since the last read.
     static func current() -> GlobeKeyAction {
         if !CFPreferencesAppSynchronize(preferencesDomain as CFString) {
-            logger.error("Failed to synchronize \(preferencesDomain) preferences")
+            logger.error("Failed to synchronize \(preferencesDomain, privacy: .public) preferences")
         }
         let value = CFPreferencesCopyAppValue(usageTypeKey as CFString, preferencesDomain as CFString)
         return GlobeKeyAction(usageType: value as? Int)

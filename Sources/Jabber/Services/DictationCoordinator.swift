@@ -260,7 +260,7 @@ final class DictationCoordinator {
             scheduleRecordingLimit(sessionID: sessionID)
             return true
         } catch {
-            logger.error("Failed to start audio capture: \(error.localizedDescription)")
+            logger.error("Failed to start audio capture: \(error.localizedDescription, privacy: .public)")
             currentSessionID = nil
             currentTargetProcessID = nil
             mediaPlaybackService.resumeAfterDictationIfNeeded()
@@ -292,7 +292,7 @@ final class DictationCoordinator {
         }
 
         guard activity.start(sessionID) else {
-            logger.error("Could not mark transcription activity active for session \(sessionID.uuidString)")
+            logger.error("Could not mark transcription activity active for session \(sessionID.uuidString, privacy: .public)")
             finish(sessionID: sessionID)
             return
         }
@@ -323,7 +323,7 @@ final class DictationCoordinator {
 
         let sessionID = UUID()
         guard activity.start(sessionID) else {
-            logger.error("Could not mark transcription activity active for retry session \(sessionID.uuidString)")
+            logger.error("Could not mark transcription activity active for retry session \(sessionID.uuidString, privacy: .public)")
             return false
         }
 
@@ -428,7 +428,7 @@ final class DictationCoordinator {
                 } catch is CancellationError {
                     return
                 } catch {
-                    logger.error("Streaming preview stop timeout sleep failed: \(error.localizedDescription)")
+                    logger.error("Streaming preview stop timeout sleep failed: \(error.localizedDescription, privacy: .public)")
                     return
                 }
 
@@ -454,7 +454,7 @@ final class DictationCoordinator {
             } catch is CancellationError {
                 return
             } catch {
-                self?.logger.error("Recording limit sleep failed: \(error.localizedDescription)")
+                self?.logger.error("Recording limit sleep failed: \(error.localizedDescription, privacy: .public)")
                 return
             }
             guard !Task.isCancelled else { return }
@@ -494,7 +494,7 @@ final class DictationCoordinator {
             } catch is CancellationError {
                 break
             } catch {
-                logger.error("Streaming preview sleep failed: \(error.localizedDescription)")
+                logger.error("Streaming preview sleep failed: \(error.localizedDescription, privacy: .public)")
                 break
             }
         }
@@ -543,7 +543,7 @@ final class DictationCoordinator {
         } catch is CancellationError {
             // Expected when recording stops while a preview pass is in flight.
         } catch {
-            logger.warning("Streaming preview failed: \(error.localizedDescription)")
+            logger.warning("Streaming preview failed: \(error.localizedDescription, privacy: .public)")
         }
     }
 
@@ -672,7 +672,7 @@ final class DictationCoordinator {
         } catch is CancellationError {
             // Expected when cancel() is called.
         } catch {
-            logger.error("Transcription failed: \(error.localizedDescription)")
+            logger.error("Transcription failed: \(error.localizedDescription, privacy: .public)")
             guard currentSessionID == sessionID else { return }
             // Shares the buffer rather than copying it. Kept before reporting
             // so the error UI can rely on the retry being available.
@@ -790,7 +790,7 @@ final class DictationCoordinator {
             // dictated is rejected. Give Apple Intelligence one more chance —
             // it sometimes gets it right on a second pass — then fall back.
             if let firstError = PostProcessingValidator.suspiciousPostProcessingError(raw: rawTrimmed, processed: normalized) {
-                logger.notice("Post-processing rejected on first pass, retrying once: \(firstError.description)")
+                logger.notice("Post-processing rejected on first pass, retrying once: \(firstError.description, privacy: .public)")
                 return try await retryPostProcessing(
                     rawText: rawText,
                     rawTrimmed: rawTrimmed,
@@ -811,7 +811,7 @@ final class DictationCoordinator {
             // True provider failure on the first (and only) attempt: do NOT
             // retry (retries are for guardrail rejection only). Fall back to
             // the raw transcript and surface the error for a disruptive notice.
-            logger.error("Post-processing failed, falling back to raw transcript: \(error.localizedDescription)")
+            logger.error("Post-processing failed, falling back to raw transcript: \(error.localizedDescription, privacy: .public)")
             onPostProcessingError?(error)
             return PostProcessingOutcome(
                 finalText: rawText,
@@ -859,7 +859,7 @@ final class DictationCoordinator {
                     kind: .suspiciousShrinkage,
                     detail: "retry returned an empty result after a rejected first pass"
                 )
-            logger.notice("Post-processing retry also rejected, using raw transcript: \(retryError.description)")
+            logger.notice("Post-processing retry also rejected, using raw transcript: \(retryError.description, privacy: .public)")
             onPostProcessingFallback?()
             return PostProcessingOutcome(
                 finalText: rawText,
@@ -874,7 +874,7 @@ final class DictationCoordinator {
             // The retry threw. We were already in a guardrail-fallback scenario
             // (that is why we retried), so keep the feedback non-disruptive and
             // fall back to the raw transcript. The thrown error is logged.
-            logger.error("Post-processing retry threw, using raw transcript: \(error.localizedDescription)")
+            logger.error("Post-processing retry threw, using raw transcript: \(error.localizedDescription, privacy: .public)")
             onPostProcessingFallback?()
             return PostProcessingOutcome(
                 finalText: rawText,

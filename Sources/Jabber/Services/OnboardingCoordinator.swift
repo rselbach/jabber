@@ -312,7 +312,7 @@ final class OnboardingCoordinator {
         } catch is CancellationError {
             return false
         } catch {
-            logger.error("Onboarding permission polling failed: \(error.localizedDescription)")
+            logger.error("Onboarding permission polling failed: \(error.localizedDescription, privacy: .public)")
             return false
         }
 

@@ -182,7 +182,7 @@ final class AppleSpeechProvider: TranscriptionProvider, @unchecked Sendable {
         } catch {
             continuation.finish()
             await cancelResultsTask(resultsTask)
-            logger.error("Speech transcription failed: \(error.localizedDescription)")
+            logger.error("Speech transcription failed: \(error.localizedDescription, privacy: .public)")
             throw TranscriptionError.transcriptionFailed
         }
 
@@ -214,7 +214,7 @@ final class AppleSpeechProvider: TranscriptionProvider, @unchecked Sendable {
         } catch is CancellationError {
             return
         } catch {
-            logger.error("Speech transcription results task failed after cancellation: \(error.localizedDescription)")
+            logger.error("Speech transcription results task failed after cancellation: \(error.localizedDescription, privacy: .public)")
         }
     }
 

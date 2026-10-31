@@ -168,7 +168,7 @@ class OverlayWindow: OverlayWindowController {
             show()
         }
         guard let waveformView else {
-            logger.error("Dropped overlay notice \(title): no overlay panel")
+            logger.error("Dropped overlay notice \(title, privacy: .public): no overlay panel")
             return
         }
         waveformView.showFallbackNotice(title: title, message: message)

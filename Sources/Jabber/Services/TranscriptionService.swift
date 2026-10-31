@@ -163,7 +163,7 @@ actor TranscriptionService {
         let resolved = Self.resolveLanguage(language)
         selectedLanguage = resolved
         if resolved != language {
-            logger.warning("Invalid language code '\(language)' - falling back to auto-detect")
+            logger.warning("Invalid language code '\(language, privacy: .public)' - falling back to auto-detect")
 
             Task { @MainActor in
                 TypedSettings[.selectedLanguage] = "auto"
@@ -253,7 +253,7 @@ actor TranscriptionService {
             }
         } catch is CancellationError {
         } catch {
-            logger.error("Streaming transcription reset failed: \(error.localizedDescription)")
+            logger.error("Streaming transcription reset failed: \(error.localizedDescription, privacy: .public)")
         }
     }
 
@@ -329,7 +329,7 @@ actor TranscriptionService {
             } catch let error as ModelError {
                 switch error {
                 case .modelNotFound:
-                    logger.warning("Unknown model id '\(modelIdToLoad)', falling back to base")
+                    logger.warning("Unknown model id '\(modelIdToLoad, privacy: .public)', falling back to base")
                     let fallbackModelId = LanguageModelCatalog.recommendedModelId(for: Constants.defaultLanguage)
                     await loadDependencies.setSelectedModelId(fallbackModelId)
                     modelIdToLoad = fallbackModelId
@@ -416,7 +416,7 @@ actor TranscriptionService {
             }
         } catch is CancellationError {
         } catch {
-            logger.error("Provider unload failed: \(error.localizedDescription)")
+            logger.error("Provider unload failed: \(error.localizedDescription, privacy: .public)")
         }
     }
 

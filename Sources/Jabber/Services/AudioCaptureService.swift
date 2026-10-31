@@ -131,7 +131,7 @@ final class AudioCaptureService {
         } catch {
             // Nothing is lost: startCapture() builds on demand and surfaces
             // the failure to the user there.
-            logger.warning("Audio capture prepare failed: \(error.localizedDescription)")
+            logger.warning("Audio capture prepare failed: \(error.localizedDescription, privacy: .public)")
         }
     }
 
@@ -269,14 +269,14 @@ final class AudioCaptureService {
             return
         }
         guard inputRecoveryTask == nil else {
-            logger.notice("Coalescing input rebuild after \(reason)")
+            logger.notice("Coalescing input rebuild after \(reason, privacy: .public)")
             return
         }
         if reason != .missingFirstBuffer {
             didRetryMissingFirstBuffer = false
         }
 
-        logger.notice("Scheduling input rebuild because \(reason)")
+        logger.notice("Scheduling input rebuild because \(reason, privacy: .public)")
         inputRecoveryGeneration += 1
         let recoveryGeneration = inputRecoveryGeneration
         inputRecoveryTask = Task { @MainActor [weak self] in
@@ -315,12 +315,12 @@ final class AudioCaptureService {
                 }
                 needsRebuild = false
                 finishInputRecovery(generation: recoveryGeneration)
-                logger.notice("Rebuilt audio input after \(reason)")
+                logger.notice("Rebuilt audio input after \(reason, privacy: .public)")
                 return
             } catch {
                 lastError = error
                 logger.warning(
-                    "Audio input rebuild attempt \(attempt + 1) failed: \(error.localizedDescription)"
+                    "Audio input rebuild attempt \(attempt + 1) failed: \(error.localizedDescription, privacy: .public)"
                 )
                 teardownEngine()
             }
@@ -328,7 +328,7 @@ final class AudioCaptureService {
 
         finishInputRecovery(generation: recoveryGeneration)
         guard wasCapturing, isCapturing else {
-            logger.error("Could not prepare audio input after \(reason): \(lastError.localizedDescription)")
+            logger.error("Could not prepare audio input after \(reason, privacy: .public): \(lastError.localizedDescription, privacy: .public)")
             return
         }
 
@@ -435,7 +435,7 @@ final class AudioCaptureService {
                 return nil
             }
             if let error {
-                logger.warning("Draining audio converter tail failed: \(error.localizedDescription)")
+                logger.warning("Draining audio converter tail failed: \(error.localizedDescription, privacy: .public)")
                 return []
             }
 
@@ -533,7 +533,7 @@ final class AudioCaptureService {
 
         guard let conversionResult = withConverter({ convertBuffer(buffer, using: $0) }) else { return }
         if let error = conversionResult.error {
-            logger.error("Audio conversion failed: \(error.localizedDescription)")
+            logger.error("Audio conversion failed: \(error.localizedDescription, privacy: .public)")
             DispatchQueue.main.async { [weak self] in
                 self?.onConversionError?(AudioCaptureError.conversionFailed(error))
             }

@@ -118,6 +118,7 @@ final class ModelManagerTests: XCTestCase {
             try tc.current?(current)
 
             let manager = ModelManager(settings: settings, cacheBaseURL: cacheBaseURL)
+            manager.removeObsoleteDownloads()
 
             XCTAssertFalse(FileManager.default.fileExists(atPath: legacy.path), name)
             let parakeet = try XCTUnwrap(manager.models.first { $0.id == AppMode.parakeetModelId }, name)
@@ -170,12 +171,26 @@ final class ModelManagerTests: XCTestCase {
         let kept = fluidAudioFolder("parakeet-tdt-0.6b-v2")
         try createCompleteParakeetModelFolder(at: kept)
 
-        _ = ModelManager(settings: settings, cacheBaseURL: cacheBaseURL)
+        ModelManager(settings: settings, cacheBaseURL: cacheBaseURL).removeObsoleteDownloads()
 
         for folder in removed {
             XCTAssertFalse(FileManager.default.fileExists(atPath: folder.path), folder.lastPathComponent)
         }
         XCTAssertTrue(FileManager.default.fileExists(atPath: kept.path))
+    }
+
+    func testCreatingAManagerLeavesOldDownloadsAlone() throws {
+        // Tests and views build ModelManagers freely, some against the real
+        // cache, so only the explicit launch step may move or delete files.
+        let legacy = fluidAudioFolder("parakeet-tdt-0.6b-v2-coreml")
+        let removed = fluidAudioFolder("parakeet-tdt-0.6b-v3")
+        try createCompleteParakeetModelFolder(at: legacy)
+        try createCompleteParakeetModelFolder(at: removed, layout: ModelInstallationValidator.parakeetMultilingualLayout)
+
+        _ = ModelManager(settings: settings, cacheBaseURL: cacheBaseURL)
+
+        XCTAssertTrue(FileManager.default.fileExists(atPath: legacy.path))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: removed.path))
     }
 
     func testMigrateExperimentalQwenModelIds() {

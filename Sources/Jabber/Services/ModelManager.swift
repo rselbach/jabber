@@ -92,9 +92,17 @@ final class ModelManager {
     ) {
         self.settings = settings
         self.cacheBaseURL = cacheBaseURL
+        migrateSelectedModelIfNeeded()
+        refreshModels()
+    }
+
+    /// Moves and deletes downloads earlier releases left behind: the duplicate
+    /// copies of FluidAudio models and the folders of models an update
+    /// dropped. Called once at launch rather than from `init`, so building a
+    /// ModelManager never touches the disk.
+    func removeObsoleteDownloads() {
         consolidateLegacyDownloads()
         removeDownloadsOfRemovedModels()
-        migrateSelectedModelIfNeeded()
         refreshModels()
     }
 

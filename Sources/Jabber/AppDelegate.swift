@@ -91,6 +91,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // `@AppStorage` reads never observe a pre-migration value and the
         // SettingsStore getters can stay pure (no writes during view updates).
         TypedSettings.migrateStoredValues()
+        // Before anything asks which models are installed.
+        ModelManager.shared.removeObsoleteDownloads()
         setupOverlayNotices()
         setupMenuBar()
         setupHotkey()

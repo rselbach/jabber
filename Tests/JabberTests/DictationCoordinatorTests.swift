@@ -75,6 +75,34 @@ final class DictationCoordinatorTests: XCTestCase {
         XCTAssertTrue(audioCapture.didStart)
     }
 
+    func testSessionPreventsIdleSleepUntilItEnds() async {
+        audioCapture.storedSamples = makeLoudSamples()
+        transcriptionService.transcribeResult = .success("hello")
+        let idleExpectation = XCTestExpectation(description: "coordinator returns to idle")
+        coordinator.onStateChange = { state in
+            if state == .idle {
+                idleExpectation.fulfill()
+            }
+        }
+        XCTAssertFalse(coordinator.isPreventingIdleSleep)
+
+        XCTAssertTrue(coordinator.start())
+        XCTAssertTrue(coordinator.isPreventingIdleSleep)
+        coordinator.stop()
+        XCTAssertTrue(coordinator.isTranscribing)
+        XCTAssertTrue(coordinator.isPreventingIdleSleep)
+
+        await fulfillment(of: [idleExpectation], timeout: 2)
+        XCTAssertFalse(coordinator.isPreventingIdleSleep)
+    }
+
+    func testCancelReleasesIdleSleepPrevention() {
+        XCTAssertTrue(coordinator.start())
+        coordinator.cancel()
+
+        XCTAssertFalse(coordinator.isPreventingIdleSleep)
+    }
+
     func testStartRequestsMediaPause() {
         XCTAssertTrue(coordinator.start())
 

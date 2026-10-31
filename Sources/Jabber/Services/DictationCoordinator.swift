@@ -93,7 +93,17 @@ final class DictationCoordinator {
         case transcribing(sessionID: UUID)
     }
 
-    private(set) var state: State = .idle
+    private(set) var state: State = .idle {
+        didSet { updateIdleSleepActivity() }
+    }
+
+    /// Keeps the Mac from idle-sleeping mid-session: a long hands-free
+    /// dictation has no keyboard or mouse input to hold it awake.
+    private var idleSleepActivity: NSObjectProtocol?
+
+    var isPreventingIdleSleep: Bool {
+        idleSleepActivity != nil
+    }
 
     var isIdle: Bool {
         state == .idle
@@ -890,6 +900,21 @@ final class DictationCoordinator {
 
     // Validation logic extracted to PostProcessingValidator for testability.
     // See PostProcessingValidator.swift for shrinkage/markdown guardrail rules.
+
+    private func updateIdleSleepActivity() {
+        switch (state, idleSleepActivity) {
+        case (.idle, let activity?):
+            ProcessInfo.processInfo.endActivity(activity)
+            idleSleepActivity = nil
+        case (.recording, nil), (.transcribing, nil):
+            idleSleepActivity = ProcessInfo.processInfo.beginActivity(
+                options: .idleSystemSleepDisabled,
+                reason: "Dictation in progress"
+            )
+        default:
+            break
+        }
+    }
 
     private func finish(sessionID: UUID) {
         guard currentSessionID == sessionID else { return }

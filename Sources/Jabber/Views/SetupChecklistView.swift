@@ -65,10 +65,12 @@ private struct SetupStepRow: View {
                     .font(.subheadline)
                     .fontWeight(.medium)
 
-                Text(step.message)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
+                if step.status != .complete {
+                    Text(step.message)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
 
                 if let actionTitle = step.actionTitle,
                    step.status == .needsAction {

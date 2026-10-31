@@ -27,9 +27,7 @@ struct GettingStartedPage: View {
                     runOnboardingAgain()
                 }
             } header: {
-                Text("Quick Setup")
-            } footer: {
-                Text("Jabber needs these before dictation feels boringly reliable.")
+                Text("Setup")
             }
 
             Section {
@@ -37,7 +35,7 @@ struct GettingStartedPage: View {
                     Text("Press")
                         .foregroundStyle(.secondary)
                     KeycapsView(labels: hotkeyShortcut.keycapLabels)
-                    Text("and speak. Your words appear wherever your cursor is.")
+                    Text("and speak.")
                         .foregroundStyle(.secondary)
                 }
 
@@ -54,11 +52,7 @@ struct GettingStartedPage: View {
                         }
                     }
             } header: {
-                Text("Test Playground")
-            } footer: {
-                Text(isClipboardOutputMode
-                    ? "Output mode is set to clipboard — paste with ⌘V after dictating."
-                    : "Click the field first so the transcription has somewhere to land.")
+                Text("Try It")
             }
         }
         .formStyle(.grouped)
@@ -99,8 +93,8 @@ struct GettingStartedPage: View {
 
     private var playgroundPlaceholder: String {
         isClipboardOutputMode
-            ? "Dictate, then paste your words here with ⌘V…"
-            : "Click here, press the hotkey, and say hello…"
+            ? "Click here, dictate, then paste with ⌘V."
+            : "Click here and try it."
     }
 
     private func requestMicrophoneAccess() {

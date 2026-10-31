@@ -112,22 +112,20 @@ struct OnboardingView: View {
         }
     }
 
-    private func stepHeader(title: String, subtitle: String) -> some View {
+    private func stepHeader(title: String, subtitle: String? = nil) -> some View {
         VStack(spacing: 6) {
-            Image(nsImage: NSApp.applicationIconImage)
-                .resizable()
-                .frame(width: 44, height: 44)
-                .shadow(color: .accentColor.opacity(0.35), radius: 10)
-                .padding(.bottom, 4)
-
             Text(title)
                 .font(.system(size: 26, weight: .bold))
 
-            Text(subtitle)
-                .foregroundStyle(.secondary)
-                .multilineTextAlignment(.center)
+            if let subtitle {
+                Text(subtitle)
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
+            }
         }
         .frame(maxWidth: .infinity)
+        .padding(.top, 16)
+        .padding(.bottom, 8)
     }
 
     private var footer: some View {
@@ -179,77 +177,34 @@ struct OnboardingView: View {
             ZStack {
                 Circle()
                     .fill(Color.accentColor.opacity(0.25))
-                    .frame(width: 130, height: 130)
-                    .blur(radius: 40)
+                    .frame(width: 150, height: 150)
+                    .blur(radius: 45)
 
                 Image(nsImage: NSApp.applicationIconImage)
                     .resizable()
-                    .frame(width: 110, height: 110)
+                    .frame(width: 128, height: 128)
                     .shadow(color: .black.opacity(0.25), radius: 12, y: 6)
             }
-            .padding(.bottom, 20)
+            .padding(.bottom, 28)
 
-            Text("Speak. Jabber types.")
+            Text("Welcome to Jabber")
                 .font(.system(size: 34, weight: .bold))
 
-            Text("Fast, private dictation that works in every app.")
+            Text("On-device dictation for any app.")
                 .font(.title3)
                 .foregroundStyle(.secondary)
-                .padding(.top, 8)
-
-            HStack(spacing: 16) {
-                featureCard(
-                    symbol: "lock.shield.fill",
-                    title: "Private",
-                    detail: "Everything runs on your Mac. Audio never leaves it."
-                )
-                featureCard(
-                    symbol: "bolt.fill",
-                    title: "Fast",
-                    detail: "Local speech models tuned for Apple silicon."
-                )
-                featureCard(
-                    symbol: "keyboard.fill",
-                    title: "Everywhere",
-                    detail: "Press a hotkey and dictate into any app."
-                )
-            }
-            .padding(.top, 36)
+                .padding(.top, 6)
 
             Spacer()
+            Spacer()
         }
-    }
-
-    private func featureCard(symbol: String, title: String, detail: String) -> some View {
-        card(
-            VStack(spacing: 8) {
-                Image(systemName: symbol)
-                    .font(.title2)
-                    .foregroundStyle(Color.accentColor)
-                    .frame(height: 28)
-
-                Text(title)
-                    .font(.headline)
-
-                Text(detail)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .multilineTextAlignment(.center)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-            .padding(16)
-            .frame(width: 170)
-        )
     }
 
     // MARK: - Language
 
     private var languageStep: some View {
         VStack(spacing: 16) {
-            stepHeader(
-                title: "What language will you speak?",
-                subtitle: "Jabber recommends the best speech model for it."
-            )
+            stepHeader(title: "What language do you speak?")
 
             HStack(spacing: 12) {
                 HStack(spacing: 6) {
@@ -344,17 +299,14 @@ struct OnboardingView: View {
 
     private var permissionsStep: some View {
         VStack(spacing: 16) {
-            stepHeader(
-                title: "Let Jabber listen and type",
-                subtitle: "Two permissions make dictation work anywhere."
-            )
+            stepHeader(title: "Allow access")
 
             VStack(spacing: 12) {
                 microphoneCard
                 accessibilityCard
 
                 if !coordinator.isAccessibilityTrusted && !coordinator.didSkipAccessibility {
-                    Button("Skip — copy results to the clipboard instead") {
+                    Button("Use the clipboard instead") {
                         coordinator.skipAccessibility()
                     }
                     .buttonStyle(.plain)
@@ -395,16 +347,16 @@ struct OnboardingView: View {
         }
     }
 
-    private var microphoneDetail: String {
+    private var microphoneDetail: String? {
         switch coordinator.microphoneStatus {
         case .authorized:
-            return "Jabber can hear your dictation."
+            return nil
         case .denied:
-            return "Access denied. Enable it in System Settings to dictate."
+            return "Turn it on in System Settings."
         case .restricted:
-            return "Microphone access is restricted on this Mac."
+            return "Restricted on this Mac."
         default:
-            return "Jabber listens only while you hold the hotkey."
+            return "Only used while you dictate."
         }
     }
 
@@ -414,8 +366,7 @@ struct OnboardingView: View {
             symbolColor: .purple,
             title: "Typing Access",
             detail: accessibilityDetail,
-            isGranted: coordinator.isAccessibilityTrusted,
-            skippedNote: coordinator.didSkipAccessibility && !coordinator.isAccessibilityTrusted ? "Clipboard mode" : nil
+            isGranted: coordinator.isAccessibilityTrusted
         ) {
             if !coordinator.isAccessibilityTrusted {
                 Button("Open Settings") {
@@ -426,23 +377,22 @@ struct OnboardingView: View {
         }
     }
 
-    private var accessibilityDetail: String {
+    private var accessibilityDetail: String? {
         if coordinator.isAccessibilityTrusted {
-            return "Jabber can type into the app you're using."
+            return nil
         }
         if coordinator.didSkipAccessibility {
-            return "Transcriptions will be copied to the clipboard."
+            return "Transcripts go to the clipboard."
         }
-        return "Lets Jabber place text directly into the app you're using."
+        return "Types transcripts into the app you're using."
     }
 
     private func permissionCard(
         symbol: String,
         symbolColor: Color,
         title: String,
-        detail: String,
+        detail: String?,
         isGranted: Bool,
-        skippedNote: String? = nil,
         @ViewBuilder action: () -> some View
     ) -> some View {
         card(
@@ -459,10 +409,12 @@ struct OnboardingView: View {
                 VStack(alignment: .leading, spacing: 2) {
                     Text(title)
                         .font(.headline)
-                    Text(detail)
-                        .font(.callout)
-                        .foregroundStyle(.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
+                    if let detail {
+                        Text(detail)
+                            .font(.callout)
+                            .foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
                 }
 
                 Spacer()
@@ -472,10 +424,6 @@ struct OnboardingView: View {
                         .font(.callout.weight(.medium))
                         .foregroundStyle(.green)
                         .transition(.scale.combined(with: .opacity))
-                } else if let skippedNote {
-                    Text(skippedNote)
-                        .font(.callout)
-                        .foregroundStyle(.secondary)
                 }
 
                 action()
@@ -490,8 +438,8 @@ struct OnboardingView: View {
     private var hotkeyStep: some View {
         VStack(spacing: 16) {
             stepHeader(
-                title: "Pick your dictation hotkey",
-                subtitle: "\(TypedSettings.hotkeyActivationMode.description) Change it anytime in Settings."
+                title: "Choose a hotkey",
+                subtitle: TypedSettings.hotkeyActivationMode.description
             )
 
             ScrollView {
@@ -587,10 +535,7 @@ struct OnboardingView: View {
 
     private var modelDownloadStep: some View {
         VStack(spacing: 16) {
-            stepHeader(
-                title: "Choose your speech model",
-                subtitle: "Recommended for \(selectedLanguageName). You can switch anytime in Settings."
-            )
+            stepHeader(title: "Choose a speech model")
 
             ScrollView {
                 VStack(spacing: 12) {
@@ -805,16 +750,11 @@ struct OnboardingView: View {
             tryItField
                 .padding(.top, 28)
 
-            Text("Change the hotkey, language, or model anytime in Settings.")
-                .font(.callout)
-                .foregroundStyle(.tertiary)
-                .padding(.top, 16)
-
             if let historyNote {
                 Text(historyNote)
                     .font(.callout)
                     .foregroundStyle(.tertiary)
-                    .padding(.top, 4)
+                    .padding(.top, 16)
             }
 
             Spacer()
@@ -844,7 +784,7 @@ struct OnboardingView: View {
         let period = preferences.retention == .forever
             ? ""
             : " for \(preferences.retention.displayName.lowercased())"
-        return "Your transcripts stay on this Mac\(period). Manage them in Settings › History."
+        return "Transcripts are saved on this Mac\(period)."
     }
 
     private var hotkeyKeycapLabels: [String] {
@@ -881,9 +821,9 @@ struct OnboardingView: View {
 
     private var tryItPlaceholder: String {
         if isClipboardOutputMode {
-            return "Try it: click here, press the hotkey and speak — then paste with ⌘V."
+            return "Click here, dictate, then paste with ⌘V."
         }
-        return "Try it: click here, press the hotkey, and say hello…"
+        return "Click here and try it."
     }
 
     private var isClipboardOutputMode: Bool {
@@ -898,14 +838,6 @@ struct OnboardingView: View {
 
     private var allLanguages: [(name: String, code: String)] {
         LanguageModelCatalog.allLanguages()
-    }
-
-    private var selectedLanguageName: String {
-        let code = coordinator.onboardingSelectedLanguage
-        if code == "auto" {
-            return "auto-detect"
-        }
-        return Constants.sortedLanguages.first { $0.code == code }?.name ?? code
     }
 }
 

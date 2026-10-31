@@ -1,3 +1,4 @@
+import AVFoundation
 import XCTest
 @testable import Jabber
 
@@ -14,7 +15,8 @@ final class StatusMenuStateTests: XCTestCase {
         outputMode: TypingService.OutputMode = .directTyping,
         hasFailedDictation: Bool = false,
         canStartSession: Bool = true,
-        hasModelLoadFailed: Bool = false
+        hasModelLoadFailed: Bool = false,
+        missingPermission: StatusMenuState.MissingPermission? = nil
     ) -> StatusMenuState {
         StatusMenuState.resolve(
             appState: appState,
@@ -28,8 +30,46 @@ final class StatusMenuStateTests: XCTestCase {
             outputMode: outputMode,
             hasFailedDictation: hasFailedDictation,
             canStartSession: canStartSession,
-            hasModelLoadFailed: hasModelLoadFailed
+            hasModelLoadFailed: hasModelLoadFailed,
+            missingPermission: missingPermission
         )
+    }
+
+    func testMissingPermissionReplacesReadyHeader() {
+        let cases: [String: (appState: AppDelegate.AppState, missing: StatusMenuState.MissingPermission?, isSetupPending: Bool, want: String, wantsFix: Bool)] = [
+            "microphone": (.ready, .microphone, false, "Microphone Access Needed", true),
+            "accessibility": (.ready, .accessibility, false, "Accessibility Access Needed", true),
+            "nothing missing": (.ready, nil, false, "Ready to Dictate — ⌥ Space", false),
+            "recording keeps its header": (.recording, .accessibility, false, "Recording…", true),
+            "abandoned setup still warns": (.ready, .microphone, true, "Microphone Access Needed", true)
+        ]
+
+        for (name, tc) in cases {
+            let got = resolve(appState: tc.appState, isSetupPending: tc.isSetupPending, missingPermission: tc.missing)
+            XCTAssertEqual(got.header, tc.want, name)
+            XCTAssertEqual(got.showsFixPermissions, tc.wantsFix, name)
+        }
+    }
+
+    func testMissingPermissionResolution() {
+        let cases: [String: (microphone: AVAuthorizationStatus, isTrusted: Bool, isNeeded: Bool, want: StatusMenuState.MissingPermission?)] = [
+            "all granted": (.authorized, true, true, nil),
+            "microphone denied": (.denied, true, true, .microphone),
+            "microphone restricted": (.restricted, true, false, .microphone),
+            "microphone never asked": (.notDetermined, true, true, nil),
+            "microphone wins over accessibility": (.denied, false, true, .microphone),
+            "accessibility revoked": (.authorized, false, true, .accessibility),
+            "accessibility not needed": (.authorized, false, false, nil)
+        ]
+
+        for (name, tc) in cases {
+            let got = StatusMenuState.MissingPermission.resolve(
+                microphoneStatus: tc.microphone,
+                isAccessibilityTrusted: tc.isTrusted,
+                isAccessibilityNeeded: tc.isNeeded
+            )
+            XCTAssertEqual(got, tc.want, name)
+        }
     }
 
     func testHeaderNamesTheCurrentState() {

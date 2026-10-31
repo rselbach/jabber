@@ -17,6 +17,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var discardFailedDictationItem: NSMenuItem?
     /// Shown only after a model load failed; refreshed on every menu open.
     private var retryModelLoadItem: NSMenuItem?
+    /// Shown only while macOS withholds a permission dictation needs.
+    private var fixPermissionsItem: NSMenuItem?
     private var currentAppState: AppState = .ready
     /// Download or load progress shown in the icon and menu header, when known.
     private var currentProgress: Double?
@@ -380,15 +382,25 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             return
         }
 
-        // Matches the menu header, which says setup is unfinished rather than
-        // that a model failed.
-        let description = state == .error && shouldShowAutomaticOnboarding()
-            ? "Jabber, finish setup to dictate"
-            : state.accessibilityDescription(progress: currentProgress)
+        // Matches the menu header, which says setup is unfinished or a
+        // permission is missing rather than that Jabber is ready.
+        let missingPermission = state == .ready ? currentMissingPermission() : nil
+        let description: String
+        switch missingPermission {
+        case .microphone:
+            description = "Jabber, microphone access needed"
+        case .accessibility:
+            description = "Jabber, accessibility access needed"
+        case nil:
+            description = state == .error && shouldShowAutomaticOnboarding()
+                ? "Jabber, finish setup to dictate"
+                : state.accessibilityDescription(progress: currentProgress)
+        }
         if let currentProgress {
             button.image = DownloadProgressIcon.image(progress: currentProgress, accessibilityDescription: description)
         } else {
-            button.image = NSImage(systemSymbolName: state.symbolName, accessibilityDescription: description)
+            let symbolName = missingPermission == nil ? state.symbolName : AppState.error.symbolName
+            button.image = NSImage(systemSymbolName: symbolName, accessibilityDescription: description)
         }
         button.contentTintColor = state == .recording ? .systemRed : nil
     }
@@ -429,18 +441,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         discardFailedDictationItem = discardItem
         let retryLoadItem = NSMenuItem(title: "Retry Loading Model", action: #selector(retryModelLoad), keyEquivalent: "")
         retryModelLoadItem = retryLoadItem
+        let fixItem = NSMenuItem(title: "Fix Permissions…", action: #selector(openSettings), keyEquivalent: "")
+        fixPermissionsItem = fixItem
         let openItem = NSMenuItem(title: "Open Jabber", action: #selector(openJabber), keyEquivalent: "")
         let settingsItem = NSMenuItem(title: "Settings…", action: #selector(openSettings), keyEquivalent: ",")
         let updatesItem = NSMenuItem(title: "Check for Updates…", action: #selector(checkForUpdates), keyEquivalent: "")
         let quitItem = NSMenuItem(title: "Quit Jabber", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
 
-        for item in [toggleItem, lastItem, retryItem, discardItem, retryLoadItem, openItem, settingsItem, updatesItem] {
+        for item in [toggleItem, lastItem, retryItem, discardItem, retryLoadItem, fixItem, openItem, settingsItem, updatesItem] {
             item.target = self
         }
         // quitItem has no target → routes through the responder chain to NSApp.terminate.
         // statusHeaderItem has no action either, so autoenablesItems keeps it disabled.
 
-        menu.items = [statusHeaderItem, toggleItem, lastItem, recentItem, retryItem, discardItem, retryLoadItem,
+        menu.items = [statusHeaderItem, fixItem, toggleItem, lastItem, recentItem, retryItem, discardItem, retryLoadItem,
                       .separator(), openItem, settingsItem, .separator(), updatesItem, .separator(), quitItem]
         menu.delegate = self
         applyStatusMenuState(currentStatusMenuState())
@@ -466,8 +480,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             outputMode: typingService.mode,
             hasFailedDictation: dictationCoordinator.hasFailedDictation,
             canStartSession: dictationCoordinator.canStart,
-            hasModelLoadFailed: hasModelLoadFailed
+            hasModelLoadFailed: hasModelLoadFailed,
+            missingPermission: currentMissingPermission()
         )
+    }
+
+    private func currentMissingPermission() -> StatusMenuState.MissingPermission? {
+        StatusMenuState.MissingPermission.resolve(
+            microphoneStatus: permissionService.microphoneAuthorizationStatus(),
+            isAccessibilityTrusted: permissionService.hasAccessibilityPermission(),
+            isAccessibilityNeeded: typingService.requiresAccessibilityPermission
+                || TypedSettings.hotkeyShortcut.needsAccessibility
+        )
+    }
+
+    /// Re-reads permissions into the icon, which otherwise changes only with
+    /// the model or dictation state.
+    private func refreshStatusIcon() {
+        updateStatusIcon(state: currentAppState, progress: currentProgress)
     }
 
     private func applyStatusMenuState(_ state: StatusMenuState) {
@@ -480,6 +510,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         retryFailedDictationItem?.isHidden = !state.showsFailedDictationItems
         discardFailedDictationItem?.isHidden = !state.showsFailedDictationItems
         retryModelLoadItem?.isHidden = !state.showsRetryModelLoad
+        fixPermissionsItem?.isHidden = !state.showsFixPermissions
     }
 
     @objc private func openJabber() {
@@ -751,6 +782,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     @objc private func handleApplicationDidBecomeActive() {
         retryHotkeyRegistrationIfTrusted()
+        refreshStatusIcon()
     }
 
     private func registerConfiguredHotkey() {
@@ -1627,6 +1659,7 @@ extension AppDelegate: NSWindowDelegate {
 
 extension AppDelegate: NSMenuDelegate {
     func menuWillOpen(_ menu: NSMenu) {
+        refreshStatusIcon()
         applyStatusMenuState(currentStatusMenuState())
     }
 }

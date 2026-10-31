@@ -1,3 +1,4 @@
+import AVFoundation
 import Foundation
 
 /// What the status menu shows for the current app state. Pure so the menu's
@@ -20,6 +21,31 @@ struct StatusMenuState: Equatable {
         let appName: String?
     }
 
+    /// A permission dictation needs that macOS no longer grants, found before
+    /// the user wastes a dictation on it.
+    enum MissingPermission: Equatable {
+        case microphone
+        case accessibility
+
+        /// Microphone access that was never asked for is left out: the first
+        /// dictation shows the system prompt, which is the fix.
+        static func resolve(
+            microphoneStatus: AVAuthorizationStatus,
+            isAccessibilityTrusted: Bool,
+            isAccessibilityNeeded: Bool
+        ) -> MissingPermission? {
+            switch microphoneStatus {
+            case .denied, .restricted:
+                return .microphone
+            case .authorized, .notDetermined:
+                break
+            @unknown default:
+                break
+            }
+            return isAccessibilityNeeded && !isAccessibilityTrusted ? .accessibility : nil
+        }
+    }
+
     var header: String
     /// Start, stop, or cancel the session, depending on its phase.
     var dictationItemTitle: String
@@ -33,6 +59,7 @@ struct StatusMenuState: Equatable {
     var showsFailedDictationItems: Bool
     var canActOnFailedDictation: Bool
     var showsRetryModelLoad: Bool
+    var showsFixPermissions: Bool
 
     /// - Parameter progress: Download or load progress, when known.
     static func resolve(
@@ -47,10 +74,17 @@ struct StatusMenuState: Equatable {
         outputMode: TypingService.OutputMode,
         hasFailedDictation: Bool,
         canStartSession: Bool,
-        hasModelLoadFailed: Bool
+        hasModelLoadFailed: Bool,
+        missingPermission: MissingPermission?
     ) -> StatusMenuState {
         StatusMenuState(
-            header: header(for: appState, progress: progress, hotkeyDisplay: hotkeyDisplay, isSetupPending: isSetupPending),
+            header: header(
+                for: appState,
+                progress: progress,
+                hotkeyDisplay: hotkeyDisplay,
+                isSetupPending: isSetupPending,
+                missingPermission: missingPermission
+            ),
             dictationItemTitle: dictationItemTitle(for: dictationState),
             lastTranscriptItemTitle: outputMode == .clipboard ? "Copy Last Transcript" : "Paste Last Transcript",
             lastTranscriptPreview: lastTranscript.map(preview),
@@ -60,7 +94,8 @@ struct StatusMenuState: Equatable {
             canDeliverRecentTranscripts: dictationState == .idle,
             showsFailedDictationItems: hasFailedDictation,
             canActOnFailedDictation: hasFailedDictation && canStartSession,
-            showsRetryModelLoad: hasModelLoadFailed
+            showsRetryModelLoad: hasModelLoadFailed,
+            showsFixPermissions: missingPermission != nil
         )
     }
 
@@ -93,14 +128,22 @@ struct StatusMenuState: Equatable {
         for appState: AppDelegate.AppState,
         progress: Double?,
         hotkeyDisplay: String,
-        isSetupPending: Bool
+        isSetupPending: Bool,
+        missingPermission: MissingPermission?
     ) -> String {
         switch appState {
         case .downloading:
             guard let progress else { return "Preparing Speech Model…" }
             return "Preparing Speech Model… \(Int(progress * 100))%"
         case .ready:
-            return "Ready to Dictate — \(hotkeyDisplay)"
+            switch missingPermission {
+            case .microphone:
+                return "Microphone Access Needed"
+            case .accessibility:
+                return "Accessibility Access Needed"
+            case nil:
+                return "Ready to Dictate — \(hotkeyDisplay)"
+            }
         case .recording:
             return "Recording…"
         case .transcribing:

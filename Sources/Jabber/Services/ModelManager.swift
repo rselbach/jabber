@@ -224,6 +224,19 @@ final class ModelManager {
         return true
     }
 
+    /// Replaces the files of a downloaded model that fails to load. The
+    /// completeness check only looks for the expected files, so a corrupt one
+    /// passes it, and retrying the load reads the same bytes again.
+    @discardableResult
+    func redownloadModel(_ modelId: String) -> Bool {
+        guard let def = AppMode.modelDefinition(for: modelId), !def.isBuiltIn, activeDownloads[modelId] == nil else {
+            return false
+        }
+        removeFailedDownloadFolder(for: modelId)
+        refreshModels()
+        return startDownload(modelId)
+    }
+
     func cancelDownload(_ modelId: String) {
         clearPendingSelection(of: modelId)
         guard let activeDownload = activeDownloads[modelId] else { return }

@@ -17,6 +17,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var discardFailedDictationItem: NSMenuItem?
     /// Shown only after a model load failed; refreshed on every menu open.
     private var retryModelLoadItem: NSMenuItem?
+    private var redownloadModelItem: NSMenuItem?
     /// Shown only while macOS withholds a permission dictation needs.
     private var fixPermissionsItem: NSMenuItem?
     /// Recent languages; rebuilt on every menu open.
@@ -319,13 +320,40 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func showModelLoadError(_ error: Error) {
         NotificationService.shared.showError(
             title: "Couldn't Load Speech Model",
-            message: "\(error.localizedDescription) Check your internet connection, then choose Retry Loading Model from the menu bar icon."
+            message: Self.modelLoadErrorMessage(
+                errorDescription: error.localizedDescription,
+                isModelDownloaded: isSelectedModelOnDisk()
+            )
         )
+    }
+
+    /// A model whose files are on disk failed in loading, not downloading,
+    /// so the internet is not the suspect and new files may be the fix.
+    static func modelLoadErrorMessage(errorDescription: String, isModelDownloaded: Bool) -> String {
+        guard isModelDownloaded else {
+            return "\(errorDescription) Check your internet connection, then choose Retry Loading Model from the menu bar icon."
+        }
+        return "\(errorDescription) Choose Retry Loading Model from the menu bar icon, or Re-download Model to replace its files."
+    }
+
+    /// Whether the selected model's files are installed, as opposed to
+    /// built in or still missing.
+    private func isSelectedModelOnDisk() -> Bool {
+        let modelManager = ModelManager.shared
+        guard AppMode.modelDefinition(for: modelManager.selectedModelId())?.isBuiltIn == false else { return false }
+        return modelManager.isSelectedModelDownloaded
     }
 
     @objc private func retryModelLoad() {
         guard !isModelLoadInProgress else { return }
         startModelLoadingTask()
+    }
+
+    /// Replaces the selected model's files; the finished download starts a
+    /// fresh load (handleModelDownloadState).
+    @objc private func redownloadModel() {
+        guard !isModelLoadInProgress else { return }
+        ModelManager.shared.redownloadModel(ModelManager.shared.selectedModelId())
     }
 
     private func handleModelState(_ state: TranscriptionService.State) {
@@ -455,6 +483,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         discardFailedDictationItem = discardItem
         let retryLoadItem = NSMenuItem(title: "Retry Loading Model", action: #selector(retryModelLoad), keyEquivalent: "")
         retryModelLoadItem = retryLoadItem
+        let redownloadItem = NSMenuItem(title: "Re-download Model", action: #selector(redownloadModel), keyEquivalent: "")
+        redownloadModelItem = redownloadItem
         let fixItem = NSMenuItem(title: "Fix Permissions…", action: #selector(openSettings), keyEquivalent: "")
         fixPermissionsItem = fixItem
         let languageItem = NSMenuItem(title: "Language", action: nil, keyEquivalent: "")
@@ -465,14 +495,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let updatesItem = NSMenuItem(title: "Check for Updates…", action: #selector(checkForUpdates), keyEquivalent: "")
         let quitItem = NSMenuItem(title: "Quit Jabber", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
 
-        for item in [toggleItem, lastItem, retryItem, discardItem, retryLoadItem, fixItem, openItem, settingsItem, updatesItem] {
+        for item in [toggleItem, lastItem, retryItem, discardItem, retryLoadItem, redownloadItem, fixItem, openItem, settingsItem, updatesItem] {
             item.target = self
         }
         // quitItem has no target → routes through the responder chain to NSApp.terminate.
         // statusHeaderItem has no action either, so autoenablesItems keeps it disabled.
 
         menu.items = [statusHeaderItem, fixItem, toggleItem, lastItem, recentItem, retryItem, discardItem, retryLoadItem,
-                      .separator(), languageItem,
+                      redownloadItem, .separator(), languageItem,
                       .separator(), openItem, settingsItem, .separator(), updatesItem, .separator(), quitItem]
         menu.delegate = self
         applyStatusMenuState(currentStatusMenuState())
@@ -554,6 +584,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             hasFailedDictation: dictationCoordinator.hasFailedDictation,
             canStartSession: dictationCoordinator.canStart,
             hasModelLoadFailed: hasModelLoadFailed,
+            isFailedModelDownloaded: isSelectedModelOnDisk(),
             missingPermission: currentMissingPermission()
         )
     }
@@ -583,6 +614,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         retryFailedDictationItem?.isHidden = !state.showsFailedDictationItems
         discardFailedDictationItem?.isHidden = !state.showsFailedDictationItems
         retryModelLoadItem?.isHidden = !state.showsRetryModelLoad
+        redownloadModelItem?.isHidden = !state.showsRedownloadModel
         fixPermissionsItem?.isHidden = !state.showsFixPermissions
     }
 

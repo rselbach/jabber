@@ -16,6 +16,7 @@ final class StatusMenuStateTests: XCTestCase {
         hasFailedDictation: Bool = false,
         canStartSession: Bool = true,
         hasModelLoadFailed: Bool = false,
+        isFailedModelDownloaded: Bool = false,
         missingPermission: StatusMenuState.MissingPermission? = nil
     ) -> StatusMenuState {
         StatusMenuState.resolve(
@@ -31,6 +32,7 @@ final class StatusMenuStateTests: XCTestCase {
             hasFailedDictation: hasFailedDictation,
             canStartSession: canStartSession,
             hasModelLoadFailed: hasModelLoadFailed,
+            isFailedModelDownloaded: isFailedModelDownloaded,
             missingPermission: missingPermission
         )
     }
@@ -49,6 +51,30 @@ final class StatusMenuStateTests: XCTestCase {
             XCTAssertEqual(got.header, tc.want, name)
             XCTAssertEqual(got.showsFixPermissions, tc.wantsFix, name)
         }
+    }
+
+    func testRedownloadOffersOnlyForADownloadedModelThatFailedToLoad() {
+        let cases: [String: (failed: Bool, downloaded: Bool, want: Bool)] = [
+            "load failed on downloaded files": (true, true, true),
+            "load failed without files": (true, false, false),
+            "loaded fine": (false, true, false)
+        ]
+
+        for (name, tc) in cases {
+            let got = resolve(hasModelLoadFailed: tc.failed, isFailedModelDownloaded: tc.downloaded)
+            XCTAssertEqual(got.showsRedownloadModel, tc.want, name)
+        }
+    }
+
+    func testModelLoadErrorMessage() {
+        XCTAssertEqual(
+            AppDelegate.modelLoadErrorMessage(errorDescription: "Bad weights.", isModelDownloaded: true),
+            "Bad weights. Choose Retry Loading Model from the menu bar icon, or Re-download Model to replace its files."
+        )
+        XCTAssertEqual(
+            AppDelegate.modelLoadErrorMessage(errorDescription: "Offline.", isModelDownloaded: false),
+            "Offline. Check your internet connection, then choose Retry Loading Model from the menu bar icon."
+        )
     }
 
     func testMissingPermissionResolution() {

@@ -59,6 +59,8 @@ struct StatusMenuState: Equatable {
     var showsFailedDictationItems: Bool
     var canActOnFailedDictation: Bool
     var showsRetryModelLoad: Bool
+    /// A downloaded model failed to load, so its files may be damaged.
+    var showsRedownloadModel: Bool
     var showsFixPermissions: Bool
 
     /// - Parameter progress: Download or load progress, when known.
@@ -75,6 +77,7 @@ struct StatusMenuState: Equatable {
         hasFailedDictation: Bool,
         canStartSession: Bool,
         hasModelLoadFailed: Bool,
+        isFailedModelDownloaded: Bool,
         missingPermission: MissingPermission?
     ) -> StatusMenuState {
         StatusMenuState(
@@ -95,6 +98,7 @@ struct StatusMenuState: Equatable {
             showsFailedDictationItems: hasFailedDictation,
             canActOnFailedDictation: hasFailedDictation && canStartSession,
             showsRetryModelLoad: hasModelLoadFailed,
+            showsRedownloadModel: hasModelLoadFailed && isFailedModelDownloaded,
             showsFixPermissions: missingPermission != nil
         )
     }

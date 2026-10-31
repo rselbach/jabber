@@ -74,6 +74,11 @@ final class ModelManagerTests: XCTestCase {
         XCTAssertTrue(parakeetModel.isDownloaded)
     }
 
+    func testRedownloadRefusesBuiltInAndUnknownModels() {
+        XCTAssertFalse(modelManager.redownloadModel(AppMode.appleSpeechModelId))
+        XCTAssertFalse(modelManager.redownloadModel("greendale-model"))
+    }
+
     func testDeleteModelRemovesItsFolder() throws {
         let modelFolder = fluidAudioFolder("parakeet-tdt-0.6b-v2")
         try createCompleteParakeetModelFolder(at: modelFolder)

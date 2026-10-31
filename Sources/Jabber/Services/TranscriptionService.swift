@@ -464,6 +464,8 @@ enum TranscriptionError: Error, LocalizedError {
     case loadTimeout
     case transcriptionFailed
     case modelNotReady
+    /// Apple Speech has no model for this locale on this Mac.
+    case unsupportedLanguage(Locale)
 
     var errorDescription: String? {
         switch self {
@@ -475,6 +477,9 @@ enum TranscriptionError: Error, LocalizedError {
             return "Transcription failed"
         case .modelNotReady:
             return "Transcription model is not ready"
+        case let .unsupportedLanguage(locale):
+            let name = Locale.current.localizedString(forIdentifier: locale.identifier) ?? locale.identifier
+            return "Apple Speech can't transcribe \(name) on this Mac"
         }
     }
 }

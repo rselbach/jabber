@@ -66,8 +66,6 @@ enum Constants {
         "dutch": "nl",
         "english": "en",
         "estonian": "et",
-        "farsi": "fa",
-        "filipino": "fil",
         "finnish": "fi",
         "flemish": "nl",
         "french": "fr",
@@ -81,11 +79,9 @@ enum Constants {
         "korean": "ko",
         "latvian": "lv",
         "lithuanian": "lt",
-        "macedonian": "mk",
         "malay": "ms",
         "maltese": "mt",
         "mandarin": "zh",
-        "persian": "fa",
         "polish": "pl",
         "portuguese": "pt",
         "romanian": "ro",
@@ -95,7 +91,6 @@ enum Constants {
         "slovenian": "sl",
         "spanish": "es",
         "swedish": "sv",
-        "tagalog": "fil",
         "thai": "th",
         "turkish": "tr",
         "ukrainian": "uk",
@@ -105,8 +100,6 @@ enum Constants {
     /// some language codes have multiple names; pick one for UI
     private static let preferredLanguageNameByCode: [String: String] = [
         "es": "spanish",
-        "fa": "persian",
-        "fil": "filipino",
         "nl": "dutch",
         "ro": "romanian",
         "zh": "chinese"

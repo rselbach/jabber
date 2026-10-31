@@ -16,6 +16,17 @@ enum AppMode {
         "sl", "sr", "sv", "uk"
     ]
 
+    /// Languages Apple Speech transcribes: the union of SpeechTranscriber's and
+    /// DictationTranscriber's supported locales on macOS 27. Like the Parakeet
+    /// list, it names languages Jabber does not offer yet. The provider still
+    /// asks the Speech framework at load time, which has the final say.
+    static let appleSpeechLanguageCodes: Set<String> = [
+        "ar", "bn", "ca", "cs", "da", "de", "el", "en", "es", "fi", "fr", "gu",
+        "he", "hi", "hr", "hu", "id", "it", "ja", "kn", "ko", "ks", "mai", "ml",
+        "mr", "ms", "nb", "ne", "nl", "or", "pa", "pl", "pt", "ro", "ru", "sk",
+        "sv", "ta", "te", "th", "tr", "uk", "ur", "vi", "yue", "zh"
+    ]
+
     enum ModelFamily: String, CaseIterable {
         case parakeetTDT
         case nemotronASR
@@ -29,15 +40,11 @@ enum AppMode {
         let name: String
         let description: String
         let sizeHint: String
-        let supportedLanguageCodes: Set<String>?
+        let supportedLanguageCodes: Set<String>
         let license: String
         let licenseUrl: String
         let attribution: String
         let isBuiltIn: Bool
-
-        var supportsAllLanguages: Bool {
-            supportedLanguageCodes == nil
-        }
     }
 
     static let modelDefinitions: [ModelDefinition] = [
@@ -100,7 +107,7 @@ enum AppMode {
             name: "Apple Speech",
             description: "Built-in macOS speech recognition — no download required",
             sizeHint: "Built-in",
-            supportedLanguageCodes: nil,
+            supportedLanguageCodes: appleSpeechLanguageCodes,
             license: "Apple System",
             licenseUrl: "https://www.apple.com/legal/sla/",
             attribution: "Apple Speech Framework (macOS 26+)",

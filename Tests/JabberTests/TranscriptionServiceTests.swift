@@ -338,7 +338,7 @@ final class TranscriptionServiceTests: XCTestCase {
     func testResolveLanguageAcceptsValidCode() {
         XCTAssertEqual(TranscriptionService.resolveLanguage("en"), "en")
         XCTAssertEqual(TranscriptionService.resolveLanguage("zh"), "zh")
-        XCTAssertEqual(TranscriptionService.resolveLanguage("fa"), "fa")
+        XCTAssertEqual(TranscriptionService.resolveLanguage("ar"), "ar")
     }
 
     func testResolveLanguageFallsBackForInvalidCode() {

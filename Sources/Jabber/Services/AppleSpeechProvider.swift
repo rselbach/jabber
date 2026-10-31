@@ -12,8 +12,20 @@ final class AppleSpeechProvider: TranscriptionProvider, @unchecked Sendable {
 
     private struct State {
         var analyzerFormat: AVAudioFormat?
+        /// The locale Jabber asked for. Asking for a different one re-prepares.
         var preparedLocale: Locale?
+        /// The Apple module that serves `preparedLocale`.
+        var transcriber: Transcriber?
         var ready = false
+    }
+
+    /// The Apple module that transcribes a locale, and the supported locale it
+    /// runs with. SpeechTranscriber is Apple's newer, more accurate model but
+    /// covers fewer languages; DictationTranscriber covers the rest of what
+    /// system dictation supports.
+    enum Transcriber: Equatable {
+        case speech(Locale)
+        case dictation(Locale)
     }
 
     var isReady: Bool {
@@ -33,50 +45,81 @@ final class AppleSpeechProvider: TranscriptionProvider, @unchecked Sendable {
         progressHandler?(1.0, "Ready")
     }
 
-    /// Ensures the speech asset for `locale` is installed and rebuilds the
-    /// converter/analyzerFormat for it. Shared by `load()` and `transcribe()`
-    /// so a language switch without a model switch re-preares the provider
-    /// instead of transcribing in the stale locale.
+    /// Picks the Apple module for `locale`, ensures its speech asset is
+    /// installed, and rebuilds the converter/analyzerFormat for it. Shared by
+    /// `load()` and `transcribe()` so a language switch without a model switch
+    /// re-prepares the provider instead of transcribing in the stale locale.
     private func prepareForLocale(
         _ locale: Locale,
         progressHandler: (@Sendable (Double, String) -> Void)?
     ) async throws {
-        let transcriber = SpeechTranscriber(
+        let transcriber = try await Self.transcriber(for: locale)
+        let module = Self.makeModule(transcriber)
+
+        // Nil when the asset is already installed.
+        if let downloader = try await AssetInventory.assetInstallationRequest(supporting: [module]) {
+            let progress = downloader.progress
+            let monitorTask = Task {
+                while !Task.isCancelled, !progress.isFinished, !progress.isCancelled {
+                    progressHandler?(progress.fractionCompleted, "Downloading speech model...")
+                    do {
+                        try await Task.sleep(for: .milliseconds(100))
+                    } catch {
+                        break
+                    }
+                }
+            }
+            defer { monitorTask.cancel() }
+            try await downloader.downloadAndInstall()
+        }
+
+        let analyzerFormat = await SpeechAnalyzer.bestAvailableAudioFormat(compatibleWith: [module])
+        state.withLock {
+            $0.analyzerFormat = analyzerFormat
+            $0.preparedLocale = locale
+            $0.transcriber = transcriber
+        }
+    }
+
+    /// Prefers SpeechTranscriber and falls back to DictationTranscriber, each
+    /// asked for its supported locale equivalent to `locale`.
+    static func transcriber(for locale: Locale) async throws -> Transcriber {
+        if let supported = await SpeechTranscriber.supportedLocale(equivalentTo: locale) {
+            return .speech(supported)
+        }
+        if let supported = await DictationTranscriber.supportedLocale(equivalentTo: locale) {
+            return .dictation(supported)
+        }
+        throw TranscriptionError.unsupportedLanguage(locale)
+    }
+
+    private static func makeModule(_ transcriber: Transcriber) -> any SpeechModule {
+        switch transcriber {
+        case let .speech(locale):
+            makeSpeechTranscriber(locale)
+        case let .dictation(locale):
+            makeDictationTranscriber(locale)
+        }
+    }
+
+    private static func makeSpeechTranscriber(_ locale: Locale) -> SpeechTranscriber {
+        SpeechTranscriber(
             locale: locale,
             transcriptionOptions: [],
             reportingOptions: [],
             attributeOptions: []
         )
+    }
 
-        let supportedIDs = await SpeechTranscriber.supportedLocales.map { Self.normalized($0) }
-        guard supportedIDs.contains(Self.normalized(locale)) else {
-            throw TranscriptionError.loadFailed
-        }
-
-        let installedIDs = await SpeechTranscriber.installedLocales.map { Self.normalized($0) }
-        if !installedIDs.contains(Self.normalized(locale)) {
-            if let downloader = try await AssetInventory.assetInstallationRequest(supporting: [transcriber]) {
-                let progress = downloader.progress
-                let monitorTask = Task {
-                    while !Task.isCancelled, !progress.isFinished, !progress.isCancelled {
-                        progressHandler?(progress.fractionCompleted, "Downloading speech model...")
-                        do {
-                            try await Task.sleep(for: .milliseconds(100))
-                        } catch {
-                            break
-                        }
-                    }
-                }
-                defer { monitorTask.cancel() }
-                try await downloader.downloadAndInstall()
-            }
-        }
-
-        let analyzerFormat = await SpeechAnalyzer.bestAvailableAudioFormat(compatibleWith: [transcriber])
-        state.withLock {
-            $0.analyzerFormat = analyzerFormat
-            $0.preparedLocale = locale
-        }
+    private static func makeDictationTranscriber(_ locale: Locale) -> DictationTranscriber {
+        // Unlike SpeechTranscriber, dictation punctuates only when asked.
+        DictationTranscriber(
+            locale: locale,
+            contentHints: [],
+            transcriptionOptions: [.punctuation],
+            reportingOptions: [],
+            attributeOptions: []
+        )
     }
 
     func transcribe(samples: [Float], language: String?) async throws -> String {
@@ -94,17 +137,8 @@ final class AppleSpeechProvider: TranscriptionProvider, @unchecked Sendable {
         if locale != initialState.preparedLocale {
             try await prepareForLocale(locale, progressHandler: nil)
         }
-        let analyzerFormat = state.withLock { $0.analyzerFormat }
-
-        let transcriber = SpeechTranscriber(
-            locale: locale,
-            transcriptionOptions: [],
-            reportingOptions: [],
-            attributeOptions: []
-        )
-
-        let (inputStream, continuation) = AsyncStream<AnalyzerInput>.makeStream()
-        let analyzer = SpeechAnalyzer(modules: [transcriber])
+        let (analyzerFormat, transcriber) = state.withLock { ($0.analyzerFormat, $0.transcriber) }
+        guard let transcriber else { throw TranscriptionError.loadFailed }
 
         guard let buffer = Self.makePCMBuffer(from: samples) else {
             throw TranscriptionError.transcriptionFailed
@@ -119,19 +153,21 @@ final class AppleSpeechProvider: TranscriptionProvider, @unchecked Sendable {
         }
 
         let finalText = OSAllocatedUnfairLock(initialState: "")
-        let resultsTask = Task {
-            for try await result in transcriber.results {
-                let text = String(result.text.characters)
-                if result.isFinal {
-                    finalText.withLock { accumulated in
-                        if !accumulated.isEmpty, !text.isEmpty {
-                            accumulated += " "
-                        }
-                        accumulated += text
-                    }
-                }
-            }
+        let module: any SpeechModule
+        let resultsTask: Task<Void, any Error>
+        switch transcriber {
+        case let .speech(locale):
+            let speech = Self.makeSpeechTranscriber(locale)
+            module = speech
+            resultsTask = Self.collectFinalText(from: speech, into: finalText)
+        case let .dictation(locale):
+            let dictation = Self.makeDictationTranscriber(locale)
+            module = dictation
+            resultsTask = Self.collectFinalText(from: dictation, into: finalText)
         }
+
+        let (inputStream, continuation) = AsyncStream<AnalyzerInput>.makeStream()
+        let analyzer = SpeechAnalyzer(modules: [module])
 
         do {
             try await analyzer.start(inputSequence: inputStream)
@@ -153,6 +189,24 @@ final class AppleSpeechProvider: TranscriptionProvider, @unchecked Sendable {
         return finalText.withLock { $0 }.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
+    /// Joins the final results `module` produces, in order, with spaces.
+    private static func collectFinalText<Module: SpeechModule>(
+        from module: Module,
+        into finalText: OSAllocatedUnfairLock<String>
+    ) -> Task<Void, any Error> where Module.Result: TranscribedText {
+        Task {
+            for try await result in module.results where result.isFinal {
+                let text = String(result.text.characters)
+                finalText.withLock { accumulated in
+                    if !accumulated.isEmpty, !text.isEmpty {
+                        accumulated += " "
+                    }
+                    accumulated += text
+                }
+            }
+        }
+    }
+
     private func cancelResultsTask(_ resultsTask: Task<Void, any Error>) async {
         resultsTask.cancel()
         do {
@@ -168,6 +222,7 @@ final class AppleSpeechProvider: TranscriptionProvider, @unchecked Sendable {
         state.withLock {
             $0.ready = false
             $0.preparedLocale = nil
+            $0.transcriber = nil
             $0.analyzerFormat = nil
         }
     }
@@ -200,11 +255,8 @@ final class AppleSpeechProvider: TranscriptionProvider, @unchecked Sendable {
         "hu": "hu-HU",
         "ro": "ro-RO",
         "uk": "uk-UA",
-        "fa": "fa-IR",
         "id": "id-ID",
         "ms": "ms-MY",
-        "mk": "mk-MK",
-        "fil": "fil-PH",
         "yue": "yue-CN",
         "be": "be-BY",
         "bg": "bg-BG",
@@ -238,10 +290,6 @@ final class AppleSpeechProvider: TranscriptionProvider, @unchecked Sendable {
             return locale(for: language)
         }
         return preparedLocale ?? locale(for: nil)
-    }
-
-    static func normalized(_ locale: Locale) -> String {
-        locale.identifier(.bcp47).replacingOccurrences(of: "_", with: "-")
     }
 
     // MARK: - Audio Buffer Helpers
@@ -307,3 +355,12 @@ final class AppleSpeechProvider: TranscriptionProvider, @unchecked Sendable {
         return output
     }
 }
+
+/// The transcribed text both Apple transcribers' results carry, so one
+/// collector serves either module.
+private protocol TranscribedText {
+    var text: AttributedString { get }
+}
+
+extension SpeechTranscriber.Result: TranscribedText {}
+extension DictationTranscriber.Result: TranscribedText {}

@@ -119,9 +119,27 @@ final class LanguageModelCatalogTests: XCTestCase {
         }
     }
 
-    func testAppleSpeechSupportsAllLanguages() {
+    func testEveryOfferedLanguageHasAModelThatTranscribesIt() {
+        // A language no model handles would leave the user with a model that
+        // fails to load.
         for code in Constants.validLanguageCodes {
-            XCTAssertTrue(LanguageModelCatalog.supportsLanguage(code, modelId: AppMode.appleSpeechModelId))
+            let recommended = LanguageModelCatalog.recommendedModelId(for: code)
+            XCTAssertTrue(LanguageModelCatalog.supportsLanguage(code, modelId: recommended), code)
+        }
+    }
+
+    func testAppleSpeechIsOfferedOnlyWhereItTranscribes() {
+        // Apple has no model for these Parakeet languages.
+        for code in ["be", "bg", "bs", "et", "lt", "lv", "mt", "sl", "sr"] {
+            XCTAssertFalse(
+                LanguageModelCatalog.compatibleModelIds(for: code).contains(AppMode.appleSpeechModelId),
+                code
+            )
+        }
+
+        // Only DictationTranscriber covers these, and nothing else does.
+        for code in ["ar", "id", "ms", "th", "tr", "vi"] {
+            XCTAssertEqual(LanguageModelCatalog.compatibleModelIds(for: code), [AppMode.appleSpeechModelId], code)
         }
     }
 
@@ -196,6 +214,10 @@ final class LanguageModelCatalogTests: XCTestCase {
             ),
             "korean on apple speech is supported": (
                 "ko", AppMode.appleSpeechModelId, "pt", .supported
+            ),
+            "belarusian on apple speech recommends parakeet v3": (
+                "be", AppMode.appleSpeechModelId, "pt",
+                .unsupported(recommendedModelId: AppMode.parakeetMultilingualModelId)
             ),
             "auto on parakeet v3 detects the language": (
                 "auto", AppMode.parakeetMultilingualModelId, "pt", .detectsLanguage

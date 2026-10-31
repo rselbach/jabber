@@ -31,22 +31,10 @@ final class AppleSpeechProviderTests: XCTestCase {
         XCTAssertEqual(result.identifier, "xx")
     }
 
-    func testNormalizedProducesBCP47WithHyphens() {
-        let locale = Locale(identifier: "en_US")
-        let normalized = AppleSpeechProvider.normalized(locale)
-        XCTAssertTrue(normalized.contains("-"), "normalized locale should use hyphens, got: \(normalized)")
-        XCTAssertFalse(normalized.contains("_"), "normalized locale should not use underscores, got: \(normalized)")
-    }
-
-    func testNormalizedHasNoUnderscoresForAllMappedLocales() {
-        for (code, _) in AppleSpeechProvider.localeMap {
-            let locale = AppleSpeechProvider.locale(for: code)
-            let normalized = AppleSpeechProvider.normalized(locale)
-            XCTAssertFalse(
-                normalized.contains("_"),
-                "normalized('\(code)') = '\(normalized)' should not contain underscores"
-            )
-        }
+    func testUnsupportedLanguageErrorNamesTheLanguage() {
+        let description = TranscriptionError.unsupportedLanguage(Locale(identifier: "fa-IR")).errorDescription
+        let name = Locale.current.localizedString(forIdentifier: "fa-IR") ?? "fa-IR"
+        XCTAssertEqual(description, "Apple Speech can't transcribe \(name) on this Mac")
     }
 
     // MARK: - Bug: transcribe must honor the passed language over the stale

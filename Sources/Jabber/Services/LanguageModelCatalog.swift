@@ -33,7 +33,7 @@ enum LanguageModelCatalog {
 
     static func routes(for languageCode: String) -> [Route] {
         if languageCode == "auto" {
-            // Apple Speech leads because it covers every language Jabber
+            // Apple Speech leads because it covers the most languages Jabber
             // offers; Parakeet v3 needs the language named to pick a script.
             return [
                 .init(modelId: AppMode.appleSpeechModelId, isRecommended: true),
@@ -54,22 +54,22 @@ enum LanguageModelCatalog {
         }
 
         if AppMode.parakeetMultilingualLanguageCodes.contains(languageCode) {
-            return [
-                .init(modelId: AppMode.parakeetMultilingualModelId, isRecommended: true),
-                .init(modelId: AppMode.appleSpeechModelId, isRecommended: false)
-            ]
+            return [.init(modelId: AppMode.parakeetMultilingualModelId, isRecommended: true)]
+                + appleSpeechRoute(for: languageCode, isRecommended: false)
         }
 
         if languageCode == "ja" {
-            return [
-                .init(modelId: AppMode.parakeetJapaneseModelId, isRecommended: true),
-                .init(modelId: AppMode.appleSpeechModelId, isRecommended: false)
-            ]
+            return [.init(modelId: AppMode.parakeetJapaneseModelId, isRecommended: true)]
+                + appleSpeechRoute(for: languageCode, isRecommended: false)
         }
 
-        return [
-            .init(modelId: AppMode.appleSpeechModelId, isRecommended: true)
-        ]
+        return appleSpeechRoute(for: languageCode, isRecommended: true)
+    }
+
+    /// Apple Speech, when it can transcribe the language.
+    private static func appleSpeechRoute(for languageCode: String, isRecommended: Bool) -> [Route] {
+        guard AppMode.appleSpeechLanguageCodes.contains(languageCode) else { return [] }
+        return [.init(modelId: AppMode.appleSpeechModelId, isRecommended: isRecommended)]
     }
 
     static func recommendedModelId(for languageCode: String) -> String {
@@ -83,11 +83,10 @@ enum LanguageModelCatalog {
 
     static func supportsLanguage(_ languageCode: String, modelId: String) -> Bool {
         guard let def = AppMode.modelDefinition(for: modelId) else { return false }
-        guard let supported = def.supportedLanguageCodes else { return true }
         if languageCode == "auto" {
             return true
         }
-        return supported.contains(languageCode)
+        return def.supportedLanguageCodes.contains(languageCode)
     }
 
     /// Resolves what `modelId` will actually do with `languageCode`.
@@ -107,11 +106,12 @@ enum LanguageModelCatalog {
             return .supported
         }
 
-        // Only Apple Speech has no language list, and it cannot detect: it
-        // needs a locale up front and takes the system's.
-        guard let supported = def.supportedLanguageCodes else {
+        // Apple Speech cannot detect: it needs a locale up front and takes the
+        // system's.
+        if def.family == .appleSpeech {
             return .usesSystemLanguage(systemLanguageCode)
         }
+        let supported = def.supportedLanguageCodes
         if supported.count == 1, let only = supported.first {
             return .assumesLanguage(only)
         }

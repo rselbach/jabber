@@ -201,6 +201,10 @@ class OverlayWindow: OverlayWindowController {
         waveformView?.setTargetAppIcon(icon)
     }
 
+    func setInputDeviceName(_ name: String?) {
+        waveformView?.setInputDeviceName(name)
+    }
+
     func startRecordingClock(limit: TimeInterval) {
         waveformView?.startRecordingClock(limit: limit)
     }
@@ -365,6 +369,8 @@ struct WaveformContainer: View {
             fallbackNoticeView(notice)
         } else if waveformView.isProcessing {
             processingContent
+        } else if waveformView.isInputSilent {
+            silentInputContent
         } else if waveformView.partialTranscription.isEmpty {
             waveform
         } else {
@@ -388,6 +394,27 @@ struct WaveformContainer: View {
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
                     .lineLimit(3)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .padding(.horizontal, 18)
+        .padding(.vertical, 12)
+    }
+
+    /// Recording carries on; this only says nothing is coming in, and clears
+    /// as soon as the microphone delivers sound.
+    private var silentInputContent: some View {
+        HStack(spacing: 10) {
+            Image(systemName: "mic.slash.fill")
+                .foregroundStyle(.orange)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(waveformView.inputDeviceName.map { "No sound from \($0)" } ?? "No sound from the microphone")
+                    .font(.headline)
+                    .lineLimit(1)
+                Text("Check that it's unmuted, or pick another input in Settings.")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(2)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
         }

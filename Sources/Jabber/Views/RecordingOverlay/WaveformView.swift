@@ -2,6 +2,34 @@ import AppKit
 import Foundation
 import SwiftUI
 
+/// Spots a microphone that delivers no signal at all (muted, unplugged
+/// interface, a headset whose mic is off) while recording, so the user hears
+/// about it before dictating a paragraph into nothing. The threshold sits far
+/// below any live microphone's noise floor, so a pause to think never trips it.
+struct SilentInputDetector {
+    /// About -70 dBFS RMS.
+    static let threshold: Float = 0.0003
+    static let duration: TimeInterval = 1.5
+
+    private var silentSince: TimeInterval?
+
+    /// Records `level` heard at `time`; returns whether the input has been
+    /// silent for `duration`.
+    mutating func observe(level: Float, at time: TimeInterval) -> Bool {
+        guard level < Self.threshold else {
+            silentSince = nil
+            return false
+        }
+        let since = silentSince ?? time
+        silentSince = since
+        return time - since >= Self.duration
+    }
+
+    mutating func reset() {
+        silentSince = nil
+    }
+}
+
 /// A short titled message shown on the overlay in place of its live content.
 struct OverlayNotice: Equatable {
     let title: String
@@ -25,6 +53,12 @@ final class WaveformView: ObservableObject {
     /// not post as a system notification. Auto-clears after
     /// `fallbackNoticeDuration` so no click-to-dismiss UI is needed.
     @Published private(set) var fallbackNotice: OverlayNotice?
+    /// The microphone has delivered no signal for a while; see
+    /// `SilentInputDetector`.
+    @Published private(set) var isInputSilent = false
+    /// Named in the silent-input hint.
+    @Published private(set) var inputDeviceName: String?
+    private var silentInputDetector = SilentInputDetector()
 
     /// Invoked when the fallback notice auto-clears (after its duration) or is
     /// cleared explicitly, so the overlay window can complete a deferred hide.
@@ -46,7 +80,11 @@ final class WaveformView: ObservableObject {
         cachedLevels
     }
 
-    func addLevel(_ level: Float) {
+    func addLevel(_ level: Float, at time: TimeInterval = ProcessInfo.processInfo.systemUptime) {
+        let isSilent = silentInputDetector.observe(level: level, at: time)
+        if isSilent != isInputSilent {
+            isInputSilent = isSilent
+        }
         if circularBuffer.count < maxSamples {
             circularBuffer.append(level)
         } else {
@@ -76,6 +114,9 @@ final class WaveformView: ObservableObject {
         partialTranscription = ""
         targetAppIcon = nil
         recordingStartedAt = nil
+        isInputSilent = false
+        inputDeviceName = nil
+        silentInputDetector.reset()
         // Abandon any in-flight notice without firing the cleared callback: a
         // reset means the overlay is being reused for a new session, so a
         // pending deferred hide must not fire against the fresh state.
@@ -89,6 +130,7 @@ final class WaveformView: ObservableObject {
     }
 
     func showProcessing() {
+        isInputSilent = false
         isProcessing = true
         processingLabel = "Transcribing..."
         recordingStartedAt = nil
@@ -132,5 +174,9 @@ final class WaveformView: ObservableObject {
 
     func setTargetAppIcon(_ icon: NSImage?) {
         targetAppIcon = icon
+    }
+
+    func setInputDeviceName(_ name: String?) {
+        inputDeviceName = name
     }
 }

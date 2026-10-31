@@ -60,4 +60,33 @@ final class WaveformViewTests: XCTestCase {
         XCTAssertNil(view.fallbackNotice)
         XCTAssertFalse(cleared)
     }
+
+    func testSilentInputDetector() {
+        let tests: [String: (levels: [(level: Float, time: TimeInterval)], want: Bool)] = [
+            "silent long enough": ([(0, 0), (0.0001, 1), (0, 1.5)], true),
+            "silent too briefly": ([(0, 0), (0, 1.4)], false),
+            "room noise is not silence": ([(0.001, 0), (0.001, 2)], false),
+            "sound restarts the clock": ([(0, 0), (0.01, 1), (0, 1.2), (0, 2.6)], false),
+            "sound clears it": ([(0, 0), (0, 2), (0.01, 2.1)], false)
+        ]
+        for (name, tc) in tests {
+            var detector = SilentInputDetector()
+            var got = false
+            for sample in tc.levels {
+                got = detector.observe(level: sample.level, at: sample.time)
+            }
+            XCTAssertEqual(got, tc.want, name)
+        }
+    }
+
+    func testSilentInputClearsOnReset() {
+        let view = WaveformView()
+        view.addLevel(0, at: 0)
+        view.addLevel(0, at: 2)
+        XCTAssertTrue(view.isInputSilent)
+
+        view.reset()
+
+        XCTAssertFalse(view.isInputSilent)
+    }
 }

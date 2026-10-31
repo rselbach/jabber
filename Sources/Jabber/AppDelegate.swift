@@ -1499,11 +1499,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         overlayWindow.setTargetAppIcon(
             TypingService.appIcon(forTargetProcessID: currentTargetProcessID)
         )
+        overlayWindow.setInputDeviceName(currentInputDeviceName())
         overlayWindow.startRecordingClock(
             limit: TimeInterval(dictationCoordinator.maxRecordingDuration.components.seconds)
         )
         updateStatusIcon(state: .recording)
         SoundFeedbackService.shared.play(.dictationStart)
+    }
+
+    /// The microphone dictation records from: the selected one, or the macOS
+    /// default.
+    private func currentInputDeviceName() -> String? {
+        let monitor = AudioInputDeviceMonitor.shared
+        let selectedUID = TypedSettings[.inputDeviceUID]
+        guard !selectedUID.isEmpty else { return monitor.defaultInputDevice?.name }
+        return monitor.devices.first { $0.uid == selectedUID }?.name
     }
 
     /// Shows the recording once a provisional Hold press outlasts a tap. A

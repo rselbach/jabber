@@ -679,10 +679,7 @@ final class DictationCoordinatorTests: XCTestCase {
         XCTAssertTrue(coordinator.isIdle)
         XCTAssertTrue(audioCapture.didStop)
         XCTAssertTrue(typingService.outputs.isEmpty)
-        guard let surfacedError else {
-            return XCTFail("input-unavailable error was not surfaced")
-        }
-        guard case .inputUnavailable = surfacedError else {
+        guard let surfacedError, case .inputUnavailable = surfacedError else {
             return XCTFail("input-unavailable error was not surfaced")
         }
     }

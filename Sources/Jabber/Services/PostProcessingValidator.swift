@@ -72,8 +72,7 @@ enum PostProcessingValidator {
     }
 
     static func rogueMarkdownError(raw: String, processed: String) -> PostProcessingValidationError? {
-        guard beginsWithMarkdownStructure(processed) else { return nil }
-        guard !containsFormattingCommand(raw) else { return nil }
+        guard beginsWithMarkdownStructure(processed), !containsFormattingCommand(raw) else { return nil }
         return PostProcessingValidationError(
             kind: .rogueMarkdown,
             detail: "output introduces markdown formatting that was not dictated"

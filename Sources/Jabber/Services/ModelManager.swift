@@ -181,8 +181,7 @@ final class ModelManager {
     func selectModel(_ modelId: String) -> Bool {
         // An explicit choice replaces any switch still waiting on a download.
         pendingSelectionModelId = nil
-        guard downloadedModels.contains(where: { $0.id == modelId }) else { return false }
-        guard settings[.selectedModel] != modelId else { return false }
+        guard downloadedModels.contains(where: { $0.id == modelId }), settings[.selectedModel] != modelId else { return false }
         settings.remove(.declinedModelMigrationNoticeKey)
         settings[.selectedModel] = modelId
         NotificationCenter.default.post(name: Constants.Notifications.modelDidChange, object: nil)
@@ -546,11 +545,8 @@ final class ModelManager {
     }
 
     private func downloadModelFiles(modelId: String, modelName: String) async throws -> URL {
-        guard let def = AppMode.modelDefinition(for: modelId) else {
-            throw ModelError.modelNotFound(modelId: modelId)
-        }
-
-        guard case let .fluidAudio(repo) = def.source,
+        guard let def = AppMode.modelDefinition(for: modelId),
+              case let .fluidAudio(repo) = def.source,
               let layout = ModelInstallationValidator.layout(for: def)
         else {
             throw ModelError.modelNotFound(modelId: modelId)

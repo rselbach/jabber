@@ -18,8 +18,7 @@ final class SoundFeedbackService {
     private let logger = Logger(subsystem: "com.rselbach.jabber", category: "SoundFeedbackService")
 
     func play(_ cue: Cue) {
-        guard TypedSettings[.soundFeedbackEnabled] else { return }
-        guard let player = player(for: cue) else { return }
+        guard TypedSettings[.soundFeedbackEnabled], let player = player(for: cue) else { return }
         player.currentTime = 0
         player.play()
     }

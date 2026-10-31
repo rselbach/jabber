@@ -134,11 +134,11 @@ enum ReplacementWordsResolver {
 
         for rule in rules {
             guard let range = transcript.range(
-                of: rule.trigger,
-                options: [.caseInsensitive, .anchored],
-                range: position ..< transcript.endIndex
-            ) else { continue }
-            guard isLeftBoundary(at: range.lowerBound, in: transcript),
+                      of: rule.trigger,
+                      options: [.caseInsensitive, .anchored],
+                      range: position ..< transcript.endIndex
+                  ),
+                  isLeftBoundary(at: range.lowerBound, in: transcript),
                   isRightBoundary(at: range.upperBound, in: transcript) else { continue }
             // "Longest" is measured in the transcript, not the trigger: full
             // case folding can match spans of a different length than the

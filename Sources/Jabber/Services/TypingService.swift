@@ -59,8 +59,7 @@ final class TypingService {
             &focusedElementRef
         )
 
-        guard result == .success, let focusedElementRef else { return nil }
-        guard CFGetTypeID(focusedElementRef) == AXUIElementGetTypeID() else { return nil }
+        guard result == .success, let focusedElementRef, CFGetTypeID(focusedElementRef) == AXUIElementGetTypeID() else { return nil }
 
         let focusedElement = unsafeBitCast(focusedElementRef, to: AXUIElement.self)
         var pid: pid_t = 0
@@ -308,9 +307,7 @@ final class TypingService {
     }
 
     private func insertTextViaAccessibility(_ text: String, targetProcessID: pid_t?) -> Bool {
-        guard let element = focusedTextElement(targetProcessID: targetProcessID) else { return false }
-        guard let currentValue = stringValue(from: element) else { return false }
-        guard var selectedRange = selectedTextRange(from: element) else { return false }
+        guard let element = focusedTextElement(targetProcessID: targetProcessID), let currentValue = stringValue(from: element), var selectedRange = selectedTextRange(from: element) else { return false }
 
         let currentNSString = currentValue as NSString
         let maxLength = currentNSString.length
@@ -366,8 +363,7 @@ final class TypingService {
     private func axElementAttribute(from element: AXUIElement, attribute: CFString) -> AXUIElement? {
         var value: CFTypeRef?
         let result = AXUIElementCopyAttributeValue(element, attribute, &value)
-        guard result == .success, let value else { return nil }
-        guard CFGetTypeID(value) == AXUIElementGetTypeID() else { return nil }
+        guard result == .success, let value, CFGetTypeID(value) == AXUIElementGetTypeID() else { return nil }
         return unsafeBitCast(value, to: AXUIElement.self)
     }
 
@@ -381,8 +377,7 @@ final class TypingService {
     private func selectedTextRange(from element: AXUIElement) -> CFRange? {
         var value: CFTypeRef?
         let result = AXUIElementCopyAttributeValue(element, kAXSelectedTextRangeAttribute as CFString, &value)
-        guard result == .success, let value else { return nil }
-        guard CFGetTypeID(value) == AXValueGetTypeID() else { return nil }
+        guard result == .success, let value, CFGetTypeID(value) == AXValueGetTypeID() else { return nil }
 
         var range = CFRange()
         guard AXValueGetValue(unsafeBitCast(value, to: AXValue.self), .cfRange, &range) else { return nil }

@@ -82,8 +82,7 @@ struct SpeechPage: View {
             queueAlert(pendingAlerts.removeFirst())
         }
         .onReceive(NotificationCenter.default.publisher(for: Constants.Notifications.modelDownloadStateDidChange)) { notification in
-            guard let state = notification.object as? ModelDownloadState else { return }
-            guard state.phase == .failed, !state.isCancelled else { return }
+            guard let state = notification.object as? ModelDownloadState, state.phase == .failed, !state.isCancelled else { return }
 
             let modelName = modelManager.models.first { $0.id == state.modelId }?.name ?? state.modelId
             let details = state.errorDescription ?? state.status

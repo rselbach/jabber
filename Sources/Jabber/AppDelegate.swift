@@ -159,8 +159,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         audioPrepareTask?.cancel()
         audioPrepareTask = Task { @MainActor [weak self] in
             await AppReadinessGate.shared.waitForUIReady()
-            guard let self, !Task.isCancelled else { return }
-            guard permissionService.hasMicrophonePermission() else { return }
+            guard let self, !Task.isCancelled, permissionService.hasMicrophonePermission() else { return }
             audioCapture.prepare()
         }
     }
@@ -583,8 +582,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func deliverTranscript(_ text: String) {
-        guard dictationCoordinator.isIdle else { return }
-        guard ensureOutputPermissionReady() else { return }
+        guard dictationCoordinator.isIdle, ensureOutputPermissionReady() else { return }
         typingService.output(text, targetProcessID: TypingService.captureFocusedProcessID())
     }
 
@@ -954,8 +952,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func ensureOutputPermissionReady() -> Bool {
-        guard typingService.requiresAccessibilityPermission else { return true }
-        guard !permissionService.hasAccessibilityPermission() else { return true }
+        guard typingService.requiresAccessibilityPermission, !permissionService.hasAccessibilityPermission() else { return true }
 
         showAccessibilityPermissionWarning()
         return false
@@ -999,8 +996,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func shouldShowAutomaticOnboarding() -> Bool {
-        guard !TypedSettings[.onboardingCompleted] else { return false }
-        guard !TypedSettings[.didShowFirstRunSetup] else { return false }
+        guard !TypedSettings[.onboardingCompleted], !TypedSettings[.didShowFirstRunSetup] else { return false }
         return true
     }
 
@@ -1093,8 +1089,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func pendingModelMigrationNotice() -> ModelMigrationNotice? {
         // Onboarding owns the new-user / pre-onboarding upgrade flow; don't
         // compete with it.
-        guard !shouldShowAutomaticOnboarding() else { return nil }
-        guard let migration = ModelManager.shared.lastMigration else { return nil }
+        guard !shouldShowAutomaticOnboarding(), let migration = ModelManager.shared.lastMigration else { return nil }
 
         return ModelMigrationNoticeResolver.resolve(
             migration: migration,
@@ -1308,8 +1303,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // Only auto-load when the selected model is already installed —
         // loading would otherwise kick off the multi-GB download the launch
         // path deliberately avoids for a user who abandoned onboarding.
-        guard ModelManager.shared.isSelectedModelDownloaded else { return }
-        guard !isModelLoadInProgress, !transcriptionService.isReady else { return }
+        guard ModelManager.shared.isSelectedModelDownloaded, !isModelLoadInProgress, !transcriptionService.isReady else { return }
 
         if !startDeclinedModelMigrationFallbackIfNeeded() {
             startModelLoadingTask()

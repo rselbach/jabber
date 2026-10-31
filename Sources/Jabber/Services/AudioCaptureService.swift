@@ -143,11 +143,7 @@ final class AudioCaptureService {
 
         // A device that is still waking up reports a zero-rate format; a tap
         // installed against it never delivers audio.
-        guard inputFormat.sampleRate > 0, inputFormat.channelCount > 0 else {
-            throw AudioCaptureError.invalidFormat
-        }
-
-        guard let outputFormat = AVAudioFormat(
+        guard inputFormat.sampleRate > 0, inputFormat.channelCount > 0, let outputFormat = AVAudioFormat(
             commonFormat: .pcmFormatFloat32,
             sampleRate: targetSampleRate,
             channels: 1,
@@ -544,9 +540,7 @@ final class AudioCaptureService {
             return
         }
 
-        guard let convertedBuffer = conversionResult.buffer else { return }
-
-        guard let channelData = convertedBuffer.floatChannelData?[0] else { return }
+        guard let convertedBuffer = conversionResult.buffer, let channelData = convertedBuffer.floatChannelData?[0] else { return }
         let frames = Int(convertedBuffer.frameLength)
         guard frames > 0 else { return }
 

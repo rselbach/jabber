@@ -141,10 +141,7 @@ final class ParakeetASRProvider: TranscriptionProvider, @unchecked Sendable {
             ? Double(boundedPreviewCount) / Double(finalSampleCount)
             : 0
 
-        guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return false }
-        guard previewSampleCount > 0, finalSampleCount >= 32_000 else { return false }
-        guard previewAge <= .seconds(3) else { return false }
-        guard coverage >= 0.88, tailDuration <= .milliseconds(1_800) else { return false }
+        guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty, previewSampleCount > 0, finalSampleCount >= 32_000, previewAge <= .seconds(3), coverage >= 0.88, tailDuration <= .milliseconds(1_800) else { return false }
         return tailSamples == 0 || tailRMS <= 0.002
     }
 

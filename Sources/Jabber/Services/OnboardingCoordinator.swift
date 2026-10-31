@@ -277,8 +277,7 @@ final class OnboardingCoordinator {
 
     private func startRecommendedModelDownloadIfNeeded() {
         let recommended = recommendedModelIdForSelectedLanguage()
-        guard let model = modelManager.models.first(where: { $0.id == recommended }) else { return }
-        guard !model.isDownloaded, !model.isDownloading else { return }
+        guard let model = modelManager.models.first(where: { $0.id == recommended }), !model.isDownloaded, !model.isDownloading else { return }
 
         if !modelManager.startDownload(recommended) {
             modelManager.refreshModels()

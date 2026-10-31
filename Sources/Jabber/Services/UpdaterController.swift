@@ -56,8 +56,7 @@ final class UpdaterController: ObservableObject {
     }
 
     func checkForUpdatesOnLaunchIfNeeded() {
-        guard !didScheduleLaunchCheck else { return }
-        guard automaticallyChecksForUpdates else { return }
+        guard !didScheduleLaunchCheck, automaticallyChecksForUpdates else { return }
         didScheduleLaunchCheck = true
         guard let updater = updaterController?.updater else { return }
         if updater.canCheckForUpdates {

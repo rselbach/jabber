@@ -509,8 +509,7 @@ final class DictationCoordinator {
         // Only one preview loop exists, so slow passes cause ticks to be
         // skipped naturally instead of building an inference queue.
         let totalCount = audioCapture.sampleCount()
-        guard totalCount >= minimumStreamingPreviewSampleCount else { return }
-        guard totalCount > lastStreamingPreviewSampleCount else { return }
+        guard totalCount >= minimumStreamingPreviewSampleCount, totalCount > lastStreamingPreviewSampleCount else { return }
 
         // No speech gate here: it measured RMS across the whole prefix, so a
         // pause before speaking or a quiet microphone suppressed every preview

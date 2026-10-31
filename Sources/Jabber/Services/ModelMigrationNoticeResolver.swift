@@ -25,8 +25,7 @@ enum ModelMigrationNoticeResolver {
         // Built-in (Apple Speech) needs no download; an already-downloaded
         // replacement needs no action. In both cases the user feels nothing,
         // so we don't bug them.
-        guard !newModelIsBuiltIn else { return nil }
-        guard !newModelDownloaded else { return nil }
+        guard !newModelIsBuiltIn, !newModelDownloaded else { return nil }
         let key = noticeKey(for: migration)
         guard lastShownKey != key else { return nil }
         return ModelMigrationNotice(migration: migration, noticeKey: key)
@@ -51,8 +50,7 @@ enum ModelMigrationDeclineResolver {
         declinedNoticeKey: String,
         newModelDownloaded: Bool
     ) -> Bool {
-        guard let migration else { return false }
-        guard !newModelDownloaded else { return false }
+        guard let migration, !newModelDownloaded else { return false }
         return declinedNoticeKey == ModelMigrationNoticeResolver.noticeKey(for: migration)
     }
 }

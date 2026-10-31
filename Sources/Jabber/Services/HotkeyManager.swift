@@ -841,9 +841,7 @@ struct ModifierOnlyGestureReducer: Sendable, Equatable {
     ) -> Input? {
         // Only the configured physical key drives the gesture; sibling-modifier
         // events (e.g. Left Option when Right Option is configured) are ignored.
-        guard keyCode == shortcutKeyCode else { return nil }
-
-        guard let familyFlag = HotkeyShortcut.cgEventFlag(forKeyCode: keyCode) else {
+        guard keyCode == shortcutKeyCode, let familyFlag = HotkeyShortcut.cgEventFlag(forKeyCode: keyCode) else {
             return nil
         }
 

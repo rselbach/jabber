@@ -84,7 +84,9 @@ final class OpenRouterPostProcessorTests: XCTestCase {
         XCTAssertEqual(json["stream"] as? Bool, false)
         XCTAssertEqual(json["temperature"] as? Int, 0)
         XCTAssertEqual((json["reasoning"] as? [String: Any])?["effort"] as? String, "none")
-        XCTAssertEqual((json["provider"] as? [String: Any])?["sort"] as? String, "latency")
+        let routing = try XCTUnwrap(json["provider"] as? [String: Any])
+        XCTAssertEqual(routing["sort"] as? String, "latency")
+        XCTAssertEqual(routing["zdr"] as? Bool, true, "transcripts must only reach zero-retention providers")
 
         let messages = try XCTUnwrap(json["messages"] as? [[String: Any]])
         XCTAssertEqual(messages.count, 2)

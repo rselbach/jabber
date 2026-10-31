@@ -37,7 +37,7 @@ struct PostProcessingPage: View {
                             }
                         }
 
-                        Text("Cloud post-processing sends your transcript to OpenRouter and the selected model provider for processing. The API key is stored in your macOS Keychain, not in preferences. Falls back to the raw transcript if the request fails.")
+                        Text("Cloud post-processing sends your transcript to OpenRouter and the selected model provider for processing. Jabber asks OpenRouter to use only providers that don't retain your transcript. The API key is stored in your macOS Keychain, not in preferences. Falls back to the raw transcript if the request fails.")
                             .font(.caption)
                             .foregroundStyle(.secondary)
                     case .openCodeZen:

@@ -193,7 +193,7 @@ private struct OpenAICompatiblePostProcessingClient: Sendable {
 ///   "stream": false,
 ///   "temperature": 0,
 ///   "reasoning": {"effort": "<catalog effort>"},
-///   "provider": {"sort": "latency"}
+///   "provider": {"sort": "latency", "zdr": true}
 /// }
 /// ```
 /// Response: `choices[0].message.content` is returned verbatim. An empty/whitespace
@@ -266,8 +266,12 @@ struct OpenRouterPostProcessor: PostProcessingProvider {
                     "reasoning": ["effort": model.reasoningEffort.rawValue],
                     // Someone is waiting to see their dictation, so take the
                     // provider answering fastest over OpenRouter's
-                    // price-weighted default.
-                    "provider": ["sort": "latency"]
+                    // price-weighted default. Dictation can be private, so
+                    // only route to providers that retain nothing; every
+                    // catalog model has such endpoints, and a request fails
+                    // to the raw transcript rather than reach one that keeps
+                    // prompts.
+                    "provider": ["sort": "latency", "zdr": true] as [String: any Sendable]
                 ],
                 requestTimeout: Self.requestTimeout,
                 transport: transport

@@ -1,7 +1,7 @@
 import AVFoundation
 import SwiftUI
 
-/// Permissions, output, media, and update preferences.
+/// Permissions, output, media, startup, and update preferences.
 struct GeneralPage: View {
     @ObservedObject var updaterController: UpdaterController
 
@@ -14,6 +14,8 @@ struct GeneralPage: View {
     @State private var isAccessibilityTrusted = false
     @State private var inputDevices: [AudioInputDevice] = []
     @State private var inputDeviceRefreshTick = false
+    @State private var launchAtLoginStatus = LaunchAtLogin.Status.disabled
+    @State private var launchAtLoginError: String?
 
     var body: some View {
         Form {
@@ -90,6 +92,44 @@ struct GeneralPage: View {
 
             Section {
                 Toggle(
+                    "Open Jabber at login",
+                    isOn: Binding(
+                        get: { launchAtLoginStatus.isOn },
+                        set: setLaunchAtLogin
+                    )
+                )
+                .disabled(launchAtLoginStatus == .unavailable)
+
+                if let launchAtLoginError {
+                    Text(launchAtLoginError)
+                        .font(.caption)
+                        .foregroundStyle(.orange)
+                } else {
+                    switch launchAtLoginStatus {
+                    case .requiresApproval:
+                        HStack {
+                            Text("Switched off in Login Items. Turn Jabber on there to open it at login.")
+                                .font(.caption)
+                                .foregroundStyle(.orange)
+                            Spacer()
+                            Button("Open Login Items") {
+                                LaunchAtLogin.openLoginItemsSettings()
+                            }
+                        }
+                    case .unavailable:
+                        Text("Available only when Jabber runs from its app bundle.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    case .enabled, .disabled:
+                        EmptyView()
+                    }
+                }
+            } header: {
+                Text("Startup")
+            }
+
+            Section {
+                Toggle(
                     "Check for updates automatically",
                     isOn: Binding(
                         get: { updaterController.automaticallyChecksForUpdates },
@@ -114,6 +154,7 @@ struct GeneralPage: View {
             outputMode = TypingService.migratedOutputModeRawValue(outputMode)
             refreshInputDevices()
             refreshPermissions()
+            refreshLaunchAtLogin()
         }
         .onChange(of: inputDeviceUID) {
             AudioInputDeviceMonitor.shared.selectionDidChange()
@@ -124,6 +165,7 @@ struct GeneralPage: View {
         // Picks up changes made in System Settings once the user is back.
         .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
             refreshPermissions()
+            refreshLaunchAtLogin()
         }
     }
 
@@ -166,6 +208,20 @@ struct GeneralPage: View {
     private func refreshPermissions() {
         microphoneStatus = PermissionService.shared.microphoneAuthorizationStatus()
         isAccessibilityTrusted = PermissionService.shared.refreshAccessibilityPermissionStatus()
+    }
+
+    private func refreshLaunchAtLogin() {
+        launchAtLoginStatus = LaunchAtLogin.status
+    }
+
+    private func setLaunchAtLogin(_ enabled: Bool) {
+        do {
+            try LaunchAtLogin.setEnabled(enabled)
+            launchAtLoginError = nil
+        } catch {
+            launchAtLoginError = "Couldn't \(enabled ? "add Jabber to" : "remove Jabber from") Login Items: \(error.localizedDescription)"
+        }
+        refreshLaunchAtLogin()
     }
 
     /// Asks the first time; after a denial only System Settings can change it.

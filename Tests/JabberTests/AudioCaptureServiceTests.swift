@@ -26,4 +26,20 @@ final class AudioCaptureServiceTests: XCTestCase {
             XCTAssertEqual(got, tc.want, name)
         }
     }
+
+    func testPreRollKeepsOnlyTheNewestSamples() {
+        let limit = AudioCaptureService.preRollSampleLimit
+        var preRoll: [Float] = []
+
+        AudioCaptureService.appendPreRoll(Array(repeating: 1, count: limit - 10), to: &preRoll)
+        XCTAssertEqual(preRoll.count, limit - 10)
+
+        AudioCaptureService.appendPreRoll(Array(repeating: 2, count: 30), to: &preRoll)
+        XCTAssertEqual(preRoll.count, limit)
+        XCTAssertEqual(preRoll.first, 1)
+        XCTAssertEqual(preRoll.suffix(30), Array(repeating: 2, count: 30)[...])
+
+        AudioCaptureService.appendPreRoll(Array(repeating: 3, count: limit + 5), to: &preRoll)
+        XCTAssertEqual(preRoll, Array(repeating: 3, count: limit))
+    }
 }

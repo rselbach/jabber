@@ -137,6 +137,10 @@ final class DictationCoordinator {
     /// instead of audio that was just recorded.
     private(set) var isRetryingFailedDictation = false
 
+    /// Whether the recording may still turn out to be an accidental tap: it
+    /// captures audio but has not paused media. See `confirmRecording()`.
+    private(set) var isProvisional = false
+
     /// The text most recently delivered to an app, kept in memory only so the
     /// status menu can paste it again.
     private(set) var lastTranscript: String?
@@ -252,18 +256,25 @@ final class DictationCoordinator {
 
     /// Starts a new dictation session if the coordinator is idle.
     /// Returns `true` if recording began, `false` otherwise.
+    ///
+    /// A provisional start records from the first instant but leaves media
+    /// playing until `confirmRecording()`, so a brushed hotkey that `cancel()`
+    /// then drops leaves no trace.
     @discardableResult
-    func start(targetProcessID: pid_t? = nil) -> Bool {
+    func start(targetProcessID: pid_t? = nil, isProvisional: Bool = false) -> Bool {
         guard canStart else { return false }
 
         let sessionID = UUID()
         currentSessionID = sessionID
         currentTargetProcessID = targetProcessID
 
-        mediaPlaybackService.pauseForDictationIfNeeded()
+        if !isProvisional {
+            mediaPlaybackService.pauseForDictationIfNeeded()
+        }
 
         do {
             try audioCapture.startCapture()
+            self.isProvisional = isProvisional
             state = .recording
             onStateChange?(.recording)
             startStreamingPreview(sessionID: sessionID)
@@ -273,10 +284,20 @@ final class DictationCoordinator {
             logger.error("Failed to start audio capture: \(error.localizedDescription, privacy: .public)")
             currentSessionID = nil
             currentTargetProcessID = nil
-            mediaPlaybackService.resumeAfterDictationIfNeeded()
+            if !isProvisional {
+                mediaPlaybackService.resumeAfterDictationIfNeeded()
+            }
             onAudioConversionError?(error)
             return false
         }
+    }
+
+    /// Commits a provisional recording once the press proved deliberate:
+    /// media pauses now, and stopping transcribes as usual.
+    func confirmRecording() {
+        guard isRecording, isProvisional else { return }
+        isProvisional = false
+        mediaPlaybackService.pauseForDictationIfNeeded()
     }
 
     /// Stops recording and, if speech was detected, begins transcription.
@@ -289,6 +310,9 @@ final class DictationCoordinator {
     /// `cancel()` during the tail drops the session as usual.
     func stop(tail: Duration = .zero) {
         guard case .recording = state, let sessionID = currentSessionID else { return }
+        // Stopping a provisional recording keeps it, without pausing media
+        // for a session that is already ending.
+        isProvisional = false
 
         let stopStartedAt = ContinuousClock.now
         recordingLimitTask?.cancel()
@@ -321,9 +345,11 @@ final class DictationCoordinator {
         transcriptionTask = Task { [weak self] in
             do {
                 try await Task.sleep(for: tail)
-            } catch {
+            } catch is CancellationError {
                 // cancel() owns the session once it cancels the tail.
                 return
+            } catch {
+                self?.logger.error("Release tail sleep failed: \(error.localizedDescription, privacy: .public)")
             }
             guard let self, currentSessionID == sessionID else { return }
 
@@ -443,9 +469,11 @@ final class DictationCoordinator {
         let sessionID = currentSessionID
         currentSessionID = nil
         currentTargetProcessID = nil
-        // A retry never paused media, so it has nothing to resume.
-        let shouldResumeMedia = !isRetryingFailedDictation
+        // A retry or a provisional recording never paused media, so it has
+        // nothing to resume.
+        let shouldResumeMedia = !isRetryingFailedDictation && !isProvisional
         isRetryingFailedDictation = false
+        isProvisional = false
         _ = stopStreamingPreview()
         transcriptionTask?.cancel()
         transcriptionTask = nil
@@ -990,6 +1018,7 @@ final class DictationCoordinator {
         transcriptionTask = nil
         let shouldResumeMedia = !isRetryingFailedDictation
         isRetryingFailedDictation = false
+        isProvisional = false
         state = .idle
         onStateChange?(.idle)
         if shouldResumeMedia {

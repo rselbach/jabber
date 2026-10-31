@@ -66,6 +66,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// last word lost on 3 in 10 real clips released 100 ms early, and on none
     /// released on time.
     private static let hotkeyReleaseTail: Duration = .milliseconds(200)
+    /// A Hold press released sooner than this was a brushed key, not a
+    /// dictation: it is dropped before the overlay, sounds, or media pause.
+    private static let holdTapThreshold: Duration = .milliseconds(300)
 
     // Hotkey press tracking: a press that awaits microphone permission can
     // have its key released before `start()` runs, leaving a "stuck" recording.
@@ -78,6 +81,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var activeHotkeyPressMode: HotkeyActivationMode?
     private var automaticHotkeyPressStartedAt: CFAbsoluteTime?
     private var automaticHotkeyPressStartedRecording = false
+    /// Confirms a provisional Hold recording once it outlasts a tap.
+    private var provisionalConfirmTask: Task<Void, Never>?
+    /// Whether the current session's overlay, icon, and start cue are up. A
+    /// provisional recording has none until it is confirmed.
+    private var isRecordingUIShown = false
 
     // A modifier-only shortcut that failed to register for lack of
     // Accessibility is retried once the grant appears; the poll task exists
@@ -850,7 +858,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         switch mode {
         case .hold:
-            startDictationFromHotkey()
+            startDictationFromHotkey(isProvisional: true)
         case .toggle:
             if hasActiveOrPendingRecording {
                 stopOrAbortDictationFromHotkey()
@@ -875,7 +883,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         switch mode {
         case .hold:
-            stopOrAbortDictationFromHotkey()
+            if dictationCoordinator.isRecording, dictationCoordinator.isProvisional {
+                logger.notice("Dropped a hotkey tap shorter than the hold threshold")
+                dictationCoordinator.cancel()
+            } else {
+                stopOrAbortDictationFromHotkey()
+            }
         case .toggle:
             break
         case .automatic:
@@ -896,20 +909,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
-    private func startDictationFromHotkey() {
+    private func startDictationFromHotkey(isProvisional: Bool = false) {
         currentHotkeyPressID += 1
         let pressID = currentHotkeyPressID
         pendingHotkeyStartID = pressID
 
         Task { @MainActor [weak self] in
-            await self?.startDictation(pressID: pressID)
+            await self?.startDictation(pressID: pressID, isProvisional: isProvisional)
         }
     }
 
     /// Runs the readiness checks and starts recording into the focused app.
     /// `pressID` identifies a hotkey press, whose release may abort the start
-    /// while microphone permission is pending; menu starts pass nil.
-    private func startDictation(pressID: Int?) async {
+    /// while microphone permission is pending; menu starts pass nil. A
+    /// provisional start stays invisible until it outlasts a tap.
+    private func startDictation(pressID: Int?, isProvisional: Bool = false) async {
         defer {
             if let pressID {
                 if pendingHotkeyStartID == pressID {
@@ -958,7 +972,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         let targetProcessID = TypingService.captureFocusedProcessID()
         currentTargetProcessID = targetProcessID
-        _ = dictationCoordinator.start(targetProcessID: targetProcessID)
+        _ = dictationCoordinator.start(targetProcessID: targetProcessID, isProvisional: isProvisional)
     }
 
     /// Escape or the overlay's cancel button: drop the session in progress,
@@ -1356,6 +1370,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         switch state {
         case .idle:
+            provisionalConfirmTask?.cancel()
+            provisionalConfirmTask = nil
+            isRecordingUIShown = false
             overlayWindow.hide()
             overlayWindow.setTargetAppIcon(nil)
             currentTargetProcessID = nil
@@ -1363,30 +1380,63 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             // A "Download & Use" that finished mid-session switches now.
             ModelManager.shared.applyPendingSelection()
         case .recording:
-            downloadOverlay.hide()
-            overlayWindow.show()
-            overlayWindow.setTargetAppIcon(
-                TypingService.appIcon(forTargetProcessID: currentTargetProcessID)
-            )
-            overlayWindow.startRecordingClock(
-                limit: TimeInterval(dictationCoordinator.maxRecordingDuration.components.seconds)
-            )
-            updateStatusIcon(state: .recording)
-            SoundFeedbackService.shared.play(.dictationStart)
+            if dictationCoordinator.isProvisional {
+                scheduleProvisionalConfirm()
+            } else {
+                showRecordingUI()
+            }
         case .transcribing:
-            if dictationCoordinator.isRetryingFailedDictation {
-                // A retry skips recording, so the overlay is not up yet and
-                // there is no stopped recording to cue.
+            if isRecordingUIShown {
+                SoundFeedbackService.shared.play(.dictationStop)
+            } else {
+                // A retry skips recording, and a provisional recording can
+                // stop before it was confirmed, so the overlay is not up yet
+                // and there is no started recording to cue.
                 downloadOverlay.hide()
                 overlayWindow.show()
                 overlayWindow.setTargetAppIcon(
                     TypingService.appIcon(forTargetProcessID: currentTargetProcessID)
                 )
-            } else {
-                SoundFeedbackService.shared.play(.dictationStop)
             }
             overlayWindow.showProcessing()
             updateStatusIcon(state: .transcribing)
+        }
+    }
+
+    private func showRecordingUI() {
+        isRecordingUIShown = true
+        downloadOverlay.hide()
+        overlayWindow.show()
+        overlayWindow.setTargetAppIcon(
+            TypingService.appIcon(forTargetProcessID: currentTargetProcessID)
+        )
+        overlayWindow.startRecordingClock(
+            limit: TimeInterval(dictationCoordinator.maxRecordingDuration.components.seconds)
+        )
+        updateStatusIcon(state: .recording)
+        SoundFeedbackService.shared.play(.dictationStart)
+    }
+
+    /// Shows the recording once a provisional Hold press outlasts a tap. A
+    /// lone-modifier press already waited out its debounce before starting,
+    /// so it only waits for the rest of the threshold.
+    private func scheduleProvisionalConfirm() {
+        let delay = TypedSettings.hotkeyShortcut.isModifierOnly
+            ? Self.holdTapThreshold - .milliseconds(Int(ModifierOnlyGestureReducer.debounceInterval * 1_000))
+            : Self.holdTapThreshold
+        provisionalConfirmTask?.cancel()
+        provisionalConfirmTask = Task { @MainActor [weak self] in
+            do {
+                try await Task.sleep(for: delay)
+            } catch is CancellationError {
+                return
+            } catch {
+                self?.logger.error("Provisional recording confirm sleep failed: \(error.localizedDescription, privacy: .public)")
+            }
+            guard let self, dictationCoordinator.isRecording, dictationCoordinator.isProvisional else { return }
+            provisionalConfirmTask = nil
+            dictationCoordinator.confirmRecording()
+            showRecordingUI()
         }
     }
 

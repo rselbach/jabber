@@ -110,6 +110,54 @@ final class DictationCoordinatorTests: XCTestCase {
         XCTAssertEqual(mediaPlaybackService.resumeCallCount, 0)
     }
 
+    func testProvisionalStartRecordsWithoutPausingMedia() {
+        XCTAssertTrue(coordinator.start(isProvisional: true))
+
+        XCTAssertTrue(coordinator.isRecording)
+        XCTAssertTrue(coordinator.isProvisional)
+        XCTAssertTrue(audioCapture.didStart)
+        XCTAssertEqual(mediaPlaybackService.pauseCallCount, 0)
+    }
+
+    func testConfirmRecordingPausesMediaOnce() {
+        XCTAssertTrue(coordinator.start(isProvisional: true))
+        coordinator.confirmRecording()
+        coordinator.confirmRecording()
+
+        XCTAssertFalse(coordinator.isProvisional)
+        XCTAssertTrue(coordinator.isRecording)
+        XCTAssertEqual(mediaPlaybackService.pauseCallCount, 1)
+    }
+
+    func testCancellingAProvisionalRecordingLeavesMediaAlone() {
+        XCTAssertTrue(coordinator.start(isProvisional: true))
+        coordinator.cancel()
+
+        XCTAssertTrue(coordinator.isIdle)
+        XCTAssertFalse(coordinator.isProvisional)
+        XCTAssertEqual(mediaPlaybackService.pauseCallCount, 0)
+        XCTAssertEqual(mediaPlaybackService.resumeCallCount, 0)
+    }
+
+    func testStoppingAProvisionalRecordingTranscribesWithoutPausingMedia() async {
+        audioCapture.storedSamples = makeLoudSamples()
+        transcriptionService.transcribeResult = .success("hello")
+        let idleExpectation = XCTestExpectation(description: "coordinator returns to idle")
+        coordinator.onStateChange = { state in
+            if state == .idle {
+                idleExpectation.fulfill()
+            }
+        }
+
+        XCTAssertTrue(coordinator.start(isProvisional: true))
+        coordinator.stop()
+        XCTAssertFalse(coordinator.isProvisional)
+        await fulfillment(of: [idleExpectation], timeout: 1.0)
+
+        XCTAssertEqual(typingService.outputs, ["hello"])
+        XCTAssertEqual(mediaPlaybackService.pauseCallCount, 0)
+    }
+
     func testStartFailsWhenAlreadyRecording() {
         XCTAssertTrue(coordinator.start())
         XCTAssertFalse(coordinator.start())

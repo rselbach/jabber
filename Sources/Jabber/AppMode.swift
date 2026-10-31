@@ -5,7 +5,7 @@ enum AppMode {
     static let parakeetModelId = "parakeet-tdt-v2"
     static let parakeetMultilingualModelId = "parakeet-ultra"
     static let parakeetJapaneseModelId = "parakeet-ja"
-    static let nemotronModelId = "nemotron"
+    static let parakeetUnifiedModelId = "parakeet-unified"
     static let appleSpeechModelId = "apple-speech"
 
     /// Languages Parakeet Ultra transcribes: those of NVIDIA's Parakeet TDT v3,
@@ -31,7 +31,7 @@ enum AppMode {
 
     enum ModelFamily: String, CaseIterable {
         case parakeetTDT
-        case nemotronASR
+        case parakeetUnified
         case appleSpeech
     }
 
@@ -40,8 +40,6 @@ enum AppMode {
         /// Downloaded and loaded by FluidAudio, which keeps each repository in
         /// a folder it names.
         case fluidAudio(Repo)
-        /// Downloaded by speech-swift from this Hugging Face repository.
-        case huggingFace(String)
         /// Ships with macOS.
         case system
     }
@@ -104,16 +102,16 @@ enum AppMode {
             attribution: "Parakeet 0.6B Japanese by NVIDIA; CoreML conversion by FluidInference"
         ),
         .init(
-            id: nemotronModelId,
-            family: .nemotronASR,
-            source: .huggingFace("aufklarer/Nemotron-Speech-Streaming-0.6B-CoreML-INT8"),
-            name: "Nemotron",
-            description: "NVIDIA Nemotron — English-only, native punctuation & capitalization",
-            sizeHint: "~600MB",
+            id: parakeetUnifiedModelId,
+            family: .parakeetUnified,
+            source: .fluidAudio(.parakeetUnified),
+            name: "Parakeet Unified",
+            description: "NVIDIA Parakeet Unified — English, transcribed live as you speak",
+            sizeHint: "~590MB",
             supportedLanguageCodes: ["en"],
-            license: "OpenMDW-1.1",
-            licenseUrl: "https://www.openmodeldefinition.org/",
-            attribution: "Nemotron Speech Streaming by NVIDIA"
+            license: "NVIDIA Open Model License",
+            licenseUrl: "https://www.nvidia.com/en-us/agreements/enterprise-software/nvidia-open-model-license/",
+            attribution: "Parakeet Unified 0.6B by NVIDIA; CoreML conversion by FluidInference"
         ),
         .init(
             id: appleSpeechModelId,

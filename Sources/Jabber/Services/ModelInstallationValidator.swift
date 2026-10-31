@@ -1,3 +1,4 @@
+import FluidAudio
 import Foundation
 
 struct ModelFolderValidation: Equatable {
@@ -91,16 +92,33 @@ enum ModelInstallationValidator {
         }
     }
 
-    static let requiredCoreMLTransducerFiles = [
-        "config.json",
-        "vocab.json"
-    ]
+    /// Parakeet Unified computes its mel features in Swift, so it ships no
+    /// preprocessor bundle, and its streaming latency tier is baked into the
+    /// encoder export, so the layout names the one the provider loads.
+    static let parakeetUnifiedLayout: FolderLayout = {
+        let config = UnifiedASRProvider.config
+        return FolderLayout(
+            files: [config.family.vocab],
+            directories: [
+                config.family.streamingEncoderFile(precision: .int8, contextSuffix: config.contextSuffix),
+                config.family.decoderFile,
+                config.family.jointDecisionFile
+            ]
+        )
+    }()
 
-    static let requiredCoreMLTransducerDirectories = [
-        "encoder.mlmodelc",
-        "decoder.mlmodelc",
-        "joint.mlmodelc"
-    ]
+    /// What a model's folder must hold, or nil for a model that ships with
+    /// macOS.
+    static func layout(for definition: AppMode.ModelDefinition) -> FolderLayout? {
+        switch definition.family {
+        case .parakeetTDT:
+            return parakeetLayout(for: definition.id)
+        case .parakeetUnified:
+            return parakeetUnifiedLayout
+        case .appleSpeech:
+            return nil
+        }
+    }
 
     /// File present at the root of every compiled CoreML `.mlmodelc` bundle.
     /// Used to confirm a bundle was fully written, not just created as an
@@ -153,56 +171,8 @@ enum ModelInstallationValidator {
         )
     }
 
-    static func validateCoreMLTransducerModelFolder(at folder: URL) -> ModelFolderValidation {
-        let fm = FileManager.default
-        var isDirectory: ObjCBool = false
-        guard fm.fileExists(atPath: folder.path, isDirectory: &isDirectory), isDirectory.boolValue else {
-            return ModelFolderValidation(
-                folderExists: false,
-                missingRequiredFiles: requiredCoreMLTransducerFiles + requiredCoreMLTransducerDirectories,
-                hasWeights: false,
-                readErrorDescription: nil
-            )
-        }
-
-        let contents: [URL]
-        do {
-            contents = try fm.contentsOfDirectory(at: folder, includingPropertiesForKeys: nil)
-        } catch {
-            return ModelFolderValidation(
-                folderExists: true,
-                missingRequiredFiles: requiredCoreMLTransducerFiles + requiredCoreMLTransducerDirectories,
-                hasWeights: false,
-                readErrorDescription: error.localizedDescription
-            )
-        }
-
-        let fileNames = Set(contents.map(\.lastPathComponent))
-        let missingFiles = requiredCoreMLTransducerFiles.filter { !fileNames.contains($0) }
-        let missingDirs = requiredCoreMLTransducerDirectories.filter { !fileNames.contains($0) }
-        let missing = missingFiles + missingDirs
-        let hasWeights = requiredCoreMLTransducerDirectories.allSatisfy { dirName in
-            let marker = folder
-                .appendingPathComponent(dirName)
-                .appendingPathComponent(coreMLBundleMarkerFile)
-            return fm.fileExists(atPath: marker.path)
-        }
-
-        return ModelFolderValidation(
-            folderExists: true,
-            missingRequiredFiles: missing,
-            hasWeights: hasWeights,
-            readErrorDescription: nil
-        )
-    }
-
     static func validate(folder: URL, for definition: AppMode.ModelDefinition) -> ModelFolderValidation {
-        switch definition.family {
-        case .parakeetTDT:
-            return validateParakeetModelFolder(at: folder, layout: parakeetLayout(for: definition.id))
-        case .nemotronASR:
-            return validateCoreMLTransducerModelFolder(at: folder)
-        case .appleSpeech:
+        guard let layout = layout(for: definition) else {
             return ModelFolderValidation(
                 folderExists: true,
                 missingRequiredFiles: [],
@@ -210,5 +180,6 @@ enum ModelInstallationValidator {
                 readErrorDescription: nil
             )
         }
+        return validateParakeetModelFolder(at: folder, layout: layout)
     }
 }

@@ -7,7 +7,7 @@ final class LanguageModelCatalogTests: XCTestCase {
 
         XCTAssertEqual(route.first?.modelId, AppMode.parakeetModelId)
         XCTAssertTrue(route.first?.isRecommended == true)
-        XCTAssertTrue(route.contains { $0.modelId == AppMode.nemotronModelId })
+        XCTAssertTrue(route.contains { $0.modelId == AppMode.parakeetUnifiedModelId })
         XCTAssertTrue(route.contains { $0.modelId == AppMode.appleSpeechModelId })
     }
 
@@ -17,7 +17,7 @@ final class LanguageModelCatalogTests: XCTestCase {
         XCTAssertEqual(route.first?.modelId, AppMode.appleSpeechModelId)
         XCTAssertTrue(route.first?.isRecommended == true)
         XCTAssertTrue(route.contains { $0.modelId == AppMode.parakeetModelId })
-        XCTAssertTrue(route.contains { $0.modelId == AppMode.nemotronModelId })
+        XCTAssertTrue(route.contains { $0.modelId == AppMode.parakeetUnifiedModelId })
     }
 
     func testLanguageOutsideEveryLocalModelOnlyOffersAppleSpeech() {
@@ -113,7 +113,7 @@ final class LanguageModelCatalogTests: XCTestCase {
     }
 
     func testEnglishOnlyModelsRejectNonEnglishLanguages() {
-        for modelId in [AppMode.parakeetModelId, AppMode.nemotronModelId] {
+        for modelId in [AppMode.parakeetModelId, AppMode.parakeetUnifiedModelId] {
             XCTAssertTrue(LanguageModelCatalog.supportsLanguage("en", modelId: modelId))
             XCTAssertFalse(LanguageModelCatalog.supportsLanguage("de", modelId: modelId))
         }
@@ -161,8 +161,8 @@ final class LanguageModelCatalogTests: XCTestCase {
             "english on parakeet ultra is supported": (
                 "en", AppMode.parakeetMultilingualModelId, "pt", .supported
             ),
-            "english on nemotron is supported": (
-                "en", AppMode.nemotronModelId, "pt", .supported
+            "english on parakeet unified is supported": (
+                "en", AppMode.parakeetUnifiedModelId, "pt", .supported
             ),
             "english on apple speech is supported": (
                 "en", AppMode.appleSpeechModelId, "pt", .supported
@@ -175,8 +175,8 @@ final class LanguageModelCatalogTests: XCTestCase {
                 "de", AppMode.parakeetModelId, "pt",
                 .unsupported(recommendedModelId: AppMode.parakeetMultilingualModelId)
             ),
-            "german on nemotron recommends parakeet ultra": (
-                "de", AppMode.nemotronModelId, "pt",
+            "german on parakeet unified recommends parakeet ultra": (
+                "de", AppMode.parakeetUnifiedModelId, "pt",
                 .unsupported(recommendedModelId: AppMode.parakeetMultilingualModelId)
             ),
             "german on parakeet japanese recommends parakeet ultra": (
@@ -225,8 +225,8 @@ final class LanguageModelCatalogTests: XCTestCase {
             "auto on parakeet v2 assumes english": (
                 "auto", AppMode.parakeetModelId, "pt", .assumesLanguage("en")
             ),
-            "auto on nemotron assumes english": (
-                "auto", AppMode.nemotronModelId, "pt", .assumesLanguage("en")
+            "auto on parakeet unified assumes english": (
+                "auto", AppMode.parakeetUnifiedModelId, "pt", .assumesLanguage("en")
             ),
             "auto on parakeet japanese assumes japanese": (
                 "auto", AppMode.parakeetJapaneseModelId, "pt", .assumesLanguage("ja")

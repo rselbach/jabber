@@ -24,7 +24,7 @@ final class ModelManagerTests: XCTestCase {
             withIntermediateDirectories: true
         )
 
-        settings[.selectedModel] = AppMode.nemotronModelId
+        settings[.selectedModel] = AppMode.parakeetUnifiedModelId
         modelManager = ModelManager(
             settings: settings,
             cacheBaseURL: cacheBaseURL
@@ -56,7 +56,7 @@ final class ModelManagerTests: XCTestCase {
                 AppMode.parakeetModelId,
                 AppMode.parakeetMultilingualModelId,
                 AppMode.parakeetJapaneseModelId,
-                AppMode.nemotronModelId,
+                AppMode.parakeetUnifiedModelId,
                 AppMode.appleSpeechModelId
             ]
         )
@@ -153,15 +153,25 @@ final class ModelManagerTests: XCTestCase {
         }
     }
 
-    func testMigrateRemovedParakeetV3ToUltra() {
-        settings[.selectedModel] = "parakeet-tdt-v3"
-        let migration = modelManager.migrateSelectedModelIfNeeded()
-        XCTAssertEqual(migration?.to, AppMode.parakeetMultilingualModelId)
-        XCTAssertEqual(settings[.selectedModel], "parakeet-tdt-v3", "Ultra still needs a download")
+    func testMigrateRemovedModelsToTheirReplacements() {
+        let cases: [String: (from: String, want: String)] = [
+            "parakeet v3 becomes ultra": ("parakeet-tdt-v3", AppMode.parakeetMultilingualModelId),
+            "nemotron becomes parakeet unified": ("nemotron", AppMode.parakeetUnifiedModelId)
+        ]
+
+        for (name, tc) in cases {
+            settings[.selectedModel] = tc.from
+            let migration = modelManager.migrateSelectedModelIfNeeded()
+            XCTAssertEqual(migration?.to, tc.want, name)
+            XCTAssertEqual(settings[.selectedModel], tc.from, "\(name): the replacement still needs a download")
+        }
     }
 
     func testDownloadsOfRemovedModelsAreDeletedAtLaunch() throws {
-        let removed = ["parakeet-tdt-0.6b-v3", "parakeet-tdt-0.6b-v3-coreml"].map(fluidAudioFolder)
+        let removed = ["parakeet-tdt-0.6b-v3", "parakeet-tdt-0.6b-v3-coreml"].map(fluidAudioFolder) + [
+            cacheBaseURL.appendingPathComponent("models/aufklarer/Nemotron-Speech-Streaming-0.6B-CoreML-INT8"),
+            cacheBaseURL.appendingPathComponent("aufklarer_Nemotron-Speech-Streaming-0.6B-CoreML-INT8")
+        ]
         for folder in removed {
             try createCompleteParakeetModelFolder(
                 at: folder,
@@ -212,9 +222,9 @@ final class ModelManagerTests: XCTestCase {
     }
 
     func testValidAndUnknownSelectedModelMigration() {
-        settings[.selectedModel] = AppMode.nemotronModelId
+        settings[.selectedModel] = AppMode.parakeetUnifiedModelId
         XCTAssertNil(modelManager.migrateSelectedModelIfNeeded())
-        XCTAssertEqual(settings[.selectedModel], AppMode.nemotronModelId)
+        XCTAssertEqual(settings[.selectedModel], AppMode.parakeetUnifiedModelId)
 
         settings[.selectedModel] = "parakeet"
         XCTAssertNotNil(modelManager.migrateSelectedModelIfNeeded())
@@ -226,7 +236,7 @@ final class ModelManagerTests: XCTestCase {
     }
 
     func testLastMigrationNilWhenNoMigrationHappened() {
-        settings[.selectedModel] = AppMode.nemotronModelId
+        settings[.selectedModel] = AppMode.parakeetUnifiedModelId
         XCTAssertNil(modelManager.migrateSelectedModelIfNeeded())
         XCTAssertNil(modelManager.lastMigration)
     }
@@ -336,10 +346,7 @@ final class ModelManagerTests: XCTestCase {
         try Data("partial".utf8).write(to: target.appendingPathComponent("config.json"))
 
         // A sibling model folder that must be left untouched.
-        let sibling = cacheBaseURL
-            .appendingPathComponent("models", isDirectory: true)
-            .appendingPathComponent("aufklarer", isDirectory: true)
-            .appendingPathComponent("Nemotron-Speech-Streaming-0.6B-CoreML-INT8", isDirectory: true)
+        let sibling = fluidAudioFolder("parakeet-ultra")
         try FileManager.default.createDirectory(at: sibling, withIntermediateDirectories: true)
         try Data("partial".utf8).write(to: sibling.appendingPathComponent("config.json"))
 
@@ -406,7 +413,7 @@ final class ModelManagerTests: XCTestCase {
         modelManager.selectWhenDownloaded(AppMode.parakeetModelId)
         XCTAssertEqual(modelManager.pendingSelectionModelId, AppMode.parakeetModelId)
         XCTAssertFalse(modelManager.applyPendingSelection(), "not downloaded yet")
-        XCTAssertEqual(settings[.selectedModel], AppMode.nemotronModelId)
+        XCTAssertEqual(settings[.selectedModel], AppMode.parakeetUnifiedModelId)
         XCTAssertEqual(modelManager.pendingSelectionModelId, AppMode.parakeetModelId, "still waiting")
 
         try createCompleteParakeetModelFolder(at: fluidAudioFolder("parakeet-tdt-0.6b-v2"))
@@ -459,7 +466,7 @@ final class ModelManagerTests: XCTestCase {
     }
 
     func testIsSelectedModelDownloadedIsFalseForMissingSelection() {
-        // Setup selects Nemotron with an empty cache: not installed. The old
+        // Setup selects Parakeet Unified with an empty cache: not installed. The old
         // "any model downloaded" check was constant-true because built-in
         // Apple Speech always counts as installed.
         XCTAssertFalse(modelManager.isSelectedModelDownloaded)
@@ -504,7 +511,7 @@ final class ModelManagerTests: XCTestCase {
         )
 
         let state2 = ModelDownloadState(
-            modelId: AppMode.nemotronModelId,
+            modelId: AppMode.parakeetUnifiedModelId,
             progress: 0.5,
             status: "Downloading...",
             phase: .progress,

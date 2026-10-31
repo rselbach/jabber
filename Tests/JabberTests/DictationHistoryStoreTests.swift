@@ -483,7 +483,7 @@ final class DictationHistoryStoreTests: XCTestCase {
         // the UI.
         let store = makeStore()
         let tests: [String: (modelID: String, want: String)] = [
-            "nemotron": (AppMode.nemotronModelId, "Nemotron"),
+            "parakeet-unified": (AppMode.parakeetUnifiedModelId, "Parakeet Unified"),
             "apple-speech": (AppMode.appleSpeechModelId, "Apple Speech"),
             "parakeet": (AppMode.parakeetModelId, "Parakeet TDT v2")
         ]

@@ -202,7 +202,7 @@ final class OnboardingCoordinatorTests: XCTestCase {
         let settings = try makeSettings()
         // Start on a different model so selectModel goes through the
         // isolated ModelManager instead of falling back to TypedSettings.
-        settings[.selectedModel] = AppMode.nemotronModelId
+        settings[.selectedModel] = AppMode.parakeetUnifiedModelId
         let modelManager = ModelManager(
             settings: settings,
             cacheBaseURL: FileManager.default.temporaryDirectory

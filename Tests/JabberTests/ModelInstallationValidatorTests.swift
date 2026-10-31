@@ -121,30 +121,22 @@ final class ModelInstallationValidatorTests: XCTestCase {
         XCTAssertTrue(validation.hasWeights)
     }
 
-    func testCompleteCoreMLTransducerFolderIsValid() throws {
-        try writeFile(named: "config.json")
+    func testUnifiedNeedsTheEncoderForItsLatencyTier() throws {
         try writeFile(named: "vocab.json")
-        try createCoreMLBundle(named: "encoder.mlmodelc")
-        try createCoreMLBundle(named: "decoder.mlmodelc")
-        try createCoreMLBundle(named: "joint.mlmodelc")
+        try createCoreMLBundle(named: "parakeet_unified_decoder.mlmodelc")
+        try createCoreMLBundle(named: "parakeet_unified_joint_decision_single_step.mlmodelc")
+        // The default 2.08 s tier, which the provider does not load.
+        try createCoreMLBundle(named: "parakeet_unified_encoder_streaming_70_13_13_int8.mlmodelc")
 
-        let validation = ModelInstallationValidator.validateCoreMLTransducerModelFolder(at: tempDir)
-
-        XCTAssertTrue(validation.isComplete)
-        XCTAssertTrue(validation.hasWeights)
-    }
-
-    func testMissingCoreMLTransducerBundleIsInvalid() throws {
-        try writeFile(named: "config.json")
-        try writeFile(named: "vocab.json")
-        try createCoreMLBundle(named: "encoder.mlmodelc")
-        try createCoreMLBundle(named: "decoder.mlmodelc")
-
-        let validation = ModelInstallationValidator.validateCoreMLTransducerModelFolder(at: tempDir)
+        let layout = ModelInstallationValidator.parakeetUnifiedLayout
+        let validation = ModelInstallationValidator.validateParakeetModelFolder(at: tempDir, layout: layout)
 
         XCTAssertFalse(validation.isComplete)
-        XCTAssertFalse(validation.hasWeights)
-        XCTAssertTrue(validation.missingRequiredFiles.contains("joint.mlmodelc"))
+        XCTAssertEqual(validation.missingRequiredFiles, ["parakeet_unified_encoder_streaming_70_7_7_int8.mlmodelc"])
+
+        try createCoreMLBundle(named: "parakeet_unified_encoder_streaming_70_7_7_int8.mlmodelc")
+        let revalidated = ModelInstallationValidator.validateParakeetModelFolder(at: tempDir, layout: layout)
+        XCTAssertTrue(revalidated.isComplete)
     }
 
     private func writeFile(named name: String) throws {

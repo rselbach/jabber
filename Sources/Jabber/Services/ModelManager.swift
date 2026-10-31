@@ -1,6 +1,5 @@
-import Foundation
-import AudioCommon
 import FluidAudio
+import Foundation
 import os
 
 struct ModelDownloadState: Equatable {
@@ -39,7 +38,8 @@ final class ModelManager {
         "qwen3-asr-0.6b-mlx-8bit": AppMode.parakeetModelId,
         "qwen3-asr-1.7b-mlx-4bit": AppMode.parakeetModelId,
         "qwen3-asr-1.7b-mlx-8bit": AppMode.parakeetModelId,
-        "parakeet-tdt-v3": AppMode.parakeetMultilingualModelId
+        "parakeet-tdt-v3": AppMode.parakeetMultilingualModelId,
+        "nemotron": AppMode.parakeetUnifiedModelId
     ]
 
     struct Model: Identifiable {
@@ -349,7 +349,7 @@ final class ModelManager {
                 phase: .failed,
                 isCancelled: true
             )
-            // Preserve HuggingFace .incomplete resume data on user cancellation
+            // Preserve FluidAudio's .partial resume data on user cancellation
             // so a re-download picks up where it left off — do NOT clean up.
             throw CancellationError()
         } catch {
@@ -371,11 +371,11 @@ final class ModelManager {
                 phase: .failed,
                 errorDescription: error.localizedDescription
             )
-            // Clean up the partial folder. HuggingFaceDownloader already retried
-            // 3x internally, so a failure here is genuine (network/hard-fault/
-            // incomplete validation); leftover config.json and partial .mlmodelc
-            // contents would linger as invisible junk since modelFolder(for:)
-            // returns nil for incomplete installs.
+            // Clean up the partial folder. FluidAudio already retried transient
+            // failures internally, so a failure here is genuine (network/hard-
+            // fault/incomplete validation); leftover config.json and partial
+            // .mlmodelc contents would linger as invisible junk since
+            // modelFolder(for:) returns nil for incomplete installs.
             removeFailedDownloadFolder(for: modelId)
             throw error
         }
@@ -485,11 +485,6 @@ final class ModelManager {
         switch def.source {
         case let .fluidAudio(repo):
             return [fluidAudioFolder(for: repo)]
-        case let .huggingFace(huggingFaceModelId):
-            return [
-                cacheFolder(for: huggingFaceModelId),
-                oldCacheFolder(for: huggingFaceModelId)
-            ]
         case .system:
             return []
         }
@@ -504,11 +499,6 @@ final class ModelManager {
         switch def.source {
         case let .fluidAudio(repo):
             return fluidAudioFolder(for: repo)
-        case let .huggingFace(huggingFaceModelId):
-            return try HuggingFaceDownloader.getCacheDirectory(
-                for: huggingFaceModelId,
-                basePath: cacheBase()
-            )
         case .system:
             throw ModelError.modelNotFound(modelId: modelId)
         }
@@ -517,11 +507,9 @@ final class ModelManager {
     /// Remove a partially-downloaded model folder left behind by a failed
     /// download (partial config.json, half-written .mlmodelc, stale index).
     ///
-    /// Both downloaders keep resume data INSIDE this folder (FluidAudio's
-    /// `.partial` files, HuggingFace's
-    /// `<folder>/.cache/huggingface/download/*.incomplete`), so deleting it
-    /// also discards resume state. Call this only on genuine failures, never
-    /// on user cancellation — see `performDownload`.
+    /// FluidAudio keeps its `.partial` resume data INSIDE this folder, so
+    /// deleting it also discards resume state. Call this only on genuine
+    /// failures, never on user cancellation — see `performDownload`.
     ///
     /// Logs cleanup and any removal error; never swallows failures silently.
     func removeFailedDownloadFolder(for modelId: String) {
@@ -562,39 +550,26 @@ final class ModelManager {
             throw ModelError.modelNotFound(modelId: modelId)
         }
 
-        let downloadFolder = try downloadFolder(for: modelId)
-        let reportProgress = downloadProgressHandler(modelId: modelId, modelName: modelName)
-
-        switch def.source {
-        case let .fluidAudio(repo):
-            // ModelHub fetches FluidAudio's own required files for the repo;
-            // naming the layout too keeps the download and the completeness
-            // check from drifting apart.
-            let layout = ModelInstallationValidator.parakeetLayout(for: def.id)
-            let downloadShare = Self.fluidAudioDownloadShare
-            try await ModelHub.download(
-                repo,
-                to: fluidAudioModelsDirectory(),
-                additionalModelNames: Set(layout.requiredAssets),
-                progressHandler: { progress in
-                    reportProgress(progress.fractionCompleted / downloadShare)
-                }
-            )
-        case let .huggingFace(huggingFaceModelId):
-            try await HuggingFaceDownloader.downloadWeights(
-                modelId: huggingFaceModelId,
-                to: downloadFolder,
-                additionalFiles: [
-                    "encoder.mlmodelc/**",
-                    "decoder.mlmodelc/**",
-                    "joint.mlmodelc/**",
-                    "vocab.json"
-                ],
-                progressHandler: reportProgress
-            )
-        case .system:
+        guard case let .fluidAudio(repo) = def.source,
+              let layout = ModelInstallationValidator.layout(for: def)
+        else {
             throw ModelError.modelNotFound(modelId: modelId)
         }
+
+        let downloadFolder = try downloadFolder(for: modelId)
+        let reportProgress = downloadProgressHandler(modelId: modelId, modelName: modelName)
+        let downloadShare = Self.fluidAudioDownloadShare
+        // ModelHub fetches FluidAudio's own required files for the repo;
+        // naming the layout too keeps the download and the completeness check
+        // from drifting apart.
+        try await ModelHub.download(
+            repo,
+            to: fluidAudioModelsDirectory(),
+            additionalModelNames: Set(layout.requiredAssets),
+            progressHandler: { progress in
+                reportProgress(progress.fractionCompleted / downloadShare)
+            }
+        )
 
         try Task.checkCancellation()
 
@@ -682,7 +657,9 @@ final class ModelManager {
     /// base. Nothing can load them any more.
     private static let removedModelFolders = [
         "models/FluidInference/parakeet-tdt-0.6b-v3",
-        "models/FluidInference/parakeet-tdt-0.6b-v3-coreml"
+        "models/FluidInference/parakeet-tdt-0.6b-v3-coreml",
+        "models/aufklarer/Nemotron-Speech-Streaming-0.6B-CoreML-INT8",
+        "aufklarer_Nemotron-Speech-Streaming-0.6B-CoreML-INT8"
     ]
 
     private func removeDownloadsOfRemovedModels() {
@@ -697,23 +674,6 @@ final class ModelManager {
                 logger.error("Failed to remove download of a removed model at \(folder.path): \(error.localizedDescription)")
             }
         }
-    }
-
-    private func cacheFolder(for huggingFaceModelId: String) -> URL {
-        let components = huggingFaceModelId.split(separator: "/", maxSplits: 1).map(String.init)
-        guard components.count == 2 else {
-            return oldCacheFolder(for: huggingFaceModelId)
-        }
-
-        return cacheBase()
-            .appendingPathComponent("models")
-            .appendingPathComponent(components[0])
-            .appendingPathComponent(components[1])
-    }
-
-    private func oldCacheFolder(for huggingFaceModelId: String) -> URL {
-        cacheBase()
-            .appendingPathComponent(HuggingFaceDownloader.sanitizedCacheKey(for: huggingFaceModelId))
     }
 
     private func cacheBase() -> URL {

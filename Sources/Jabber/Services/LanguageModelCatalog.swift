@@ -39,7 +39,7 @@ enum LanguageModelCatalog {
                 .init(modelId: AppMode.appleSpeechModelId, isRecommended: true),
                 .init(modelId: AppMode.parakeetMultilingualModelId, isRecommended: false),
                 .init(modelId: AppMode.parakeetModelId, isRecommended: false),
-                .init(modelId: AppMode.nemotronModelId, isRecommended: false),
+                .init(modelId: AppMode.parakeetUnifiedModelId, isRecommended: false),
             ]
         }
 
@@ -48,7 +48,7 @@ enum LanguageModelCatalog {
             return [
                 .init(modelId: AppMode.parakeetModelId, isRecommended: true),
                 .init(modelId: AppMode.parakeetMultilingualModelId, isRecommended: false),
-                .init(modelId: AppMode.nemotronModelId, isRecommended: false),
+                .init(modelId: AppMode.parakeetUnifiedModelId, isRecommended: false),
                 .init(modelId: AppMode.appleSpeechModelId, isRecommended: false)
             ]
         }

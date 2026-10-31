@@ -3,13 +3,27 @@ import XCTest
 @testable import Jabber
 
 final class TranscriptionServiceTests: XCTestCase {
-    func testParakeetAndNemotronAdvertiseStreamingPreview() {
+    func testParakeetModelsAdvertiseStreamingPreview() {
         XCTAssertTrue(ParakeetASRProvider(modelId: AppMode.parakeetModelId).supportsStreamingTranscription)
         XCTAssertFalse(AppleSpeechProvider(modelId: AppMode.appleSpeechModelId).supportsStreamingTranscription)
-        XCTAssertTrue(NemotronASRProvider(
-            modelId: AppMode.nemotronModelId,
-            huggingFaceModelId: "aufklarer/Nemotron-Speech-Streaming-0.6B-CoreML-INT8"
-        ).supportsStreamingTranscription)
+        XCTAssertTrue(UnifiedASRProvider(modelId: AppMode.parakeetUnifiedModelId).supportsStreamingTranscription)
+    }
+
+    func testUnifiedStreamsOnlyTheUnseenPartOfARecording() {
+        let cases: [String: (streamed: Int?, total: Int, want: Int?)] = [
+            "a fresh session starts over": (nil, 16_000, nil),
+            "a longer recording continues": (8_000, 16_000, 8_000),
+            "nothing new continues at the end": (16_000, 16_000, 16_000),
+            "a shorter recording is a new one": (16_000, 8_000, nil)
+        ]
+
+        for (name, tc) in cases {
+            XCTAssertEqual(
+                UnifiedASRProvider.unseenStart(streamedSampleCount: tc.streamed, sampleCount: tc.total),
+                tc.want,
+                name
+            )
+        }
     }
 
     func testParakeetModelIdSelectsTheMatchingModelVersion() {
@@ -70,12 +84,12 @@ final class TranscriptionServiceTests: XCTestCase {
 
     func testStreamingCapabilityTracksLoadedProvider() async throws {
         let provider = FakeTranscriptionProvider(
-            modelId: AppMode.nemotronModelId,
+            modelId: AppMode.parakeetUnifiedModelId,
             supportsStreamingTranscription: true
         )
         let service = TranscriptionService(loadDependencies: TranscriptionService.LoadDependencies(
             waitForUIReady: {},
-            selectedModelId: { AppMode.nemotronModelId },
+            selectedModelId: { AppMode.parakeetUnifiedModelId },
             setSelectedModelId: { _ in },
             ensureModelDownloaded: { _ in FileManager.default.temporaryDirectory },
             makeProvider: { _ in provider }
@@ -209,7 +223,7 @@ final class TranscriptionServiceTests: XCTestCase {
         let downloadProbe = ModelDownloadProbe()
         let selected = MutableSelectedModel(AppMode.parakeetModelId)
         let providerA = FakeTranscriptionProvider(modelId: AppMode.parakeetModelId)
-        let providerB = FakeTranscriptionProvider(modelId: AppMode.nemotronModelId)
+        let providerB = FakeTranscriptionProvider(modelId: AppMode.parakeetUnifiedModelId)
         let transcribeStarted = TestLatch()
         let releaseTranscribe = TestLatch()
         providerA.holdTranscribe(started: transcribeStarted, release: releaseTranscribe)
@@ -233,7 +247,7 @@ final class TranscriptionServiceTests: XCTestCase {
         let transcribeTask = Task { try await service.transcribe(samples: []) }
         await transcribeStarted.wait()
 
-        await selected.set(AppMode.nemotronModelId)
+        await selected.set(AppMode.parakeetUnifiedModelId)
 
         let firstLoad = Task { try await service.ensureModelLoaded() }
         try await Task.sleep(for: .milliseconds(50))
@@ -251,7 +265,7 @@ final class TranscriptionServiceTests: XCTestCase {
         XCTAssertEqual(providerB.loadCallCount, 1)
         XCTAssertEqual(providerB.unloadCallCount, 0)
         let currentModelId = await service.currentModelId()
-        XCTAssertEqual(currentModelId, AppMode.nemotronModelId)
+        XCTAssertEqual(currentModelId, AppMode.parakeetUnifiedModelId)
     }
 
     func testUnknownModelFallsBackToRecommendedDefaultLanguageModel() async throws {

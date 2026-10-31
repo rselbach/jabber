@@ -1630,7 +1630,7 @@ final class FakeTranscriptionService: TranscriptionProtocol, @unchecked Sendable
     private var _transcribeResult: Result<String, Error> = .success("")
     private var _streamingDelay: Duration?
     private var _transcribeDelay: Duration?
-    private var _currentModelID: String? = AppMode.nemotronModelId
+    private var _currentModelID: String? = AppMode.parakeetUnifiedModelId
     private var _streamingSampleCounts: [Int] = []
     private var _resetStreamingCallCount = 0
     private var _callOrder: [Call] = []

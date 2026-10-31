@@ -92,17 +92,17 @@ final class ModelMigrationNoticeResolverTests: XCTestCase {
     func testFallbackPrefersDownloadedRecommendedModel() {
         XCTAssertEqual(
             ModelFallbackResolver.downloadedFallbackModelId(
-                recommendedModelId: "nemotron",
-                downloadedModelIds: ["apple-speech", "nemotron"]
+                recommendedModelId: "parakeet-unified",
+                downloadedModelIds: ["apple-speech", "parakeet-unified"]
             ),
-            "nemotron"
+            "parakeet-unified"
         )
     }
 
     func testFallbackUsesFirstDownloadedModelWhenRecommendedMissing() {
         XCTAssertEqual(
             ModelFallbackResolver.downloadedFallbackModelId(
-                recommendedModelId: "nemotron",
+                recommendedModelId: "parakeet-unified",
                 downloadedModelIds: ["apple-speech", "parakeet-tdt-v2"]
             ),
             "apple-speech"
@@ -111,7 +111,7 @@ final class ModelMigrationNoticeResolverTests: XCTestCase {
 
     func testFallbackReturnsNilWithoutDownloadedModels() {
         XCTAssertNil(ModelFallbackResolver.downloadedFallbackModelId(
-            recommendedModelId: "nemotron",
+            recommendedModelId: "parakeet-unified",
             downloadedModelIds: []
         ))
     }

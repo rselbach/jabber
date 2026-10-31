@@ -99,9 +99,8 @@ actor TranscriptionService {
             switch def.family {
             case .parakeetTDT:
                 return ParakeetASRProvider(modelId: modelId)
-            case .nemotronASR:
-                guard case let .huggingFace(huggingFaceModelId) = def.source else { return nil }
-                return NemotronASRProvider(modelId: modelId, huggingFaceModelId: huggingFaceModelId)
+            case .parakeetUnified:
+                return UnifiedASRProvider(modelId: modelId)
             case .appleSpeech:
                 return AppleSpeechProvider(modelId: modelId)
             }

@@ -44,7 +44,7 @@ Model options are available in Jabber's main window (menu bar → **Open Jabber*
 - **Parakeet TDT v2** (~443MB) — fast, accurate English transcription on the Neural Engine
 - **Parakeet Ultra** (~617MB) — Moondream's retrained Parakeet v3 for 25 European languages, more accurate at the same speed
 - **Parakeet Japanese** (~606MB) — Parakeet 0.6B tuned for Japanese
-- **Nemotron** (~600MB) — NVIDIA Nemotron Speech Streaming, English-only with native punctuation & capitalization
+- **Parakeet Unified** (~590MB) — NVIDIA Parakeet Unified, English transcribed live as you speak
 - **Apple Speech** — built-in macOS 26 speech recognition, recommended for languages the Parakeet models don't cover
 
 During onboarding, you'll pick a language and Jabber recommends the best model for it.
@@ -96,16 +96,15 @@ Jabber uses the following open-source models and libraries:
 | Parakeet TDT 0.6B v2 | NVIDIA | [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/) | [huggingface.co/nvidia/parakeet-tdt-0.6b-v2](https://huggingface.co/nvidia/parakeet-tdt-0.6b-v2) |
 | Parakeet Ultra | Moondream, from NVIDIA's Parakeet TDT 0.6B v3 | [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/) | [huggingface.co/moondream/parakeet-ultra](https://huggingface.co/moondream/parakeet-ultra) |
 | Parakeet TDT-CTC 0.6B Japanese | NVIDIA | [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/) | [huggingface.co/nvidia/parakeet-tdt_ctc-0.6b-ja](https://huggingface.co/nvidia/parakeet-tdt_ctc-0.6b-ja) |
-| Nemotron Speech Streaming | NVIDIA | [OpenMDW-1.1](https://www.openmodeldefinition.org/) | [huggingface.co/nvidia/nemotron-speech-streaming-en-0.6b](https://huggingface.co/nvidia/nemotron-speech-streaming-en-0.6b) |
+| Parakeet Unified 0.6B | NVIDIA | [NVIDIA Open Model License](https://www.nvidia.com/en-us/agreements/enterprise-software/nvidia-open-model-license/) | [huggingface.co/nvidia/parakeet-unified-en-0.6b](https://huggingface.co/nvidia/parakeet-unified-en-0.6b) |
 | Apple Speech | Apple | [Apple SLA](https://www.apple.com/legal/sla/) | Built-in macOS 26 Speech framework |
 
-Parakeet's CoreML conversion is maintained by [FluidInference](https://huggingface.co/FluidInference). Nemotron's CoreML conversion is by [aufklarer](https://huggingface.co/aufklarer).
+The Parakeet CoreML conversions are maintained by [FluidInference](https://huggingface.co/FluidInference).
 
 ### Libraries
 
 | Library | License | Link |
 |---------|---------|------|
 | [FluidAudio](https://github.com/FluidInference/FluidAudio) | Apache 2.0 | Parakeet ASR for Apple platforms |
-| [speech-swift](https://github.com/soniqo/speech-swift) | Apache 2.0 | ASR/TTS models for Apple Silicon |
 | [Sparkle](https://sparkle-project.org/) | MIT | Software update framework |
 | [mediaremote-adapter](https://github.com/ejbills/mediaremote-adapter) | BSD 3-Clause ([upstream](https://github.com/ungive/mediaremote-adapter)) | Media remote control |

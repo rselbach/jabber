@@ -194,7 +194,7 @@ private struct PostProcessingTestRow: View {
         testTask = Task {
             defer { isRunning = false }
             do {
-                let output = try await RoutedPostProcessor().process(Self.sampleText)
+                let output = try await RoutedPostProcessor().process(Self.sampleText, appName: nil)
                 guard !Task.isCancelled else { return }
                 result = output.trimmingCharacters(in: .whitespacesAndNewlines)
             } catch {

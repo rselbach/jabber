@@ -661,12 +661,13 @@ final class DictationCoordinator {
             // currentTargetProcessID (and may start a new session), so reading it
             // later would risk typing stale text into the wrong target.
             let targetProcessID = currentTargetProcessID
+            let dictatedApp = targetProcessID.flatMap(dictatedAppResolver)
 
             let modelID = await transcriptionService.currentModelId() ?? TypedSettings[.selectedModel]
             let language = TypedSettings[.selectedLanguage]
 
             let refinementStartedAt = ContinuousClock.now
-            let postProcessingOutcome = try await applyPostProcessing(to: text)
+            let postProcessingOutcome = try await applyPostProcessing(to: text, appName: dictatedApp?.name)
             let refinementFinishedAt = ContinuousClock.now
 
             // Re-validate before saving/typing: the awaits above
@@ -703,7 +704,7 @@ final class DictationCoordinator {
                 rawTranscript: resolvedOutcome.rawTranscript,
                 wasPostProcessed: resolvedOutcome.wasPostProcessed,
                 postProcessingErrorDescription: resolvedOutcome.errorDescription,
-                app: targetProcessID.flatMap(dictatedAppResolver)
+                app: dictatedApp
             ))
             let historyFinishedAt = ContinuousClock.now
 
@@ -809,7 +810,7 @@ final class DictationCoordinator {
     ///   a non-disruptive `onPostProcessingFallback` (no alert).
     /// Cancellation is rethrown so the surrounding task unwinds without saving
     /// history or typing output.
-    private func applyPostProcessing(to rawText: String) async throws -> PostProcessingOutcome {
+    private func applyPostProcessing(to rawText: String, appName: String?) async throws -> PostProcessingOutcome {
         let rawTrimmed = rawText.trimmingCharacters(in: .whitespacesAndNewlines)
 
         guard isPostProcessingEnabled(),
@@ -844,7 +845,7 @@ final class DictationCoordinator {
 
         do {
             try Task.checkCancellation()
-            let processed = try await provider.process(rawText)
+            let processed = try await provider.process(rawText, appName: appName)
             // A post-processed empty/whitespace result is a VALID outcome, not a
             // failure: the model may produce it by honoring a full self-correction
             // ("scratch that", "cancel", "never mind"). Normalize whitespace-only
@@ -868,6 +869,7 @@ final class DictationCoordinator {
                 return try await retryPostProcessing(
                     rawText: rawText,
                     rawTrimmed: rawTrimmed,
+                    appName: appName,
                     provider: provider
                 )
             }
@@ -908,11 +910,12 @@ final class DictationCoordinator {
     private func retryPostProcessing(
         rawText: String,
         rawTrimmed: String,
+        appName: String?,
         provider: any PostProcessingProvider
     ) async throws -> PostProcessingOutcome {
         do {
             try Task.checkCancellation()
-            let processed = try await provider.process(rawText)
+            let processed = try await provider.process(rawText, appName: appName)
             let normalized = processed.trimmingCharacters(in: .whitespacesAndNewlines)
             // An empty retry is ambiguous (the first pass was non-empty-but-
             // bad), so treat it as another validation failure and fall back.

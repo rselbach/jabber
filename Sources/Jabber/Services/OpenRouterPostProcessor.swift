@@ -94,7 +94,7 @@ private struct OpenAICompatiblePostProcessingClient: Sendable {
     let requestTimeout: TimeInterval
     let transport: @Sendable (URLRequest) async throws -> (Data, URLResponse)
 
-    func process(_ transcript: String) async throws -> String {
+    func process(_ transcript: String, appName: String?) async throws -> String {
         var request = URLRequest(url: endpoint, timeoutInterval: requestTimeout)
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
@@ -107,7 +107,7 @@ private struct OpenAICompatiblePostProcessingClient: Sendable {
             "model": modelId,
             "messages": [
                 ["role": "system", "content": AppleIntelligencePostProcessor.instructions],
-                ["role": "user", "content": transcript]
+                ["role": "user", "content": AppleIntelligencePostProcessor.userMessage(transcript: transcript, appName: appName)]
             ],
             "stream": false,
             "temperature": 0
@@ -152,7 +152,7 @@ private struct OpenAICompatiblePostProcessingClient: Sendable {
             throw OpenAICompatiblePostProcessingError.malformedResponse
         }
 
-        return content
+        return AppleIntelligencePostProcessor.unwrapResponse(content)
     }
 
     /// Both services use the OpenAI-compatible
@@ -188,7 +188,7 @@ private struct OpenAICompatiblePostProcessingClient: Sendable {
 ///   "model": "<slug>",
 ///   "messages": [
 ///     {"role":"system","content":"<AppleIntelligencePostProcessor.instructions>"},
-///     {"role":"user","content":"<raw transcript>"}
+///     {"role":"user","content":"<AppleIntelligencePostProcessor.userMessage>"}
 ///   ],
 ///   "stream": false,
 ///   "temperature": 0,
@@ -196,7 +196,8 @@ private struct OpenAICompatiblePostProcessingClient: Sendable {
 ///   "provider": {"sort": "latency", "zdr": true}
 /// }
 /// ```
-/// Response: `choices[0].message.content` is returned verbatim. An empty/whitespace
+/// Response: `choices[0].message.content` is returned verbatim, minus any
+/// `<transcript>` tags the model echoed. An empty/whitespace
 /// content string is a *valid* outcome (a self-correction like "scratch that"),
 /// not a failure — the coordinator normalizes it and types nothing, matching the
 /// Apple Intelligence contract.
@@ -208,9 +209,11 @@ private struct OpenAICompatiblePostProcessingClient: Sendable {
 struct OpenRouterPostProcessor: PostProcessingProvider {
     static let endpoint = URL(string: "https://openrouter.ai/api/v1/chat/completions")!
 
-    /// 60s: short transcripts normally return in a few seconds. URLRequest's
-    /// timeout is idle-based; the session resource timeout is the total cap.
-    static let requestTimeout: TimeInterval = 60
+    /// 20s: short transcripts normally return in a few seconds, and on
+    /// failure the raw transcript is typed anyway, so a stalled provider
+    /// shouldn't hold the dictation hostage. URLRequest's timeout is
+    /// idle-based; the session resource timeout is the total cap.
+    static let requestTimeout: TimeInterval = 20
 
     private static let defaultSession: URLSession = {
         let configuration = URLSessionConfiguration.default
@@ -248,7 +251,7 @@ struct OpenRouterPostProcessor: PostProcessingProvider {
         !apiKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
 
-    func process(_ transcript: String) async throws -> String {
+    func process(_ transcript: String, appName: String?) async throws -> String {
         guard isAvailable else {
             throw OpenRouterPostProcessingError.missingApiKey
         }
@@ -275,7 +278,7 @@ struct OpenRouterPostProcessor: PostProcessingProvider {
                 ],
                 requestTimeout: Self.requestTimeout,
                 transport: transport
-            ).process(transcript)
+            ).process(transcript, appName: appName)
         } catch let error as OpenAICompatiblePostProcessingError {
             throw OpenRouterPostProcessingError(error)
         }
@@ -303,7 +306,7 @@ private extension OpenRouterPostProcessingError {
 /// its documented pay-as-you-go base URL.
 struct OpenCodeZenPostProcessor: PostProcessingProvider {
     static let endpoint = URL(string: "https://opencode.ai/inference/openai/v1/chat/completions")!
-    static let requestTimeout: TimeInterval = 60
+    static let requestTimeout: TimeInterval = 20
 
     private static let defaultSession: URLSession = {
         let configuration = URLSessionConfiguration.default
@@ -336,7 +339,7 @@ struct OpenCodeZenPostProcessor: PostProcessingProvider {
         !apiKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
 
-    func process(_ transcript: String) async throws -> String {
+    func process(_ transcript: String, appName: String?) async throws -> String {
         guard isAvailable else {
             throw OpenCodeZenPostProcessingError.missingApiKey
         }
@@ -350,7 +353,7 @@ struct OpenCodeZenPostProcessor: PostProcessingProvider {
                 additionalBodyFields: model.reasoningEffort.map { ["reasoning_effort": $0.rawValue] } ?? [:],
                 requestTimeout: Self.requestTimeout,
                 transport: transport
-            ).process(transcript)
+            ).process(transcript, appName: appName)
         } catch let error as OpenAICompatiblePostProcessingError {
             throw OpenCodeZenPostProcessingError(error)
         }
@@ -406,20 +409,20 @@ struct RoutedPostProcessor: PostProcessingProvider {
         }
     }
 
-    func process(_ transcript: String) async throws -> String {
+    func process(_ transcript: String, appName: String?) async throws -> String {
         switch currentKind() {
         case .appleIntelligence:
-            return try await AppleIntelligencePostProcessor().process(transcript)
+            return try await AppleIntelligencePostProcessor().process(transcript, appName: appName)
         case .openRouter:
             return try await OpenRouterPostProcessor(
                 apiKey: Self.currentApiKey(),
                 modelId: currentModelId()
-            ).process(transcript)
+            ).process(transcript, appName: appName)
         case .openCodeZen:
             return try await OpenCodeZenPostProcessor(
                 apiKey: Self.currentOpenCodeZenApiKey(),
                 modelId: currentOpenCodeZenModelId()
-            ).process(transcript)
+            ).process(transcript, appName: appName)
         }
     }
 

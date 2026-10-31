@@ -13,6 +13,39 @@ final class PostProcessingProviderTests: XCTestCase {
         AppleIntelligencePostProcessor.instructions
     }
 
+    // MARK: - User message
+
+    func testUserMessageFencesTheTranscriptAndNamesTheApp() {
+        let tests: [String: (appName: String?, want: String)] = [
+            "with app": ("Mail", "Dictating into: Mail\n\n<transcript>\nhi troy\n</transcript>"),
+            "without app": (nil, "<transcript>\nhi troy\n</transcript>"),
+            "empty app name": ("", "<transcript>\nhi troy\n</transcript>")
+        ]
+        for (name, tc) in tests {
+            XCTAssertEqual(
+                AppleIntelligencePostProcessor.userMessage(transcript: "hi troy", appName: tc.appName),
+                tc.want,
+                name
+            )
+        }
+    }
+
+    func testUnwrapResponseDropsEchoedTags() {
+        let tests: [String: (response: String, want: String)] = [
+            "echoed tags": ("<transcript>\nHi Troy.\n</transcript>", "Hi Troy."),
+            "plain answer": ("Hi Troy.", "Hi Troy."),
+            "tag mentioned inside": ("Type <transcript> here.", "Type <transcript> here.")
+        ]
+        for (name, tc) in tests {
+            XCTAssertEqual(AppleIntelligencePostProcessor.unwrapResponse(tc.response), tc.want, name)
+        }
+    }
+
+    func testPromptExplainsTheInputLayout() {
+        XCTAssertTrue(prompt.contains("<transcript> tags"))
+        XCTAssertTrue(prompt.contains("Dictating into:"))
+    }
+
     // MARK: - Preservation guardrails (highest priority)
 
     func testPromptForbidsSummarizing() {

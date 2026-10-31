@@ -1284,6 +1284,26 @@ final class DictationCoordinatorTests: XCTestCase {
         XCTAssertNil(session.postProcessingErrorDescription)
     }
 
+    func testPostProcessingReceivesTheTargetAppName() async {
+        postProcessingEnabled = true
+        postProcessor.result = .success("Hello.")
+        dictatedApps = [42: DictatedApp(name: "Greendale Messenger", bundleID: "edu.greendale.messenger")]
+        audioCapture.storedSamples = makeLoudSamples()
+        transcriptionService.transcribeResult = .success("hello")
+        let idleExpectation = XCTestExpectation(description: "coordinator returns to idle")
+        coordinator.onStateChange = { state in
+            if state == .idle {
+                idleExpectation.fulfill()
+            }
+        }
+
+        XCTAssertTrue(coordinator.start(targetProcessID: 42))
+        coordinator.stop()
+        await fulfillment(of: [idleExpectation], timeout: 1.0)
+
+        XCTAssertEqual(postProcessor.lastAppName, "Greendale Messenger")
+    }
+
     func testPostProcessingInstructionsContainDictationCapabilities() {
         // Guards against accidental regressions in the dictation prompt's
         // breadth. Does not assert Apple model output, only that the key
@@ -2003,6 +2023,7 @@ final class FakePostProcessingProvider: PostProcessingProvider, @unchecked Senda
     private var _sequentialIndex = 0
     private var _processCallCount = 0
     private var _lastProcessedInput: String?
+    private var _lastAppName: String?
     private var _holdUntilReleased = false
     private var _processRelease: CheckedContinuation<Void, Never>?
     private var _onProcessStarted: (() -> Void)?
@@ -2034,6 +2055,10 @@ final class FakePostProcessingProvider: PostProcessingProvider, @unchecked Senda
         lock.withLock { _lastProcessedInput }
     }
 
+    var lastAppName: String? {
+        lock.withLock { _lastAppName }
+    }
+
     var holdUntilReleased: Bool {
         get { lock.withLock { _holdUntilReleased } }
         set { lock.withLock { _holdUntilReleased = newValue } }
@@ -2054,10 +2079,11 @@ final class FakePostProcessingProvider: PostProcessingProvider, @unchecked Senda
         continuation?.resume()
     }
 
-    func process(_ transcript: String) async throws -> String {
+    func process(_ transcript: String, appName: String?) async throws -> String {
         let snapshot = lock.withLock {
             _processCallCount += 1
             _lastProcessedInput = transcript
+            _lastAppName = appName
             let result: Result<String, Error>
             if !_sequentialResults.isEmpty {
                 let index = min(_sequentialIndex, _sequentialResults.count - 1)

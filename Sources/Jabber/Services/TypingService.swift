@@ -117,6 +117,9 @@ final class TypingService {
             hasAccessibilityPermission: permissionService.hasAccessibilityPermission()
         ) {
         case .pasteWithRestore:
+            // Fields that don't expose their text get the dictation as is.
+            let text = textBeforeInsertionPoint(targetProcessID: targetProcessID)
+                .map { DictationJoiner.join(text, after: $0) } ?? text
             if let targetProcessID,
                insertUnicodeText(text, targetProcessID: targetProcessID) {
                 return
@@ -350,14 +353,32 @@ final class TypingService {
         return true
     }
 
-    private func focusedTextElement(targetProcessID: pid_t?) -> AXUIElement? {
-        if let targetProcessID, targetProcessID > 0 {
-            let appElement = AXUIElementCreateApplication(targetProcessID)
-            return axElementAttribute(from: appElement, attribute: kAXFocusedUIElementAttribute as CFString)
-        }
+    /// Up to `DictationJoiner.lookbehindLength` characters before the
+    /// selection in the focused field, or `nil` when the field doesn't expose
+    /// its text. Reads give up quickly, so a hung app can't stall typing.
+    private func textBeforeInsertionPoint(targetProcessID: pid_t?) -> String? {
+        guard let element = focusedTextElement(targetProcessID: targetProcessID, messagingTimeout: 0.25),
+              let value = stringValue(from: element),
+              let selectedRange = selectedTextRange(from: element) else { return nil }
 
-        let systemWideElement = AXUIElementCreateSystemWide()
-        return axElementAttribute(from: systemWideElement, attribute: kAXFocusedUIElementAttribute as CFString)
+        let nsValue = value as NSString
+        let end = max(0, min(selectedRange.location, nsValue.length))
+        let start = max(0, end - DictationJoiner.lookbehindLength)
+        let range = nsValue.rangeOfComposedCharacterSequences(for: NSRange(location: start, length: end - start))
+        return nsValue.substring(with: NSRange(location: range.location, length: end - range.location))
+    }
+
+    private func focusedTextElement(targetProcessID: pid_t?, messagingTimeout: Float? = nil) -> AXUIElement? {
+        let container = targetProcessID.flatMap { $0 > 0 ? AXUIElementCreateApplication($0) : nil }
+            ?? AXUIElementCreateSystemWide()
+        if let messagingTimeout {
+            AXUIElementSetMessagingTimeout(container, messagingTimeout)
+        }
+        let element = axElementAttribute(from: container, attribute: kAXFocusedUIElementAttribute as CFString)
+        if let element, let messagingTimeout {
+            AXUIElementSetMessagingTimeout(element, messagingTimeout)
+        }
+        return element
     }
 
     private func axElementAttribute(from element: AXUIElement, attribute: CFString) -> AXUIElement? {
